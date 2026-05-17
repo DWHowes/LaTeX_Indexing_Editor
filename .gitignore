@@ -1,0 +1,8 @@
+.venv
+.vscode
+__pycache__
+pdfcode
+tests
+*.txt
+*.tex
+
