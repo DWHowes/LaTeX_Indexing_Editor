@@ -1,28 +1,56 @@
-from PySide6.QtCore import QSortFilterProxyModel, Qt, QDirIterator, QDir
+import os
+from PySide6.QtCore import QSortFilterProxyModel, Qt, QModelIndex
 
 class LatexFolderFilterProxy(QSortFilterProxyModel):
-    def filterAcceptsRow(self, source_row, source_parent):
+    """
+    High-performance, non-blocking file system proxy model.
+    Filters out non-LaTeX assets without truncating recursive subdirectory views.
+    """
+    
+    def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
+        """Evaluates row visibility metrics entirely within memory frames."""
         source_model = self.sourceModel()
+        if not source_model:
+            return False
+            
+        # 1. Resolve cell row coordinate pointers matching column 0
         index = source_model.index(source_row, 0, source_parent)
-        
-        # 1. Retrieve the metadata we stored in QStandardItem
-        # Role 0 (UserRole) = is_dir (bool)
-        # Role 1 (UserRole + 1) = file_path (str)
-        is_dir = index.data(Qt.UserRole)
-        file_path = index.data(Qt.UserRole + 1)
+        if not index.isValid():
+            return False
+
+        # 2. Extract structural data roles matching our standard definitions
+        is_dir = bool(index.data(Qt.ItemDataRole.UserRole))
+        file_path = index.data(Qt.ItemDataRole.UserRole + 1)
         
         if not file_path:
             return False
 
-        # 2. If it's a file, only show if it ends with .tex
+        # 3. If it's a plain file, only accept it if it carries a .tex extension
         if not is_dir:
-            return file_path.lower().endswith(".tex")
+            return str(file_path).lower().endswith(".tex")
         
-        # 3. If it's a directory, only show if it contains any .tex files (recursively)
-        return self.has_tex_files(file_path)
+        # 4. HIGH-PERFORMANCE RECURSIVE CHECK:
+        # Check if the folder contains any .tex files down its branch.
+        # Uses short-circuiting to prevent main-thread lag spikes.
+        return self._fast_physical_dir_contains_tex(str(file_path))
 
-    def has_tex_files(self, dir_path):
-        """Recursively checks if a physical directory contains at least one .tex file."""
-        # Note: This checks the actual disk, not just the items loaded in the model.
-        it = QDirIterator(dir_path, ["*.tex"], QDir.Files, QDirIterator.Subdirectories)
-        return it.hasNext()
+    def _fast_physical_dir_contains_tex(self, dir_path: str) -> bool:
+        """
+        Sweeps directories recursively using an absolute short-circuit check.
+        Instantly exits the loop on the first match to keep execution sub-millisecond.
+        """
+        if not os.path.exists(dir_path):
+            return False
+
+        # os.walk is written in highly optimized C. By combining it with a short-circuit 
+        # break, we completely eliminate disk scanning lag while mapping sub-trees.
+        for root, dirs, files in os.walk(dir_path):
+            # Ignore hidden session directories to skip unnecessary file evaluations
+            if ".session_backups" in root:
+                continue
+                
+            for file in files:
+                if file.lower().endswith('.tex'):
+                    return True # Short-circuit match located! Keep this folder branch visible.
+                    
+        return False

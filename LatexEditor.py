@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import sqlite3
 import shutil
 
@@ -74,9 +75,9 @@ class LatexEditor(QMainWindow):
         self.tree_index.setFocusPolicy(Qt.FocusPolicy.StrongFocus)   
 
         # Enable custom context menu triggers on the tree view
-        self.tree_index.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.tree_index.customContextMenuRequested.connect(self.tree_index.show_context_menu) 
-        self.tree_index.referenceTokenClicked.connect(self.handle_stable_reference_click)
+        # self.tree_index.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        # self.tree_index.customContextMenuRequested.connect(self.tree_index.show_context_menu) 
+        # self.tree_index.referenceTokenClicked.connect(self.handle_stable_reference_click)
 
         # Bind QTreeView to our Controller's underlying QAbstractItemModel
         self.tree_index.setModel(self.index_controller.model)
@@ -153,6 +154,7 @@ class LatexEditor(QMainWindow):
         """Assembles core architectural decoupled signal pathways across components."""
         self.tree_files.doubleClicked.connect(self.open_file)
         self.tree_index.locationRequested.connect(self.go_to_index_location)
+        # self.tree_index.clicked.connect(self.handle_index_cell_navigation)
         self.tabs.currentChanged.connect(self.update_status_bar)
         self.tabs.tabCloseRequested.connect(self.remove_document_tab)     
         
@@ -243,7 +245,7 @@ class LatexEditor(QMainWindow):
                 return
                 
             self.project_name = proj_name.strip()
-            self.db_path = os.path.join(self.project_root, f"{self.project_name}INDEX_DATA_DB")
+            self.db_path = os.path.join(self.project_root, f"{self.project_name}"+INDEX_DATA_DB)
 
         # 4. Configure unified workspace runtime structures
         self.backup_dir = os.path.join(self.project_root, ".session_backups")
@@ -344,87 +346,78 @@ class LatexEditor(QMainWindow):
         # Send execution sequences into background
         self._load_thread.start()
 
-    @Slot(object, int)
-    def handle_stable_reference_click(self, proxy_index, click_x: int):
-        """
-        Processes clicked metrics, synchronizes the correct active editor tab, 
-        and dispatches pristine coordinate jumps across multiple files.
-        """
-        # 1. Resolve proxy model index to source model index mapping
-        if hasattr(self, 'index_proxy_model'):
-            source_index = self.index_proxy_model.mapToSource(proxy_index)
-        else:
-            source_index = proxy_index
+    # @Slot(object)
+    # def handle_index_cell_navigation(self, proxy_index):
+    #     """
+    #     Intercepts tree row interactions. Maps click character indices using native 
+    #     string text iterations, fully protecting the strict 2-column index tree hierarchy.
+    #     """
+    #     if not proxy_index.isValid() or proxy_index.column() != 1:
+    #         return  # Intercept clicks strictly inside Column 1 reference cells
 
-        ROLE_UID_DATA = Qt.ItemDataRole.UserRole + 1
-        records = source_index.data(ROLE_UID_DATA)
-        display_text = source_index.data(Qt.ItemDataRole.DisplayRole) or ""
+    #     # 1. Safely resolve proxy indices down to the root standard model layer
+    #     source_model = self.tree_index._get_source_model()
+    #     if hasattr(self.tree_index.model(), "mapToSource"):
+    #         source_index = self.tree_index.model().mapToSource(proxy_index)
+    #     else:
+    #         source_index = proxy_index
+
+    #     item = source_model.itemFromIndex(source_index)
+    #     if not item or not item.text():
+    #         return
+
+    #     # 2. Extract our structured metadata array lists collection using our standard role offset
+    #     ROLE_UID_DATA = Qt.ItemDataRole.UserRole + 1
+    #     records_list = item.data(ROLE_UID_DATA)
+    #     if not records_list or not isinstance(records_list, list) or not records_list:
+    #         return
+
+    #     # 3. ABSOLUTE CHARACTER POSITION ROUTER ENGINE
+    #     full_text = item.text()
         
-        if not records or not display_text:
-            return
+    #     # Pull the viewport mouse position relative to the item cell layout
+    #     cursor_pos_global = QCursor.pos()
+    #     cursor_pos_viewport = self.tree_index.viewport().mapFromGlobal(cursor_pos_global)
+    #     cell_rect = self.tree_index.visualRect(proxy_index)
+        
+    #     # Extract the fractional position across the text string area.
+    #     # This acts as a normalized text scaling factor (0.0 to 1.0) inside the text row,
+    #     # completely bypassing absolute width numbers, style margins, or font advance drift.
+    #     click_fraction = (cursor_pos_viewport.x() - cell_rect.x()) / max(1, cell_rect.width())
+    #     estimated_char_idx = int(click_fraction * len(full_text))
 
-        # 2. Tokenize the visual text row using font metrics to identify the targeted reference
-        font = self.tree_index.font()
-        metrics = QFontMetrics(font)
-        tokens = display_text.split(" ")
-        current_offset_x = 0
-        matched_record = None
+    #     # Scan the text string sequentially using regular expressions to isolate the bracket token bounds
+    #     clicked_id_str = None
+    #     for match in re.finditer(r'\[(\d+)\]', full_text):
+    #         # If the calculated text position resides anywhere within the token's character boundaries, select it
+    #         if match.start() <= estimated_char_idx <= match.end() or (match.start() - 2) <= estimated_char_idx <= (match.end() + 2):
+    #             clicked_id_str = match.group(1)
+    #             break
+    #     else:
+    #         # Fallback lookahead: pick the closest sequential token block if clicked near fuzzy margins
+    #         all_matches = list(re.finditer(r'\[(\d+)\]', full_text))
+    #         if all_matches:
+    #             closest_match = min(all_matches, key=lambda m: min(abs(estimated_char_idx - m.start()), abs(estimated_char_idx - m.end())))
+    #             clicked_id_str = closest_match.group(1)
 
-        for token in tokens:
-            if not token:
-                continue
-            token_width = metrics.horizontalAdvance(token)
-            space_width = metrics.horizontalAdvance(" ")
+    #     if not clicked_id_str:
+    #         return
 
-            if current_offset_x <= click_x <= (current_offset_x + token_width):
-                try:
-                    # Parse the numerical ID hidden in bracket segments like [495]
-                    target_uid = int(token.strip("[]"))
-                    for rec in records:
-                        # Checks both potential schema variants generated by the parser
-                        rec_id = rec.get("id") or rec.get("unique_id_number")
-                        if rec and rec_id is not None and int(rec_id) == target_uid:
-                            matched_record = rec
-                            break
-                except ValueError:
-                    pass
-                break
-            current_offset_x += token_width + space_width
+    #     # 4. Pull pristine layout coordinates generated by the parser and execute jump
+    #     matched_record = None
+    #     for rec in records_list:
+    #         rec_id = rec.get("unique_id_number") or rec.get("id")
+    #         if rec and rec_id is not None and str(rec_id) == clicked_id_str:
+    #             matched_record = rec
+    #             break
 
-        # 3. Securely Route the Viewport Focus Across Files
-        if matched_record:
-            target_file = self.clean_windows_path(matched_record.get("file_path"))
-            line_num = matched_record.get("line_number")
-            col_offset = matched_record.get("column_offset")
-            
-            # Scan tab layout to determine if the targeted file sheet is already active
-            tab_found = False
-            for idx in range(self.tabs.count()):
-                editor_tab = self.tabs.widget(idx)
-                if editor_tab and hasattr(editor_tab, 'file_path') and editor_tab.file_path == target_file:
-                    self.tabs.setCurrentIndex(idx) # Switch context focus immediately
-                    tab_found = True
-                    break
-            
-            # Lazy load the text tab container if it isn't already visible
-            if not tab_found:
-                file_name = Path(target_file).name
-                self.create_editor_tab(target_file, file_name)
-            
-            # Let the PySide6 rendering window finalize its tab swapping geometries
-            QCoreApplication.processEvents()
-            
-            # 4. Dispatch the Precise Text Target Jump Instruction
-            target_editor = self.tabs.currentWidget()
-            print(f"DEBUG: matched_record: {matched_record}")
+    #     if matched_record:
+    #         file_path = matched_record.get("file_path") or matched_record.get("path")
+    #         line_num = matched_record.get("line_number") or matched_record.get("line") or 1
+    #         col_offset = matched_record.get("column_offset") or matched_record.get("col") or 1
 
-            if target_editor and hasattr(target_editor, "jump_to_coordinates"):
-                target_editor.jump_to_coordinates(
-                    line = line_num,
-                    column = col_offset,
-                    absolute_position = matched_record.get("absolute_position"), # Feed absolute index!
-                    is_one_indexed = True
-                )
+    #         print(f"HIERARCHICAL CHARACTER JUMP: [ID {clicked_id_str}] -> {file_path} Line {line_num}")
+    #         self.go_to_index_location(str(file_path), int(line_num), int(col_offset))
 
     @Slot(str)
     def handle_worker_status_update(self, msg: str):
@@ -1208,28 +1201,52 @@ class LatexEditor(QMainWindow):
 
     # --- Application Lifecycle Overridden Events ---
 
-    # Inside your MainWindow class (Chunk 6)
-    def eventFilter(self, source, event):
-        """Catch events and override wheel event to implement Ctrl + Mouse Wheel for font resizing."""
-        if event.type() == QEvent.Wheel and event.modifiers() == Qt.ControlModifier:
-            delta = event.angleDelta().y()
+    """
+    Catches viewport sub-events and overrides the mouse wheel signal to implement
+    Ctrl + Mouse Wheel text zooming across active document editor tabs.
+    """
+    def eventFilter(self, source, event) -> bool:
+        # Ensure event structures are initialized before inspecting properties
+        if not event:
+            return super().eventFilter(source, event)
+
+        # Capture zooming combination triggers safely using explicit Type enums
+        if event.type() == QEvent.Type.Wheel and event.modifiers() == Qt.ControlModifier:
+            try:
+                delta = event.angleDelta().y()
+                
+                if delta > 0:
+                    # Enforce strict lower and upper bounds matching the QSpinBox (8 to 72)
+                    new_size = min(72, self.current_font_size + 1)
+                    if new_size != self.current_font_size:
+                        self.update_font_size(new_size)
+                elif delta < 0:
+                    new_size = max(8, self.current_font_size - 1)
+                    if new_size != self.current_font_size:
+                        self.update_font_size(new_size)
+                        
+            except Exception as wheel_fault:
+                print(f"DEBUG: Font sizing filter calculation dropped safely: {wheel_fault}")
             
-            if delta > 0:
-                new_size = min(72, self.current_font_size + 1)
-                self.update_font_size(new_size)
-            elif delta < 0:
-                new_size = max(6, self.current_font_size - 1)
-                self.update_font_size(new_size)
-            
-            # Returning True consumes the event, stopping further propagation
+            # Returning True consumes the event, stopping further platform processing or scrolling
             return True
             
-        # Ensure this always executes and returns a boolean value
+        # Forward all unhandled traffic seamlessly back to the underlying platform base
         return super().eventFilter(source, event)
 
 
+# --- Unified Application Execution Context Entry Point ---
 if __name__ == "__main__":
+    # Ensure high-DPI scaling configurations render text correctly across hardware layouts
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    
     app = QApplication(sys.argv)
+    
+    # Establish generic window identifiers to ensure local caches save properly
+    QCoreApplication.setOrganizationName("DH Indexing")
+    QCoreApplication.setApplicationName("LatexEditor")
+    
     window = LatexEditor()
     window.show()
-    sys.exit(app.exec())                
+    
+    sys.exit(app.exec())
