@@ -1,7 +1,8 @@
 .venv
 .vscode
+.session_logs
 __pycache__
-pdfcode
+documentation
 tests
 *.txt
 *.tex
