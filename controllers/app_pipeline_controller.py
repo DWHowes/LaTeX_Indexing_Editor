@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog
 from shiboken6 import isValid
 
 from views.app_style_configuration import AppStyleConfiguration
+from views.editor_tab import EditorTab
 
 class AppPipelineController(QObject):
     def __init__(self, window, prefs_model, backup_manager, doc_controller, index_controller, 
@@ -118,6 +119,10 @@ class AppPipelineController(QObject):
         )
 
         # --- Toolbar Controls ---
+        # FIX: Wire the missing buttons using your active window attribute ('tool_bar')
+        self.window.tool_bar.sidebar_panel_requested.connect(self._orchestrate_sidebar_focus)
+        self.window.tool_bar.dark_mode_toggle_requested.connect(self._handle_dark_mode_toggle)
+        
         self.window.tool_bar.font_family_changed.connect(self._handle_font_family_change)
         self.window.tool_bar.font_size_changed.connect(self._handle_font_size_change)
 
@@ -510,8 +515,21 @@ class AppPipelineController(QObject):
         AppStyleConfiguration.configure_application_theme(is_dark)
         self.window.tool_bar.refresh_theme_presentation(is_dark)
 
+        # Propagate theme changes down to all open editor tabs by querying the live container directly
+        tabs_container = self.window.tabs
+        if tabs_container:
+            # Query all open document panels via standard public container boundaries
+            for i in range(tabs_container.count()):
+                tab_widget = tabs_container.widget(i)
+                
+                # Verify the type contract explicitly instead of using reflection
+                if isinstance(tab_widget, EditorTab):
+                    # Direct signature invocation to swap the internal regex colors
+                    tab_widget.apply_theme_configuration(is_dark)
+
     @Slot(str)
     def _handle_font_family_change(self, family_name: str):
+        """Intercepts toolbar typography alterations and pushes changes down to open editors."""
         broker = AppStyleConfiguration.event_broker()
         broker.set_property("font_family", family_name)
         if self.prefs:
@@ -520,10 +538,25 @@ class AppPipelineController(QObject):
                 font_size=broker.property("font_size"),
                 dark_mode=broker.property("is_dark_mode")
             )
-        self.window.apply_font_scale(broker.property("font_size"))
+            
+        # ------------------------------------------------------------------
+        # MVC COMPLIANT BROADCAST LOOP: Push updates to live tabs
+        # ------------------------------------------------------------------
+        current_size = int(broker.property("font_size") or 12)
+        tabs_container = self.window.tabs
+        
+        if tabs_container:
+            # Query open tabs using standard public container boundaries
+            for i in range(tabs_container.count()):
+                tab_widget = tabs_container.widget(i)
+                
+                # Enforce clean type contract verification instead of reflection checks
+                if isinstance(tab_widget, EditorTab):
+                    tab_widget.apply_workspace_typography(family_name, current_size)
 
     @Slot(int)
     def _handle_font_size_change(self, size: int):
+        """Intercepts toolbar size alterations and pushes adjustments down to open editors."""
         broker = AppStyleConfiguration.event_broker()
         broker.set_property("font_size", size)
         if self.prefs:
@@ -532,7 +565,22 @@ class AppPipelineController(QObject):
                 font_size=size,
                 dark_mode=broker.property("is_dark_mode")
             )
-        self.window.tabs.update_workspace_fonts(broker.property("font_family"), size)
+            
+        # ------------------------------------------------------------------
+        # MVC COMPLIANT BROADCAST LOOP: Push adjustments to live tabs
+        # ------------------------------------------------------------------
+        current_family = str(broker.property("font_family") or "Arial")
+        tabs_container = self.window.tabs
+        
+        if tabs_container:
+            # Query open tabs using standard public container boundaries
+            for i in range(tabs_container.count()):
+                tab_widget = tabs_container.widget(i)
+                
+                # Enforce clean type contract verification instead of reflection checks
+                if isinstance(tab_widget, EditorTab):
+                    tab_widget.apply_workspace_typography(current_family, size)
+                    
         self.window.status_bar.showMessage(f"Font size updated: {size}pt", 2000)
 
     @Slot()

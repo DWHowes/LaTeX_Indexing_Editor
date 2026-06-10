@@ -39,13 +39,13 @@ class LatexHighlighter(QSyntaxHighlighter):
                 "brace":   "#FFB86C"   # Orange
             }
         else:
-            # Classic crisp TeXstudio shades for light paper environments
+            # OPTIMIZED: Deep, saturated LaTeX IDE palette for crisp paper environments
             self.colors = {
-                "keyword": "#800000",  # Dark Crimson Maroon
-                "command": "#000080",  # Navy Blue
-                "comment": "#A0A0A0",  # Mid Slate Grey
-                "math":    "#009300",  # Deep Green
-                "brace":   "#FF5500"   # Red-Orange
+                "keyword": "#800000",  # Rich Maroon / Deep Crimson (Excellent legibility)
+                "command": "#0000BB",  # True Royal Blue (Deeper saturation than standard navy)
+                "comment": "#555555",  # Dark Charcoal Grey (Substantial contrast boost from #A0A0A0)
+                "math":    "#006600",  # Deep Forest Green (Deeper, earthier hue prevents glare)
+                "brace":   "#B22222"   # Firebrick Red (Deeper structural accent for structural braces)
             }
 
         # Sync colors hex records back down onto the styles matrix configuration
@@ -54,17 +54,15 @@ class LatexHighlighter(QSyntaxHighlighter):
                 self.styles[key]["color"] = self.colors[key]
 
         # Fix Priority Overlap Bug: Order patterns carefully from generic to specific.
-        # By processing the generic command match FIRST, more specific keywords like
-        # \begin or \section execute later in the stack, safely overriding the color palette.
         patterns = [
             (r"\\\w+", "command"),
             (r"\\(?:begin|end|section|subsection|chapter)\b", "keyword"),
             (r"(?<!\\)%.*", "comment"),  
-            (r"\$[^\$\n]*?\$", "math"),   # Hardened: Enforce boundary constraints inside lines
+            (r"\$[^\$\n]*?\$", "math"),   
             (r"\{|\}", "brace")
         ]
 
-        # Fix Thread Performance: Pre-compile regular expressions using native QRegularExpression objects
+        # Pre-compile regular expressions using native QRegularExpression objects
         self.rules = []
         for pattern_str, style_key in patterns:
             fmt = self.create_format(style_key)

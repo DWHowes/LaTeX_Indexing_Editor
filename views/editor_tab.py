@@ -1,8 +1,9 @@
 import re
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit
-from PySide6.QtGui import QPalette, QTextDocument, QTextCursor, QColor, QTextFormat
+from PySide6.QtGui import QPalette, QTextDocument, QTextCursor, QColor, QFont
 from PySide6.QtCore import QEvent, Qt
 
+from models.latex_highlighter import LatexHighlighter
 from views.app_style_configuration import AppStyleConfiguration
 from views.tab_find_dialog import TabFindDialog
 
@@ -14,6 +15,8 @@ class EditorTab(QPlainTextEdit):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        self.syntax_highlighter = None  # Placeholder for the syntax highlighter instance
 
         # 1. Establish the non-editable baseline presentation state
         self.setReadOnly(True)  # Protects text from user typing or deletions
@@ -48,7 +51,16 @@ class EditorTab(QPlainTextEdit):
         palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
 
         # 4. Bind the modified color palette back onto the active presentation widget
-        editor_widget.setPalette(palette)          
+        editor_widget.setPalette(palette)    
+
+        document_canvas = self.document()
+        
+        if document_canvas:
+            # 3. Instantiate and bind the highlighter natively on creation.
+            # Passing document_canvas automatically registers it to the paint loop,
+            # and storing it on self protects it from immediate garbage collection.
+            self.syntax_highlighter = LatexHighlighter(parent=document_canvas, is_dark=False)
+
 
     def get_absolute_path(self) -> str:
         """Public MVC Getter Contract. Returns the unified file path tracker."""
@@ -57,6 +69,38 @@ class EditorTab(QPlainTextEdit):
     def set_absolute_path(self, path: str) -> None:
         """Public MVC Setter Contract. Updates the unified file path tracker."""
         self.file_path = str(path)
+
+    def apply_theme_configuration(self, is_dark_mode: bool) -> None:
+        """
+        Public Presentation Contract.
+        Instructs the internal syntax highlighter to shift its color rules.
+        """
+        # Note: Match the exact attribute name assigned during create_editor_tab
+        # (e.g., self.syntax_highlighter)
+        if self.syntax_highlighter is not None:
+            self.syntax_highlighter.set_dark_mode(is_dark_mode)
+
+    def apply_workspace_typography(self, font_family: str, font_size: int) -> None:
+        """
+        Public Visual Presentation Contract.
+        Applies typography modifications directly across the visible text canvas.
+        """
+        # 1. Assemble a native font object from parameters
+        new_font = QFont(font_family, font_size)
+        
+        # 2. Target the main text editing area
+        # If EditorTab is a subclass of QTextEdit/QPlainTextEdit, use self.setFont
+        # If it subclasses QWidget and houses an internal widget (e.g. self.editor_widget), 
+        # swap 'self' for your internal widget reference attribute.
+        text_canvas = self
+        
+        text_canvas.setFont(new_font)
+        
+        # 3. Synchronize the underlying layout document structure
+        # This forces word wrap configurations and row metrics to repaint instantly
+        doc = text_canvas.document()
+        if doc:
+            doc.setDefaultFont(new_font)
 
     def load_document_content(self, raw_text_content: str) -> None:
         """
@@ -112,7 +156,7 @@ class EditorTab(QPlainTextEdit):
         """Returns the active 0-indexed column coordinate offset for status updates."""
         return self.textCursor().columnNumber()
 
-    def jump_to_coordinates(self, line: int, column: int, absolute_position: int = None, is_one_indexed: bool = True):
+    def jump_to_coordinates(self, line: int, column: int, absolute_position: int = None, is_one_indexed: bool = True, is_index_jump: bool = False):
         """Moves the viewport text cursor precisely onto targets, correcting for word wrap alignment drift."""
         self.setFocus()
         doc = self.document()
@@ -125,116 +169,58 @@ class EditorTab(QPlainTextEdit):
             cursor.setPosition(safe_pos)
             block = cursor.block()
         else:
-            # 1. Resolve and clamp the target line boundary
+            # Resolve and clamp the target line boundary
             target_line = (line - 1) if is_one_indexed else line
             target_line = max(0, min(target_line, doc.blockCount() - 1))
             block = doc.findBlockByLineNumber(target_line)
             if not block.isValid():
                 return
                 
-            # 2. Initialize cursor at the absolute beginning of the target line block
+            # Initialize cursor at the absolute beginning of the target line block
             cursor = QTextCursor(block)
             line_length = len(block.text())
             
-            # 3. Resolve and clamp the target column offset
+            # Resolve and clamp the target column offset
             target_col = (column - 1) if is_one_indexed else column
             safe_col = max(0, min(target_col, line_length))
             
-            # 4. FIX: Use MoveMode enum instead of MoveOperation for the anchor behavior
+            # Move the cursor directly to the requested parameter column coordinates
             cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.MoveAnchor, safe_col)
 
-        # 5. Apply adaptive context highlighting without losing the target column anchor
-        if block.isValid():
+        # ------------------------------------------------------------------
+        # CONDITIONAL CONTEXT HIGH-LIGHTING
+        # ------------------------------------------------------------------
+        # FIX: Only run macro-scanning text selection loops if explicitly requested by an index click!
+        if is_index_jump and block.isValid():
             line_text = block.text()
             pos_in_block = cursor.positionInBlock()
             remaining_text = line_text[pos_in_block:]
             max_line_chars = len(line_text) - pos_in_block
             
-            # Look ahead for a macro explicitly starting right at our target coordinate zone
             if remaining_text.startswith("\\index"):
                 closing_brace_idx = remaining_text.find("}")
                 highlight_length = (closing_brace_idx + 1) if closing_brace_idx != -1 else 7
                 safe_highlight_len = min(highlight_length, max_line_chars)
                 cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, safe_highlight_len)
             
-            # Alternative: If macro is nearby on the same line, span it safely 
             elif "\\index" in remaining_text:
                 idx_offset = remaining_text.find("\\index")
-                # Advance anchor to the macro token start position
                 cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.MoveAnchor, idx_offset)
                 
-                # Recalculate remaining context span boundaries
                 updated_remaining = line_text[cursor.positionInBlock():]
                 closing_brace_idx = updated_remaining.find("}")
                 highlight_length = (closing_brace_idx + 1) if closing_brace_idx != -1 else 7
                 safe_highlight_len = min(highlight_length, len(line_text) - cursor.positionInBlock())
                 cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, safe_highlight_len)
                 
-            # Standard Fallback: No macro token isolated at coordinates, highlight text slice
             else:
                 safe_highlight_len = min(10, max_line_chars)
-                cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, safe_highlight_len)
+                cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.MoveAnchor, safe_highlight_len)
 
         # Commit layout adjustments back to the live editor widget canvas
         self.setTextCursor(cursor)
         self.ensureCursorVisible()
         self.centerCursor()
-
-    # def apply_persistent_highlight_layer(self):
-    #     """
-    #     Applies a persistent background highlight decoration using an isolated selection
-    #     container, preserving the active cursor's position, selection, and layout states.
-    #     """
-    #     self.blockSignals(True)
-    #     try:
-    #         # 1. Instantiate a completely isolated, background layout cursor copy
-    #         # This ensures we do not alter or overwrite the editor's main cursor state
-    #         highlight_cursor = self.textCursor()
-            
-    #         if not highlight_cursor.hasSelection():
-    #             highlight_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, 1)
-
-    #         # 2. Build the visual background overlay tracking matrix
-    #         selection = QTextEdit.ExtraSelection()
-    #         selection.format.setBackground(QColor(255, 255, 0, 100)) # Clean semi-transparent yellow
-    #         selection.format.setProperty(QTextFormat.Property.FullWidthSelection, False)
-            
-    #         # Lock the extra selection onto our isolated background cursor copy
-    #         selection.cursor = highlight_cursor
-            
-    #         # 3. Apply the decoration matrix directly to the extra selections canvas
-    #         self.setExtraSelections([selection])
-            
-    #         # DO NOT call clearSelection() or setTextCursor() here. 
-    #         # Leaving the widget's primary cursor alone preserves the target line/column jump.
-            
-    #     finally:
-    #         self.blockSignals(False)
-
-    # def highlight_and_focus_text_range(self, start_position: int, selection_length: int):
-    #     """
-    #     Public Visual Presentation API Contract.
-    #     Applies selection layers and centres the view cursor internally.
-    #     """
-    #     self.blockSignals(True)
-    #     try:
-    #         cursor = self.textCursor()
-    #         cursor.setPosition(start_position)
-    #         cursor.setPosition(start_position + selection_length, QTextCursor.MoveMode.KeepAnchor)
-            
-    #         self.setTextCursor(cursor)
-    #         self.horizontalScrollBar().setValue(0)
-    #         self.centerCursor()
-            
-    #         selection = QTextEdit.ExtraSelection()
-    #         selection.format.setBackground(QColor(255, 255, 0, 100))
-    #         selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
-    #         selection.cursor = self.textCursor()
-    #         self.setExtraSelections([selection])
-    #     finally:
-    #         self.blockSignals(False)
-            
-    #     self.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def inject_index_macro_direct(self, latex_chain_string: str) -> tuple[int, int]:
         """Injects a raw LaTeX macro string at the active position via a brief write-tunnel."""

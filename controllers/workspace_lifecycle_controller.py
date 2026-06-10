@@ -37,14 +37,9 @@ class WorkspaceLifecycleController(QObject):
 
         file_path = editor_tab.get_absolute_path()
 
-        # Release background OS tracking filters safely
+        # Release background OS tracking filters safely using type contracts
         if self.file_watcher and file_path:
-            try:
-                # Tell ExternalFileWatcherEngine to stop monitoring this file handle
-                self.file_watcher.unregister_file_path(file_path)
-            except AttributeError:
-                # Soft fallback support if your engine uses an alternative signature
-                pass
+            self.file_watcher.unregister_file_path(file_path)
 
         # Strip the visual panel index from the layout container matrix
         self.tabs.removeTab(index)
@@ -75,6 +70,85 @@ class WorkspaceLifecycleController(QObject):
             col_offset=col, 
             fallback_search_tag=fallback
         ))
+
+    def _execute_deferred_text_jump(
+        self,
+        editor: EditorTab,
+        line_num: int,
+        col_offset: int,
+        fallback_search_tag: str,
+    ) -> None:
+        """
+        Resolves the best available text coordinate and delegates layout alignment
+        and visualization entirely to the view layer to prevent cursor drift.
+        """
+        if not isinstance(editor, EditorTab):
+            return
+
+        document = editor.document()
+        if not document or document.blockCount() == 0:
+            return
+
+        resolved_line = max(1, int(line_num))
+        resolved_col  = max(1, int(col_offset))
+        zero_line     = resolved_line - 1
+        total_blocks  = document.blockCount()
+
+        if zero_line < total_blocks:
+            block = document.findBlockByLineNumber(zero_line)
+            if block.isValid():
+                # FIX: Pass is_index_jump=True to authorize macro text highlights
+                editor.jump_to_coordinates(
+                    line=resolved_line, 
+                    column=resolved_col, 
+                    absolute_position=None, 
+                    is_one_indexed=True,
+                    is_index_jump=True
+                )
+                return
+
+        if not fallback_search_tag:
+            return
+
+        full_text = document.toPlainText()
+        matches   = list(re.finditer(re.escape(fallback_search_tag), full_text))
+        if not matches:
+            return
+
+        anchor_block  = document.findBlockByLineNumber(
+            max(0, min(zero_line, total_blocks - 1))
+        )
+        anchor_offset = anchor_block.position() if anchor_block.isValid() else 0
+        best_match    = min(matches, key=lambda m: abs(m.start() - anchor_offset))
+
+        match_block = document.findBlock(best_match.start())
+        if not match_block.isValid():
+            return
+
+        fallback_line = match_block.blockNumber() + 1
+        fallback_col  = (best_match.start() - match_block.position()) + 1
+        
+        # Pass is_index_jump=True for the fallback text match block path as well
+        editor.jump_to_coordinates(
+            line=fallback_line, 
+            column=fallback_col, 
+            absolute_position=None, 
+            is_one_indexed=True,
+            is_index_jump=True
+        )
+
+    def route_find_to_active_tab(self):
+        """Inspects active tab states and toggles find panels via view boundaries."""
+        if not self.tabs:
+            return
+
+        active_tab = self.tabs.currentWidget()
+        if isinstance(active_tab, EditorTab):
+            active_tab.toggle_find_dialog()
+
+    def halt_active_search_workers(self) -> None:
+        """Public cleanup contract invoked during application shutdown."""
+        pass
 
     def open_file_by_path(self, absolute_path: str) -> EditorTab:
         """
@@ -122,30 +196,25 @@ class WorkspaceLifecycleController(QObject):
         path_obj = Path(absolute_path)
         display_name = path_obj.name
 
-        # 1. Instantiate your presentation tab widget layout component
+        # 1. Instantiate the view panel. It will now auto-initialize its own LatexHighlighter!
         editor_tab = EditorTab(parent=self.tabs)
         editor_tab.file_path = absolute_path
         editor_tab.load_document_content(contents)
 
-        # Attach a syntax highlighter instance to the document canvas of the new tab
-        try:
-            # Import your exact custom highlighter class
-            from models.latex_highlighter import LatexHighlighter
-            
-            # Extract the raw underlying QTextDocument container from the tab view layer
-            document_canvas = editor_tab.document()
-            
-            if document_canvas:
-                # Instantiate the highlighter, passing the document container as parent.
-                # This automatically binds the styling rules into the visible canvas loop.
-                # Storing it as a child attribute on the tab ensures it survives garbage collection.
-                editor_tab.syntax_highlighter = LatexHighlighter(parent=document_canvas, is_dark=False)               
-        except ImportError:
-            print("[HIGHLIGHTING ERROR] models/latex_highlighter.py could not be found on your path.")
-        except Exception as err:
-            print(f"[HIGHLIGHTING ERROR] Failed to register coloring rules on tab canvas: {err}")
+        # 2. Query your shared static configuration state models
+        from views.app_style_configuration import AppStyleConfiguration
+        broker = AppStyleConfiguration.event_broker()
+        
+        current_family = str(broker.property("font_family") or "Arial")
+        current_size = int(broker.property("font_size") or 12)
+        current_dark = bool(broker.property("is_dark_mode") == True)
 
-        # 2. Append the visual panel index into the tab layout manager matrix
+        # 3. MVC COMPLIANT STATE SYNCHRONIZATION
+        # Pass data states down through public view signature contracts
+        editor_tab.apply_workspace_typography(current_family, current_size)
+        editor_tab.apply_theme_configuration(current_dark)
+
+        # 4. Append the visual component onto the layout tab manager matrix
         new_index = self.tabs.addTab(editor_tab, display_name)
         self.tabs.setCurrentIndex(new_index)
         
@@ -157,84 +226,3 @@ class WorkspaceLifecycleController(QObject):
             )
         )
         return editor_tab
-
-    def _execute_deferred_text_jump(
-        self,
-        editor: EditorTab,
-        line_num: int,
-        col_offset: int,
-        fallback_search_tag: str,
-    ) -> None:
-        """
-        Resolves the best available text coordinate and delegates layout alignment
-        and visualization entirely to the view layer to prevent cursor drift.
-        """
-        if not isinstance(editor, EditorTab):
-            return
-
-        document = editor.document()
-        if not document or document.blockCount() == 0:
-            return
-
-        resolved_line = max(1, int(line_num))
-        resolved_col  = max(1, int(col_offset))
-        zero_line     = resolved_line - 1
-        total_blocks  = document.blockCount()
-
-        # ------------------------------------------------------------------
-        # Primary path — block is in range
-        # ------------------------------------------------------------------
-        if zero_line < total_blocks:
-            block = document.findBlockByLineNumber(zero_line)
-            if block.isValid():
-                editor.jump_to_coordinates(
-                    line=resolved_line, 
-                    column=resolved_col, 
-                    absolute_position=None, 
-                    is_one_indexed=True
-                )
-                return
-
-        # ------------------------------------------------------------------
-        # Fallback path — line out of range, search full document text
-        # ------------------------------------------------------------------
-        if not fallback_search_tag:
-            return
-
-        full_text = document.toPlainText()
-        matches   = list(re.finditer(re.escape(fallback_search_tag), full_text))
-        if not matches:
-            return
-
-        anchor_block  = document.findBlockByLineNumber(
-            max(0, min(zero_line, total_blocks - 1))
-        )
-        anchor_offset = anchor_block.position() if anchor_block.isValid() else 0
-        best_match    = min(matches, key=lambda m: abs(m.start() - anchor_offset))
-
-        match_block = document.findBlock(best_match.start())
-        if not match_block.isValid():
-            return
-
-        fallback_line = match_block.blockNumber() + 1
-        fallback_col  = (best_match.start() - match_block.position()) + 1
-        
-        editor.jump_to_coordinates(
-            line=fallback_line, 
-            column=fallback_col, 
-            absolute_position=None, 
-            is_one_indexed=True
-        )
-
-    def route_find_to_active_tab(self):
-        """Inspects active tab states and toggles find panels via view boundaries."""
-        if not self.tabs:
-            return
-
-        active_tab = self.tabs.currentWidget()
-        if isinstance(active_tab, EditorTab):
-            active_tab.toggle_find_dialog()
-
-    def halt_active_search_workers(self) -> None:
-        """Public cleanup contract invoked during application shutdown."""
-        pass
