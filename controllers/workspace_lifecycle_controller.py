@@ -116,17 +116,40 @@ class WorkspaceLifecycleController(QObject):
             
         return editor_tab
 
+# controllers/workspace_lifecycle_controller.py
+
     def create_editor_tab(self, absolute_path: str, contents: str) -> EditorTab:
         path_obj = Path(absolute_path)
         display_name = path_obj.name
 
+        # 1. Instantiate your presentation tab widget layout component
         editor_tab = EditorTab(parent=self.tabs)
         editor_tab.file_path = absolute_path
         editor_tab.load_document_content(contents)
 
+        # Attach a syntax highlighter instance to the document canvas of the new tab
+        try:
+            # Import your exact custom highlighter class
+            from models.latex_highlighter import LatexHighlighter
+            
+            # Extract the raw underlying QTextDocument container from the tab view layer
+            document_canvas = editor_tab.document()
+            
+            if document_canvas:
+                # Instantiate the highlighter, passing the document container as parent.
+                # This automatically binds the styling rules into the visible canvas loop.
+                # Storing it as a child attribute on the tab ensures it survives garbage collection.
+                editor_tab.syntax_highlighter = LatexHighlighter(parent=document_canvas, is_dark=False)               
+        except ImportError:
+            print("[HIGHLIGHTING ERROR] models/latex_highlighter.py could not be found on your path.")
+        except Exception as err:
+            print(f"[HIGHLIGHTING ERROR] Failed to register coloring rules on tab canvas: {err}")
+
+        # 2. Append the visual panel index into the tab layout manager matrix
         new_index = self.tabs.addTab(editor_tab, display_name)
         self.tabs.setCurrentIndex(new_index)
         
+        # Connect position metrics monitors
         editor_tab.cursorPositionChanged.connect(
             lambda: self.editor_metrics_updated.emit(
                 editor_tab.get_current_line(),
