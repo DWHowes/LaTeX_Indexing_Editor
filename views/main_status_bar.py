@@ -25,7 +25,10 @@ class MainStatusBar(QStatusBar):
         super().showMessage(message, timeout)
 
     @Slot(str)
-    def set_status_text(self, text: str):
-        """Displays localized processing logs forwarded by the model layer controllers."""
-        print(text)
-        self.status_lbl.setText(text)
+    def set_status_text(self, text):
+        """Sets the status bar notification text with defensive string normalization."""
+        # Defensively intercept integer or float payloads to prevent signature mismatches
+        normalized_text = str(text) if text is not None else ""
+        
+        # Safely update the widget canvas
+        self.status_lbl.setText(normalized_text)

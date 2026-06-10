@@ -6,7 +6,9 @@ class LatexIndexParser:
     """Scans raw LaTeX text streams to extract structural index macro parameters cleanly."""
     
     INDEX_PATTERN = re.compile(r'\\index\{')
-    MACRO_START_PATTERN = re.compile(r'\\(newcommand|renewcommand|def|providecommand|DeclareRobustCommand)\b')
+    # Modified macro start pattern: supports word boundaries or direct backslash triggers (\def\fn)
+    # MACRO_START_PATTERN = re.compile(r'\\(newcommand|renewcommand|def|providecommand|DeclareRobustCommand)(?=\b|\\)')
+    MACRO_START_PATTERN = re.compile(r'\\(newcommand|renewcommand|providecommand|DeclareRobustCommand|def)(?=\b|\\)')
 
     @classmethod
     def parse_file(cls, file_path: str, start_id: int = 1) -> tuple[list[tuple[list, dict]], int]:
@@ -166,60 +168,244 @@ class LatexIndexParser:
         return text, "standard"
 
     @classmethod
-    def _scrub_macro_definitions(cls, text: str) -> str:
-        """Masks structural LaTeX macro definitions using character-count matching to safely ignore noise inside templates."""
-        working_chars = list(text)
-        text_len = len(text)
-        
-        for match in cls.MACRO_START_PATTERN.finditer(text):
-            idx = match.end()
-            abort_scrub = False
-            
-            # Lookahead scanner to isolate target definition block structures securely
-            while idx < text_len:
-                if text[idx].isspace():
-                    idx += 1
-                elif text[idx] == '[':
-                    # Secure Loop Guard: Prevent unclosed brackets from spinning out of boundaries
-                    while idx < text_len and text[idx] != ']':
-                        idx += 1
-                    if idx >= text_len:
-                        abort_scrub = True
-                        break
-                    idx += 1
-                elif text[idx] == '{':
-                    end_name_brace = cls._find_closing_brace_index(text, idx)
-                    if end_name_brace != -1:
-                        next_idx = end_name_brace + 1
-                        while next_idx < text_len and (text[next_idx].isspace() or text[next_idx] == '['):
-                            if text[next_idx].isspace():
-                                next_idx += 1
-                            elif text[next_idx] == '[':
-                                while next_idx < text_len and text[next_idx] != ']':
-                                    next_idx += 1
-                                if next_idx >= text_len:
-                                    break
-                                next_idx += 1
-                                
-                        if next_idx < text_len and text[next_idx] == '{':
-                            idx = next_idx
-                            break
-                    break
-                else:
-                    idx += 1
+    def _find_closing_brace_index(cls, text: str, start_brace_pos: int) -> int:
+        """Caller's existing implementation — signature preserved exactly."""
+        depth = 0
+        for i in range(start_brace_pos, len(text)):
+            if text[i] == '{':
+                depth += 1
+            elif text[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    return i
+        return -1
 
-            if abort_scrub or idx >= text_len:
+    @classmethod
+    def _scan_to_char(cls, text: str, idx: int, target: str) -> int:
+        """
+        Advance idx forward through optional whitespace and LaTeX comment lines
+        until we reach `target` or a non-whitespace, non-comment character.
+
+        Returns the index of `target` if found, or -1 if something else is hit first.
+
+        Handles:
+        - Blank space / tabs
+        - Full-line and inline comments  (% ... \\n)
+        """
+        text_len = len(text)
+        while idx < text_len:
+            char = text[idx]
+
+            if char in (' ', '\t', '\r', '\n'):
+                idx += 1
                 continue
 
-            if text[idx] == '{':
-                end_pos = cls._find_closing_brace_index(text, idx)
-                if end_pos != -1:
-                    # Fix: Mask macro text bounds with periods ('.') instead of spaces to prevent backtracking
-                    for fill_idx in range(match.start(), end_pos + 1):
-                        if working_chars[fill_idx] not in ('\n', '\r'):
-                            working_chars[fill_idx] = '.'
-                            
+            # Unescaped '%' starts a comment — skip to end of line
+            if char == '%' and (idx == 0 or text[idx - 1] != '\\'):
+                while idx < text_len and text[idx] != '\n':
+                    idx += 1
+                continue
+
+            # We've hit a real character
+            return idx if char == target else -1
+
+        return -1
+
+    @classmethod
+    def _skip_optional_args(cls, text: str, idx: int) -> int:
+        """
+        Skip any number of optional argument blocks [...] that may appear between
+        the name block and the body block (e.g. [1], [default value]).
+
+        Handles nested brackets inside the default-value form:  [some {text}]
+        Returns the index of the first character that is not part of an optional block.
+        """
+        text_len = len(text)
+        while idx < text_len:
+            # Consume whitespace / comments before deciding
+            next_idx = cls._scan_to_char(text, idx, '[')
+            if next_idx == -1:
+                # Not a '[' — stop here (caller will look for '{')
+                break
+
+            # Balance brackets (default values can contain braces but not nested [])
+            depth = 0
+            idx = next_idx
+            while idx < text_len:
+                c = text[idx]
+                if c == '[':
+                    depth += 1
+                elif c == ']':
+                    depth -= 1
+                    if depth == 0:
+                        idx += 1   # step past the closing ']'
+                        break
+                idx += 1
+
+        return idx
+
+    @classmethod
+    def _scrub_macro_definitions(cls, text: str) -> str:
+        """
+        Masks structural LaTeX macro definitions to prevent their bodies from
+        being parsed as live index entries.
+
+        Strict MVC Compliance: Completely free of type reflection or file I/O.
+        Preserves newline characters so vertical editor coordinates stay stable.
+
+        Supported forms
+        ---------------
+        \\newcommand{\\name}[n][default]{body}
+        \\renewcommand{\\name}[n]{body}
+        \\providecommand{\\name}[n]{body}
+        \\DeclareRobustCommand{\\name}[n]{body}
+        \\def\\name#1#2{body}          ← no brace-wrapped name block
+
+        Key fix over the previous implementation
+        -----------------------------------------
+        The old code called _find_closing_brace_index on the FIRST '{' it found,
+        which for \\newcommand is the *name* block '{\\cmd}'.  The balancer exits
+        at the end of that name block and the body '{...}' is left fully exposed,
+        leaking '#1' and any \\index calls inside into the parser.
+
+        The corrected sequence is:
+        1. Detect whether this is a \\def-style macro (no brace-wrapped name).
+        2. For \\newcommand-style: consume the name block, then skip optional
+            argument blocks [n] / [default].
+        3. Find and balance the BODY block.
+        4. Mask from the macro keyword to the end of the body block.
+        """
+        working_chars = list(text)
+        text_len = len(text)
+
+        # Keyword set that uses \def-style syntax (no brace-wrapped name block).
+        # These are followed immediately by the control-sequence name token, then
+        # optional #-parameter tokens, then the replacement body in braces.
+        DEF_STYLE_KEYWORDS = {'def'}
+
+        for match in cls.MACRO_START_PATTERN.finditer(text):
+            keyword = match.group(1)          # e.g. 'newcommand', 'def'
+            start_macro_idx = match.start()   # position of the leading '\'
+            idx = match.end()                 # first char after the keyword token
+
+            # ------------------------------------------------------------------
+            # Step 1 — Handle the name token
+            # ------------------------------------------------------------------
+            if keyword in DEF_STYLE_KEYWORDS:
+                # \def syntax:  \def\cmdname#1#2{body}
+                #
+                # After the keyword, skip whitespace then consume the control
+                # sequence name  (\cmdname).  The name is NOT brace-wrapped.
+                # We just scan forward until we exit the name token (i.e. hit a
+                # character that cannot be part of a control word: space, {, #).
+                while idx < text_len and text[idx] in (' ', '\t'):
+                    idx += 1
+
+                if idx >= text_len or text[idx] != '\\':
+                    # Malformed or exotic \def variant — skip safely
+                    continue
+
+                # Consume the backslash and the control word letters
+                idx += 1  # skip '\'
+                if idx < text_len and text[idx].isalpha():
+                    # Multi-letter control word
+                    while idx < text_len and text[idx].isalpha():
+                        idx += 1
+                elif idx < text_len:
+                    # Single non-letter control symbol  (\def\,{body})
+                    idx += 1
+
+                # Consume any #n parameter tokens  (#1, #2, …)
+                while idx < text_len and text[idx] in (' ', '\t', '#', '0',
+                                                        '1', '2', '3', '4',
+                                                        '5', '6', '7', '8', '9'):
+                    idx += 1
+
+            else:
+                # \newcommand / \renewcommand / \providecommand / \DeclareRobustCommand
+                #
+                # Syntax:  \newcommand{\cmdname}[n][default]{body}
+                #
+                # Consume the name block  {\cmdname}  then optional args [n][default].
+
+                name_open = cls._scan_to_char(text, idx, '{')
+                if name_open == -1:
+                    continue
+
+                name_close = cls._find_closing_brace_index(text, name_open)
+                if name_close == -1:
+                    continue
+
+                idx = name_close + 1  # resume AFTER the name block
+
+                # Skip any optional argument blocks:  [1]  or  [default value]
+                idx = cls._skip_optional_args(text, idx)
+
+            # ------------------------------------------------------------------
+            # Step 2 — Find and balance the BODY block  { ... }
+            # ------------------------------------------------------------------
+            body_open = cls._scan_to_char(text, idx, '{')
+            if body_open == -1:
+                # No body block found (e.g. \def\foo\bar  — aliasing, not defining)
+                continue
+
+            body_close = cls._find_closing_brace_index(text, body_open)
+            if body_close == -1:
+                continue
+
+            # ------------------------------------------------------------------
+            # Step 3 — Mask from the macro keyword through the end of the body
+            # Preserve '\n' / '\r' so editor line/column offsets stay intact.
+            # ------------------------------------------------------------------
+            for fill_idx in range(start_macro_idx, body_close + 1):
+                if working_chars[fill_idx] not in ('\n', '\r'):
+                    working_chars[fill_idx] = ' '
+
         return "".join(working_chars)
+
+    # @classmethod
+    # def _scrub_macro_definitions(cls, text: str) -> str:
+    #     """
+    #     Masks structural LaTeX macro definitions using a simplified outer-brace sweep.
+    #     Strict MVC Compliance: Completely free of type reflection or file I/O operations.
+    #     Identifies macro keywords, targets the first open brace, and clears everything up to the outer closing brace.
+    #     """
+    #     working_chars = list(text)
+    #     text_len = len(text)
+        
+    #     # Use MACRO_START_PATTERN to find the command keywords (\newcommand, \def, etc.)
+    #     for match in cls.MACRO_START_PATTERN.finditer(text):
+    #         start_macro_idx = match.start()
+    #         idx = match.end()
+            
+    #         # Step A: Scan forward to find the VERY FIRST open brace '{' of this macro expression
+    #         first_open_brace_idx = -1
+    #         while idx < text_len:
+    #             char = text[idx]
+    #             if char == '{':
+    #                 first_open_brace_idx = idx
+    #                 break
+    #             elif char == '%' and (idx == 0 or text[idx - 1] != '\\'):
+    #                 # Skip comment noise lines if they occur before the first brace
+    #                 while idx < text_len and text[idx] != '\n':
+    #                     idx += 1
+    #             idx += 1
+                
+    #         if first_open_brace_idx == -1:
+    #             continue
+                
+    #         # Find the matching outer balancing closing brace
+    #         outer_closing_brace_idx = cls._find_closing_brace_index(text, first_open_brace_idx)
+    #         if outer_closing_brace_idx == -1:
+    #             continue
+                
+    #         # Mask out everything from the start of the command word up to the final outer brace
+    #         # Preserve newlines (\n) to keep vertical coordinates stable for the editor viewport
+    #         for fill_idx in range(start_macro_idx, outer_closing_brace_idx + 1):
+    #             if working_chars[fill_idx] not in ('\n', '\r'):
+    #                 working_chars[fill_idx] = ' '
+                    
+    #     return "".join(working_chars)
 
     @classmethod
     def _find_closing_brace_index(cls, text: str, start_brace_pos: int) -> int:

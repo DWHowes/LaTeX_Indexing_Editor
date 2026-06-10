@@ -122,9 +122,7 @@ class IndexLinkDelegate(QStyledItemDelegate):
                     
                     if token_index < len(metadata_list):
                         record_payload = metadata_list[token_index]
-                        
                         # Emit the record directly to any connected view or controller slots
-                        print(f"Executing explicit jump link coordinate tracking for: {record_payload}")
                         self.linkClicked.emit(record_payload)
                         
                 return True # Event handled cleanly, stops selection engine overrides

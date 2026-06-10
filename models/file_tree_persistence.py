@@ -29,17 +29,37 @@ class FileTreePersistence:
     def resolve_workspace_database_path(root_directory_path: str) -> str:
         """Calculates the absolute file destination for the index database asset."""
         return str(Path(root_directory_path) / "workspace_index_data.db")
-    
+
     def configure_project_database_path(self, target_directory: str, validated_project_name: str) -> str:
         """
-        Binds the absolute targeting path context. 
-        Expects a pre-sanitized project name string from the controller.
+        Binds the absolute targeting path context exactly once at the model level 
+        and bubbles the finalized, correct path string back up the stack.
         """
-        self._pending_project_name = validated_project_name
-        composed_filename = f"{validated_project_name}_{self.default_db_suffix}.db"
-        self.db_path = os.path.join(target_directory, composed_filename)
+        self._pending_project_name: str = validated_project_name
+        
+        # Strip any accidental trailing .db from the suffix property if present
+        suffix_clean: str = str(self.default_db_suffix).replace(".db", "").strip()
+        
+        # Build the filename structure precisely once
+        composed_filename: str = f"{validated_project_name}_{suffix_clean}.db"
+        self.db_path: str = os.path.normpath(os.path.join(target_directory, composed_filename))
 
+        return self.db_path    
+    
+    def get_active_database_path(self) -> str:
+        """Public Model Contract. Returns the valid pre-calculated database path."""
         return self.db_path
+        
+    # def configure_project_database_path(self, target_directory: str, validated_project_name: str) -> str:
+    #     """
+    #     Binds the absolute targeting path context. 
+    #     Expects a pre-sanitized project name string from the controller.
+    #     """
+    #     self._pending_project_name = validated_project_name
+    #     composed_filename = f"{validated_project_name}_{self.default_db_suffix}.db"
+    #     self.db_path = os.path.join(target_directory, composed_filename)
+
+    #     return self.db_path
             
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)

@@ -1,3 +1,4 @@
+import os
 from PySide6.QtCore import QObject, Signal, Slot, QModelIndex
 
 class ProjectScopeController(QObject):
@@ -54,13 +55,15 @@ class ProjectScopeController(QObject):
         Invokes path construction and runs schema generation rules.
         """
         # Configure the target path inside the persistence engine
-        self.model.configure_project_database_path(target_directory, project_name)
+        final_db_path: str = self.model.configure_project_database_path(target_directory, project_name)
         
         # Enforce schemas and seed the initial project configuration
         self.model.initialize_database_schema()
-
+        self.active_project_name = project_name
         # Tell the rest of the application that the data layer state has shifted
-        self.scope_mutated.emit()        
+        self.scope_mutated.emit()  
+
+        return final_db_path      
 
     def get_current_project_metadata(self, key: str) -> str | None:
         """Helper contract to read configuration records out-of-band."""
@@ -75,8 +78,11 @@ class ProjectScopeController(QObject):
     def get_active_database_path(self) -> str | None:
         """
         Public boundary contract to extract the calculated project database path.
-        Enables asynchronous load threads to target the correct workspace storage partition.
+        Exposes the model's internally tracked path attribute directly
+        to enable asynchronous load threads to target the correct workspace storage.
         """
         if not self.model:
             return None
+            
+        # Read the explicit, statically typed public path attribute from the model
         return self.model.db_path

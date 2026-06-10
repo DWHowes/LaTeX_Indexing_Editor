@@ -93,7 +93,10 @@ class IndexTreeView(QTreeView):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setEditTriggers(QTreeView.EditTrigger.NoEditTriggers)
 
+        # Viewport tracking must match parent tracking for mouse hovers
         self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
+
         self.setSortingEnabled(True) 
         self.header().setSortIndicator(0, Qt.SortOrder.AscendingOrder)
 
@@ -104,43 +107,99 @@ class IndexTreeView(QTreeView):
         self.reference_delegate = IndexLinkDelegate(self)
         self.setItemDelegateForColumn(1, self.reference_delegate)
 
+        # Single-click link tracking via Column 1 Delegate
+        self.reference_delegate.linkClicked.connect(self._unpack_delegate_payload)
+        # Double-click row navigation via the view's own signal-slot connection
         self.doubleClicked.connect(self._process_embedded_metrics_click)
 
-    def _process_embedded_metrics_click(self, index: QModelIndex):
-        """Calculates precise text coordinate offsets to emit jump location tokens."""
-        # Query metadata records safely via the engine role identifiers
-        records = index.data(Qt.ItemDataRole.UserRole + 1)
-        display_text = index.data(Qt.ItemDataRole.DisplayRole) or ""
-        if not records or not display_text: 
+    def _unpack_delegate_payload(self, record_payload: dict):
+        """
+        Unpacks coordinate packets using the exact backend payload dictionary 
+        keys to prevent 0,0 fallback routing.
+        """
+        if not isinstance(record_payload, dict):
+            return
+            
+        # Match the explicit keys provided in the Session Log payload
+        file_path = record_payload.get("file_path", "")
+        
+        # Safely convert to integers, using standard text coordinate bases
+        line_num = int(record_payload.get("line_number") or 1)
+        column_num = int(record_payload.get("column_offset") or 1)
+        
+        # Retain the identifier token string if available
+        match_text = str(record_payload.get("uid") or "")
+
+        if file_path:
+            # Emit type-safe parameters across the architectural boundary
+            self.coordinate_navigation_requested.emit(file_path, line_num, column_num, match_text)
+
+    def _process_embedded_metrics_click(self, index):
+        """Processes double-clicks, unpacks matching data structures, and emits explicit types."""
+        if not index.isValid() or index.column() == 1:
             return
 
-        visual_rect = self.visualRect(index)
-        click_x = self.viewport().mapFromGlobal(QCursor.pos()).x() - visual_rect.x()
-        metrics = QFontMetrics(self.font())
+        raw_metadata = index.data(Qt.ItemDataRole.UserRole + 1)
+        if not raw_metadata:
+            return
 
-        tokens = display_text.split(" ")
-        current_offset_x = 0
+        target_dict = None
+        if isinstance(raw_metadata, dict):
+            target_dict = raw_metadata
+        elif isinstance(raw_metadata, list) and len(raw_metadata) > 0:
+            if isinstance(raw_metadata, dict):
+                target_dict = raw_metadata
+
+        # Fallback to child tree node structure if present
+        if not target_dict and self.base_model.hasChildren(index):
+            child_idx = index.child(0, 0)
+            if child_idx.isValid():
+                child_data = child_idx.data(Qt.ItemDataRole.UserRole + 1)
+                if isinstance(child_data, dict):
+                    target_dict = child_data
+                elif isinstance(child_data, list) and len(child_data) > 0:
+                    if isinstance(child_data, dict):
+                        target_dict = child_data
+
+        if target_dict:
+            # Route through the exact same internal translation mechanism
+            self._unpack_delegate_payload(target_dict)
+
+    # def _process_embedded_metrics_click(self, index: QModelIndex):
+    #     """Calculates precise text coordinate offsets to emit jump location tokens."""
+    #     # Query metadata records safely via the engine role identifiers
+    #     records = index.data(Qt.ItemDataRole.UserRole + 1)
+    #     display_text = index.data(Qt.ItemDataRole.DisplayRole) or ""
+    #     if not records or not display_text: 
+    #         return
+
+    #     visual_rect = self.visualRect(index)
+    #     click_x = self.viewport().mapFromGlobal(QCursor.pos()).x() - visual_rect.x()
+    #     metrics = QFontMetrics(self.font())
+
+    #     tokens = display_text.split(" ")
+    #     current_offset_x = 0
         
-        for token in tokens:
-            if not token: continue
-            token_width = metrics.horizontalAdvance(token)
-            if current_offset_x <= click_x <= (current_offset_x + token_width):
-                try:
-                    target_uid = int(token.strip("[]"))
-                    for rec in records:
-                        if int(rec.get("unique_id_number", -1)) == target_uid:
-                            fallback = f"\\index{{{rec.get('entry_path_latex_format', '')}}}"
-                            self.coordinate_navigation_requested.emit(
-                                rec.get("file_path"), 
-                                rec.get("line_number"), 
-                                rec.get("column_offset"), 
-                                fallback
-                            )
-                            return
-                except ValueError: 
-                    pass
-                break
-            current_offset_x += token_width + metrics.horizontalAdvance(" ")
+    #     for token in tokens:
+    #         if not token: continue
+    #         token_width = metrics.horizontalAdvance(token)
+    #         if current_offset_x <= click_x <= (current_offset_x + token_width):
+    #             try:
+    #                 target_uid = int(token.strip("[]"))
+    #                 for rec in records:
+    #                     if int(rec.get("unique_id_number", -1)) == target_uid:
+    #                         fallback = f"\\index{{{rec.get('entry_path_latex_format', '')}}}"
+    #                         self.coordinate_navigation_requested.emit(
+    #                             rec.get("file_path"), 
+    #                             rec.get("line_number"), 
+    #                             rec.get("column_offset"), 
+    #                             fallback
+    #                         )
+    #                         return
+    #             except ValueError: 
+    #                 pass
+    #             break
+    #         current_offset_x += token_width + metrics.horizontalAdvance(" ")
 
     @Slot(list, list)
     def populate_hierarchy_tree(self, headings: list, references: list):
@@ -245,9 +304,12 @@ class IndexTreeView(QTreeView):
                 r_uid = r.get("uid") or f"{r.get('file_path')}:{r.get('line_number')}"
                 
                 if r_uid not in [ex.get("uid") for ex in new_records if ex]:
+                    # FIX: Safely parse either "id" or "unique_id_number" to guarantee alignment
+                    stable_id = r.get("id") or r.get("unique_id_number") or 0
+                    
                     new_records.append({
                         "uid": r_uid, 
-                        "unique_id_number": int(r.get("id") or 0),
+                        "unique_id_number": int(stable_id),
                         "file_path": str(r.get("file_path") or ""),
                         "line_number": int(r.get("line_number") or 0),
                         "column_offset": int(r.get("column_offset") or 0)
@@ -262,11 +324,12 @@ class IndexTreeView(QTreeView):
 
                     # Push transaction staging records straight into the model engine layer
                     self.engine.compile_transaction_record(
-                        keys, r, r.get("encap", "standard"), r.get("id", 0)
+                        keys, r, r.get("encap", "standard"), int(stable_id)
                     )
            
             sibling_ref_item.setData(new_records, role_uid)
             if new_records:
+                # Clear standard formatting rules and render the brackets cleanly
                 sibling_ref_item.setText(" ".join([f"[{rc['unique_id_number']}]" for rc in new_records]))
                 if self.style():
                     sibling_ref_item.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))

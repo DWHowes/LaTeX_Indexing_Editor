@@ -9,15 +9,18 @@ class IndexTreeModelEngine:
     """
     def __init__(self, repository_model):
         self.repo = repository_model  # Database repository layer
+
         self._staged_db_entries: list = []
-        self._cross_reference_cache: dict = {}        
+        self._cross_reference_cache: dict = {}  
+
+        self._active_headings: list = []
+        self._active_references: list = []
 
     def has_unsaved_changes(self) -> bool:
         return len(self._staged_db_entries) > 0
 
     def clear_staged_entries(self):
         self._staged_db_entries.clear()
-
 
     def reset_transaction_arrays(self) -> None:
         """
@@ -85,3 +88,27 @@ class IndexTreeModelEngine:
             "column_number": int(ref_data.get("column_offset", 0)),
             "encap_style": encap, "visual_tag": v_tag
         })
+
+    def compile_and_retain_project_paths(self, file_paths: list[str]) -> tuple[list[dict], list[dict]]:
+        """Invokes your scraper method, retains results in memory, and returns them."""
+        self.reset_transaction_arrays()
+        headings, references = self._scrape_and_compile_paths(file_paths)
+        self._active_headings = headings
+        self._active_references = references
+        return headings, references
+    
+    def clear_active_manifests(self) -> None:
+        """Purges all active workspace structures from cache tracking memory."""
+        self._staged_db_entries.clear()
+        self._cross_reference_cache.clear()
+        self._active_headings.clear()
+        self._active_references.clear()
+
+    def ingest_pre_parsed_project_dataset(self, headings: list[dict], references: list[dict]) -> None:
+        """
+        Public Data Entry Contract.
+        Ingests pre-extracted relational parameters directly into memory storage.
+        """
+        self.clear_active_manifests()
+        self._active_headings = list(headings)
+        self._active_references = list(references)

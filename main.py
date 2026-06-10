@@ -16,6 +16,8 @@ from views.app_style_configuration import AppStyleConfiguration
 from controllers.external_file_watcher_engine import ExternalFileWatcherEngine
 from models.file_tree_persistence import FileTreePersistence
 from controllers.project_scope_controller import ProjectScopeController
+from models.index_tree_model_engine import IndexTreeModelEngine
+from controllers.index_tree_controller import IndexTreeController
 
 """
 * Set up session logging
@@ -49,10 +51,8 @@ if __name__ == "__main__":
         # Initialize the main visual window shell
         editor_window = LatexEditor()
         editor_window.global_session_logger = logger
-        
-        # Initialize sub-domain controllers
-        # Required view primitives (tabs, trees) are injected explicitly through constructors
-        index_controller = IndexTreeController(editor_window.sidebar.tree_index)
+
+        editor_window.show()
         
         doc_controller = DocumentIOController(
             backup_manager, 
@@ -76,20 +76,25 @@ if __name__ == "__main__":
         file_persistence = FileTreePersistence(db_path=initial_db_path)         
         scope_controller = ProjectScopeController(file_persistence)
 
+        index_model_engine = IndexTreeModelEngine(file_persistence.model if hasattr(file_persistence, "model") else None)
+        index_controller = IndexTreeController(index_model_engine, None)
+
         # Bind all components together via the master application orchestrator
         pipeline_controller = AppPipelineController(
             window=editor_window,
             prefs_model=preferences_model,
             backup_manager=backup_manager,
             doc_controller=doc_controller,
-            index_controller=None, # Replaced dynamically via initialize_index_subsystem
+            index_controller=index_controller, 
             lifecycle_controller=lifecycle_controller,
-            scope_controller=scope_controller # <-- PASS INSTANCE HERE
+            scope_controller=scope_controller 
         )
+
+        # Link the parent relationship back safely after construction
+        index_controller.parent = pipeline_controller
 
         editor_window.backup_manager = backup_manager
 
-        editor_window.show()
         exit_code = app.exec()
         
         logger.stop_intercept()

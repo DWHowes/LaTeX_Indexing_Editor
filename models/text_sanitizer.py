@@ -29,3 +29,21 @@ class TextSanitizer:
             normalized = os.path.normpath(os.path.abspath(normalized))
         
         return normalized
+
+    def sanitize(self, raw_file_contents_string: str) -> str:
+        """
+        Model Layer Business Logic Contract.
+        Normalizes line endings and clears non-printable control blocks 
+        to safeguard document character index positioning maps.
+        """
+        if not raw_file_contents_string:
+            return ""
+
+        # Normalize carriage-return line structures to standard Unix layouts
+        # This prevents coordinate calculations from drifting inside the editor view
+        processed_text = str(raw_file_contents_string).replace("\r\n", "\n").replace("\r", "\n")
+        
+        # Strip disruptive absolute structural control bytes (e.g., Null characters)
+        processed_text = processed_text.replace("\x00", "")
+        
+        return processed_text
