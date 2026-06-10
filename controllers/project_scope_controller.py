@@ -4,8 +4,6 @@ from PySide6.QtCore import QObject, Signal, Slot, QModelIndex
 class ProjectScopeController(QObject):
     """
     Traffic Router & State Coordinator for Active Workspace Search Scopes.
-    Strict MVC Compliance: Free from dynamic hasattr reflection checks,
-    raw integer UserRole extraction leaks, and low-level os.path string calls.
     """
     # Emitted to tell downstream search/parse engines that the active scope changed
     scope_mutated = Signal()
@@ -86,3 +84,9 @@ class ProjectScopeController(QObject):
             
         # Read the explicit, statically typed public path attribute from the model
         return self.model.db_path
+
+    def save_scraped_index_data(self, headings: list[dict], references: list[dict]) -> None:
+        """Routes out-of-band data arrays safely down into the persistence model layer."""
+        if self.model:
+            self.model.serialize_scraped_index_manifest(headings, references)
+            self.scope_mutated.emit()

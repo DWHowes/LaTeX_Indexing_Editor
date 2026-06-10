@@ -50,31 +50,19 @@ class FileTreePersistence:
         """Public Model Contract. Returns the valid pre-calculated database path."""
         return self.db_path
         
-    # def configure_project_database_path(self, target_directory: str, validated_project_name: str) -> str:
-    #     """
-    #     Binds the absolute targeting path context. 
-    #     Expects a pre-sanitized project name string from the controller.
-    #     """
-    #     self._pending_project_name = validated_project_name
-    #     composed_filename = f"{validated_project_name}_{self.default_db_suffix}.db"
-    #     self.db_path = os.path.join(target_directory, composed_filename)
-
-    #     return self.db_path
-            
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
 
     def initialize_database_schema(self) -> None:
-        """Enforces relational integrity constraints at cold boot."""
+        """Enforces relational integrity constraints matching the worker keys at cold boot."""
         if not self.db_path:
             return
 
-        conn = sqlite3.connect(self.db_path)
-
-        cursor = conn.cursor()
-        try:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
             # Partition 1: Project Metadata configuration
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS project_metadata (
@@ -84,7 +72,7 @@ class FileTreePersistence:
                 );
             """)
 
-            # 🎯 Partition 2: Project Files Index (MOVED HERE)
+            # Partition 2: Project Files Index
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS project_files (
                     absolute_path TEXT PRIMARY KEY NOT NULL,
@@ -94,28 +82,34 @@ class FileTreePersistence:
                 );
             """)
 
-            # Partition 3: Structural headings
+            # Partition 3: Structural Headings (Updated to store hierarchy meta)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS project_headings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    file_path TEXT NOT NULL,
-                    line_number INTEGER NOT NULL,
-                    column_offset INTEGER NOT NULL,
+                    id INTEGER PRIMARY KEY NOT NULL,
+                    parent_id INTEGER,
                     heading_text TEXT NOT NULL,
-                    fallback_tag TEXT
+                    name TEXT NOT NULL,
+                    depth INTEGER NOT NULL
                 );
             """)
 
-            # Partition 4: Relational cross-references
+            # Partition 4: Relational Multi-References (Completely normalized to worker keys)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS project_references (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    heading_id INTEGER NOT NULL,
+                    heading_raw_text TEXT NOT NULL,
+                    uid TEXT UNIQUE NOT NULL,
+                    unique_id_number INTEGER NOT NULL,
                     file_path TEXT NOT NULL,
                     line_number INTEGER NOT NULL,
                     column_offset INTEGER NOT NULL,
-                    reference_source TEXT NOT NULL,
-                    reference_target TEXT NOT NULL,
-                    fallback_tag TEXT
+                    absolute_position INTEGER,
+                    encap TEXT DEFAULT 'standard',
+                    see_references TEXT,       
+                    seealso_references TEXT,
+                    has_references INTEGER DEFAULT 0,
+                    FOREIGN KEY(heading_id) REFERENCES project_headings(id) ON DELETE CASCADE
                 );
             """)
             
@@ -132,9 +126,6 @@ class FileTreePersistence:
                 default_metadata
             )
             conn.commit()
-        finally:
-            cursor.close()
-            conn.close()
 
     def fetch_all_project_files(self) -> List[Dict[str, Any]]:
         """
@@ -328,9 +319,10 @@ class FileTreePersistence:
         if not os.path.exists(target_directory):
             return None
 
-        # Look for any files ending with your default database suffix
+        # Look for any files ending with your default database suffix configuration
         for file_name in os.listdir(target_directory):
-            if file_name.endswith(f"_{self.default_db_suffix}.db"):
+            # FIX: Match the suffix variable directly without adding a duplicate .db extension or an underscore
+            if file_name.endswith(self.default_db_suffix):
                 possible_db_path = os.path.join(target_directory, file_name)
                 
                 # Connect to the discovered file out-of-band to inspect its metadata table
@@ -346,6 +338,7 @@ class FileTreePersistence:
                     
                     if row:
                         # Success: Return the exact custom name stored in the database payload
+                        print(f"[MODEL PERSISTENCE] Validated existing project metadata: {row[0]}")
                         return row[0]
                 except sqlite3.Error:
                     continue # Bypass corrupted or locked databases safely
@@ -390,3 +383,71 @@ class FileTreePersistence:
         finally:
             cursor.close()
             conn.close()
+
+    def serialize_scraped_index_manifest(self, headings: list[dict], references: list[dict]) -> None:
+        """
+        Public Model Endpoint.
+        Serializes multi-reference scraped index topologies with perfect key alignment.
+        """
+        if not self.db_path:
+            return
+
+        import json
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Wipe old records to enable a clean transaction write phase
+                cursor.execute("DELETE FROM project_headings;")
+                cursor.execute("DELETE FROM project_references;")
+                
+                # 1. Bulk commit the structural Headings payload
+                if headings:
+                    headings_batch = [
+                        (
+                            int(h.get("id")),
+                            h.get("parent_id"), # None or int
+                            str(h.get("heading_text", "")),
+                            str(h.get("name", "")),
+                            int(h.get("depth", 0))
+                        )
+                        for h in headings
+                    ]
+                    cursor.executemany("""
+                        INSERT INTO project_headings (id, parent_id, heading_text, name, depth)
+                        VALUES (?, ?, ?, ?, ?);
+                    """, headings_batch)
+
+                # 2. Bulk commit the un-stripped multi-reference records payload
+                if references:
+                    references_batch = [
+                        (
+                            int(r.get("heading_id")),
+                            str(r.get("heading_raw_text", "")),
+                            str(r.get("uid", "")),
+                            int(r.get("unique_id_number", 0)),
+                            str(r.get("file_path", "")),
+                            int(r.get("line_number", 1)),
+                            int(r.get("column_offset", 0)),
+                            r.get("absolute_position"), # Int or None
+                            str(r.get("encap", "standard")),
+                            json.dumps(r.get("see_references")) if isinstance(r.get("see_references"), list) else None,
+                            json.dumps(r.get("seealso_references")) if isinstance(r.get("seealso_references"), list) else None,
+                            1 if r.get("has_references") else 0
+                        )
+                        for r in references
+                    ]
+                    
+                    cursor.executemany("""
+                        INSERT INTO project_references (
+                            heading_id, heading_raw_text, uid, unique_id_number, 
+                            file_path, line_number, column_offset, absolute_position, 
+                            encap, see_references, seealso_references, has_references
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """, references_batch)
+                    
+                conn.commit()
+                print(f"[MODEL PERSISTENCE] Cleanly serialized {len(headings)} schema headings and {len(references)} references.")
+                
+        except sqlite3.Error as err:
+            print(f"[MODEL PERSISTENCE CRITICAL FAILURE] Serialization failed: {err}")

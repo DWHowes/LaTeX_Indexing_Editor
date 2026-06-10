@@ -22,8 +22,6 @@ class ProjectLoadWorker(QObject):
         self._tex_file_paths = []
         self._is_abort_requested = False
 
-# models/project_load_worker.py
-
     @Slot()
     def process(self):
         """Executes completely isolated data extraction loops inside the background thread."""
@@ -70,32 +68,51 @@ class ProjectLoadWorker(QObject):
             print(f"CRITICAL WORKER TRACEBACK:\n{traceback.format_exc()}")
             self.error_occurred.emit(str(e))
 
+# models/project_load_worker.py
+
     def _thread_local_database_extract(self, target_db_file: str) -> tuple[list, list]:
-        """
-        Creates a short-lived sqlite3 connection completely contained on this thread.
-        Guarantees that no native database timers or file handles leak to the Main Thread.
-        """
+        """Creates a short-lived thread connection and reconstructs list structures."""
+        import json
         conn = None
         headings = []
         references = []
         try:
             conn = sqlite3.connect(target_db_file)
-            conn.row_factory = sqlite3.Row  # Returns clean row dictionary access maps
+            conn.row_factory = sqlite3.Row  
             cursor = conn.cursor()
             
-            # Check if tables exist to prevent crashing on empty files
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='project_headings';")
             if cursor.fetchone():
+                # Extract Headings
                 cursor.execute("SELECT * FROM project_headings")
                 headings = [dict(row) for row in cursor.fetchall()]
                 
+                # Extract References
                 cursor.execute("SELECT * FROM project_references")
-                references = [dict(row) for row in cursor.fetchall()]
+                for row in cursor.fetchall():
+                    r_dict = dict(row)
+                    
+                    # Unpack JSON references back to native Python list variables cleanly
+                    try:
+                        r_dict["see_references"] = json.loads(r_dict["see_references"]) if r_dict["see_references"] else None
+                    except Exception:
+                        r_dict["see_references"] = None
+                        
+                    try:
+                        r_dict["seealso_references"] = json.loads(r_dict["seealso_references"]) if r_dict["seealso_references"] else None
+                    except Exception:
+                        r_dict["seealso_references"] = None
+                        
+                    # Re-convert structural flag integers back to booleans
+                    r_dict["has_references"] = bool(r_dict["has_references"])
+                    
+                    references.append(r_dict)
+                    
         except sqlite3.Error as se:
             print(f"[Worker Thread DB Error] {se}")
         finally:
             if conn:
-                conn.close() # Cleanly drop all connection handles and native internal timers
+                conn.close() 
         return headings, references
 
 # Inside models/project_load_worker.py
@@ -176,7 +193,7 @@ class ProjectLoadWorker(QObject):
                 abs_pos_coord = uid_dict.get("absolute_index") or uid_dict.get("absolute_position")
                 
                 see_array = uid_dict.get("see") or None
-                seealso_array = uid_dict.get("seealso") or None
+                seealso_array = uid_array = uid_dict.get("seealso") or None
                 has_ref_flag = bool(uid_dict.get("has_references") or see_array or seealso_array)
 
                 references_payload.append({
@@ -232,43 +249,3 @@ class SafeProjectLoadThread(QThread):
         self.finished.emit(is_db_loaded, headings, references, file_tree_payload, db_path)
         self.quit()
         self.wait()
-
-# class SafeProjectLoadThread(QThread):
-#     """
-#     Thread-isolated container that instantiates and manages the lifecycle 
-#     of ProjectLoadWorker strictly within the background execution context.
-#     """
-#     # Declare public signals on the Thread class container. AppPipelineController hooks into these
-#     status_updated = Signal(str)
-#     error_occurred = Signal(str)
-#     finished = Signal(bool, list, list, list, str) 
-
-#     def __init__(self, db_path: str, project_root: str, parent=None):
-#         super().__init__(parent)
-#         self.db_path = db_path
-#         self.project_root = project_root
-#         self.worker = None
-
-#     def run(self):
-#         """Executes out-of-band on the newly spawned thread context."""
-#         from models.project_load_worker import ProjectLoadWorker
-        
-#         self.worker = ProjectLoadWorker(db_path=self.db_path, project_root=self.project_root)
-        
-#         # Bridge simple worker messages to the thread's own class emitters
-#         self.worker.status_updated.connect(self.status_updated.emit)
-#         self.worker.error_occurred.connect(self.error_occurred.emit)
-        
-#         # Intercept the worker's processing completion safely
-#         self.worker.finished.connect(self._handle_worker_finished, Qt.ConnectionType.QueuedConnection)
-        
-#         self.worker.process()
-#         self.exec()
-
-#     def _handle_worker_finished(self, is_db_loaded, headings, references, file_tree_payload, db_path):
-#         """Ensures the thread's event loop shuts down cleanly when the worker finishes."""
-#         # Emit the thread's signal up to the controller on the main GUI thread
-#         self.finished.emit(is_db_loaded, headings, references, file_tree_payload, db_path)
-        
-#         # Break the background event loop safely
-#         self.quit()

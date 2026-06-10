@@ -210,13 +210,11 @@ class AppPipelineController(QObject):
             file_name = os.path.basename(file_path)
             self.window.status_bar.showMessage(f"Opened document: '{file_name}'", 2000)
 
-# Inside controllers/app_pipeline_controller.py
-
     @Slot()
     def select_project_folder_workflow(self) -> None:
         """
-        Launches directory selection, requests model-level path construction,
-        and dynamically passes the synchronized filename path down to the background thread.
+        Launches directory selection, checks for a pre-existing project name via 
+        the scope controller, and conditionally prompts for names only when missing.
         Strict MVC Compliance: Free of type reflections or redundant string math.
         """
         initial_dir = self.prefs.get_last_project_path()
@@ -227,32 +225,54 @@ class AppPipelineController(QObject):
             self.window.status_bar.showMessage("Project loading canceled.", 2000)
             return
 
-        project_name, ok = QInputDialog.getText(
-            self.window, 
-            "Project Configuration", 
-            "Enter a unique name for this project:",
-            text=os.path.basename(os.path.normpath(selected_dir))
-        )
-        
-        if not ok or not project_name.strip():
-            self.window.status_bar.showMessage("Project creation aborted: Invalid or empty name.", 3000)
-            return
+        # 1. VERIFICATION GATE: Query the scope controller using its exact method signature
+        existing_project_name = self.scope_ctrl.detect_pre_existing_project(target_directory=selected_dir)
 
-        clean_project_name = "".join(
-            c for c in project_name if c.isalnum() or c in (" ", "_", "-")
-        ).strip().replace(" ", "_")
-        
-        if not clean_project_name:
-            clean_project_name = "Untitled_Project"
+        # 2. CONDITIONAL BRANCHING: Skip name input prompts if a project configuration already exists
+        if existing_project_name:
+            print(f"[PIPELINE CONTROLLER] Pre-existing project localized: '{existing_project_name}'")
+            
+            # Request the model layer to configure path trackers for the existing database file
+            db_target_path = self.scope_ctrl.initialize_project_database(
+                target_directory=selected_dir, 
+                project_name=existing_project_name
+            )
+        else:
+            # Fall back to prompting the user for a new name if no project is detected
+            project_name, ok = QInputDialog.getText(
+                self.window, 
+                "Project Configuration", 
+                "Enter a unique name for this project:",
+                text=os.path.basename(os.path.normpath(selected_dir))
+            )
+            
+            if not ok or not project_name.strip():
+                self.window.status_bar.showMessage("Project creation aborted: Invalid or empty name.", 3000)
+                return
+
+            clean_project_name = "".join(
+                c for c in project_name if c.isalnum() or c in (" ", "_", "-")
+            ).strip().replace(" ", "_")
+            
+            if not clean_project_name:
+                clean_project_name = "Untitled_Project"
+
+            # Initialize a new data layer file structure and fetch its generated path string
+            db_target_path = self.scope_ctrl.initialize_project_database(
+                target_directory=selected_dir, 
+                project_name=clean_project_name
+            )
+
+        # Safety fallback check to ensure the file path is resolved before initializing threads
+        if not db_target_path:
+            db_target_path = self.scope_ctrl.get_active_database_path()
+
+        if not db_target_path:
+            self.window.status_bar.showMessage("Pipeline initialization failed: Database unresolved.", 3000)
+            return
 
         self.prefs.update_fallback_directory(selected_dir)
         self.window.centralWidget().setEnabled(False)
-
-        # Initialize the data layer and capture the clean model-generated path string
-        db_target_path: str = self.scope_ctrl.initialize_project_database(
-            target_directory=selected_dir, 
-            project_name=clean_project_name
-        )
 
         # Teardown active background threads cleanly before spin up
         if self._load_thread and self._load_thread.isRunning():
@@ -260,7 +280,7 @@ class AppPipelineController(QObject):
             self._load_thread.quit()
             self._load_thread.wait()
 
-        # Pass the clean, model-generated path down into the background thread container
+        # Pass the verified database path into the background loading worker thread
         from models.project_load_worker import SafeProjectLoadThread 
         self._load_thread = SafeProjectLoadThread(
             db_path=db_target_path, 
@@ -274,112 +294,11 @@ class AppPipelineController(QObject):
         self._load_thread.finished.connect(self._load_thread.deleteLater)
         self._load_thread.start()
 
-    # @Slot()
-    # def select_project_folder_workflow(self) -> None:
-    #     """
-    #     Launches explicit directory selection, prompts for a structured project 
-    #     name cleanly via UI contracts, and mounts the background loader thread.
-    #     Strict MVC Compliance: Free of thread tracking hacks or hasattr calls.
-    #     """
-    #     initial_dir = self.prefs.get_last_project_path()
-    #     selected_dir = QFileDialog.getExistingDirectory(
-    #         self.window, "Select LaTeX Project Root Folder", initial_dir
-    #     )
-    #     if not selected_dir:
-    #         self.window.status_bar.showMessage("Project loading canceled.", 2000)
-    #         return
-
-    #     # Prompt the user for an explicit project tracking name
-    #     project_name, ok = QInputDialog.getText(
-    #         self.window, 
-    #         "Project Configuration", 
-    #         "Enter a unique name for this project:",
-    #         text=os.path.basename(os.path.normpath(selected_dir))
-    #     )
-        
-    #     if not ok or not project_name.strip():
-    #         self.window.status_bar.showMessage("Project creation aborted: Invalid or empty name.", 3000)
-    #         return
-
-    #     # Sanitize the string to ensure it remains a valid cross-platform filename
-    #     clean_project_name = "".join(
-    #         c for c in project_name if c.isalnum() or c in (" ", "_", "-")
-    #     ).strip().replace(" ", "_")
-        
-    #     if not clean_project_name:
-    #         clean_project_name = "Untitled_Project"
-
-    #     # Construct the database filename without string duplication
-    #     # Ensures a clean trailing layout configuration (e.g., "MyProject_index_data.db")
-    #     db_filename = f"{clean_project_name}_index_data.db"
-    #     db_target_path = os.path.normpath(os.path.join(selected_dir, db_filename))
-
-    #     # Save the current workspace state parameters down to configuration records
-    #     self.prefs.update_fallback_directory(selected_dir)
-    #     self.window.centralWidget().setEnabled(False)
-
-    #     # Initialize storage partitions using the finalized path
-    #     self.scope_ctrl.initialize_project_database(
-    #         target_directory=selected_dir, 
-    #         project_name=clean_project_name
-    #     )
-
-    #     # Teardown active background threads cleanly before spin up
-    #     if self._load_thread and self._load_thread.isRunning():
-    #         self._load_thread.worker.stop()
-    #         self._load_thread.quit()
-    #         self._load_thread.wait()
-
-    #     # Kick-off the thread context using verified type contracts
-    #     from models.project_load_worker import SafeProjectLoadThread 
-    #     self._load_thread = SafeProjectLoadThread(
-    #         db_path=db_target_path, 
-    #         project_root=selected_dir, 
-    #         parent=self
-    #     )
-        
-    #     self._load_thread.status_updated.connect(self.window.status_bar.showMessage, Qt.ConnectionType.QueuedConnection)
-    #     self._load_thread.error_occurred.connect(self.handle_pipeline_failure, Qt.ConnectionType.QueuedConnection)
-    #     self._load_thread.finished.connect(self.handle_project_loading_completed, Qt.ConnectionType.QueuedConnection)
-    #     self._load_thread.finished.connect(self._load_thread.deleteLater)
-    #     self._load_thread.start()
-
-    # @Slot()
-    # def select_project_folder_workflow(self):
-    #     """Launches directory selection and routes paths to the isolated model thread."""
-    #     from models.project_load_worker import SafeProjectLoadThread 
-        
-    #     initial_dir = self.prefs.get_last_project_path()
-    #     selected_dir = QFileDialog.getExistingDirectory(self.window, "Select LaTeX Project Root Folder", initial_dir)
-    #     if not selected_dir:
-    #         self.window.status_bar.showMessage("Project loading canceled.", 2000)
-    #         return
-        
-    #     detected_name = self.scope_ctrl.detect_pre_existing_project(selected_dir)
-    #     chosen_name = detected_name if detected_name else os.path.basename(os.path.normpath(selected_dir))
-    #     safe_project_name = "".join(c for c in chosen_name if c.isalnum() or c in (" ", "_", "-")).strip() or "Untitled_Project"
-
-    #     self.prefs.update_fallback_directory(selected_dir)
-    #     self.window.centralWidget().setEnabled(False)
-
-    #     self.scope_ctrl.initialize_project_database(target_directory=selected_dir, project_name=safe_project_name)
-    #     db_target_path = self.scope_ctrl.get_active_database_path()
-
-    #     # Instantiate background thread out-of-band to safeguard GUI loop
-    #     self._load_thread = SafeProjectLoadThread(db_path=db_target_path, project_root=selected_dir, parent=self)
-        
-    #     # Route to explicit internal binding methods on execution start
-    #     self._load_thread.started.connect(self._wire_worker_signals)
-    #     self._load_thread.finished.connect(self._load_thread.deleteLater)
-    #     self._load_thread.start()
-
-    def _wire_worker_signals(self):
-        """Binds worker signal channels directly on background execution startup."""
-        self._load_thread.worker.status_updated.connect(self.window.status_bar.showMessage, Qt.ConnectionType.QueuedConnection)
-        self._load_thread.worker.finished.connect(self.handle_project_loading_completed, Qt.ConnectionType.QueuedConnection)
-        self._load_thread.worker.error_occurred.connect(self.handle_pipeline_failure, Qt.ConnectionType.QueuedConnection)
-
-# Inside controllers/app_pipeline_controller.py
+    # def _wire_worker_signals(self):
+    #     """Binds worker signal channels directly on background execution startup."""
+    #     self._load_thread.worker.status_updated.connect(self.window.status_bar.showMessage, Qt.ConnectionType.QueuedConnection)
+    #     self._load_thread.worker.finished.connect(self.handle_project_loading_completed, Qt.ConnectionType.QueuedConnection)
+    #     self._load_thread.worker.error_occurred.connect(self.handle_pipeline_failure, Qt.ConnectionType.QueuedConnection)
 
     @Slot(bool, list, list, list, str)
     def handle_project_loading_completed(self, success: bool, headings: list, references: list, file_tree_payload: list, db_path: str) -> None:
@@ -392,6 +311,12 @@ class AppPipelineController(QObject):
             if self._load_thread and self._load_thread.isRunning():
                 self._load_thread.quit()
             return
+
+        # If the background thread has returned newly harvested text arrays, 
+        # delegate their serialization entirely to the Scope Controller to 
+        # flush them down into the model layer (FileTreePersistence).
+        if headings or references:
+            self.scope_ctrl.save_scraped_index_data(headings, references)
 
         self.window.db_path = db_path
 
