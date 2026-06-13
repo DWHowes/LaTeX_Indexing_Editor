@@ -12,8 +12,14 @@ class MacroEditingController(QObject):
 
     def __init__(self, id_generator_model, index_controller, parent=None):
         super().__init__(parent)
-        self.id_gen = id_generator_model     # Model Layer Contract
-        self.idx_ctrl = index_controller     # Controller Layer Contract
+
+        if id_generator_model is None:
+            raise ValueError("MacroEditingController requires a valid id_generator_model.")
+        if index_controller is None:
+            raise ValueError("MacroEditingController requires a valid index_controller.")
+        
+        self.id_gen = id_generator_model
+        self.idx_ctrl = index_controller
 
     @Slot(EditorTab, list, dict)
     def execute_non_destructive_substitution(self, editor: EditorTab, 
@@ -29,10 +35,10 @@ class MacroEditingController(QObject):
             if encap_rule != "standard" else f"\\index{{{macro_body}}}"
         )
 
-        target_file_path = editor.file_path
+        target_file_path = editor.get_absolute_file_path()
         
         # 1. Instruct index controllers to remove old obsolete entries
-        if self.idx_ctrl and target_file_path:
+        if target_file_path:
             approx_line = metadata.get("line_number", 1)
             obsolete_idx = self.idx_ctrl.find_index_by_file_coordinates(
                 target_file_path, approx_line
@@ -69,8 +75,7 @@ class MacroEditingController(QObject):
         }
 
         # 5. Push updated data records down into the index tree controller
-        if self.idx_ctrl:
-            self.idx_ctrl.insert_new_entry_slot(updated_parts, mock_ui_metadata)
+        self.idx_ctrl.insert_new_entry_slot(updated_parts, mock_ui_metadata)
             
         self.state_dirty_flag_raised.emit()
         self.macro_substitution_completed.emit()

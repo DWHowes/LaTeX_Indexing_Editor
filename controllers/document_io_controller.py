@@ -16,7 +16,7 @@ class DocumentIOController(QObject):
         self.backup_manager = backup_manager
         self.text_sanitizer = text_sanitizer
         self.tabs = tabs_widget
-        self.parent_view = parent_view 
+        # self.parent_view = parent_view 
 
     def check_unsaved_tex_changes(self) -> bool:
         """Scans the open view collection to check for uncommitted changes."""
@@ -88,3 +88,7 @@ class DocumentIOController(QObject):
                         # else:
                         #     all_successful = False
         return all_successful
+    
+    def set_tabs_widget(self, tabs_widget) -> None:
+        """Public contract for updating the active tab container reference."""
+        self.tabs = tabs_widget    

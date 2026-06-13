@@ -1,4 +1,3 @@
-# controllers/index_tree_controller.py
 from PySide6.QtCore import QObject, Slot, Signal, QModelIndex
 
 class IndexTreeController(QObject):
@@ -40,7 +39,7 @@ class IndexTreeController(QObject):
 
     @Slot(dict)
     def direct_coordinate_jump_slot(self, payload: dict):
-        if payload and isinstance(payload, dict):
+        if payload:
             self.jump_to_coordinate_requested.emit(payload)
 
     @Slot(list, list)

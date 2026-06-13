@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Slot, Signal
+
+from views.app_style_configuration import AppStyleConfiguration
 from views.editor_tab import EditorTab
 
 class WorkspaceLifecycleController(QObject):
@@ -146,9 +148,9 @@ class WorkspaceLifecycleController(QObject):
         if isinstance(active_tab, EditorTab):
             active_tab.toggle_find_dialog()
 
-    def halt_active_search_workers(self) -> None:
-        """Public cleanup contract invoked during application shutdown."""
-        pass
+    # def halt_active_search_workers(self) -> None:
+    #     """Public cleanup contract invoked during application shutdown."""
+    #     pass
 
     def open_file_by_path(self, absolute_path: str) -> EditorTab:
         """
@@ -190,19 +192,16 @@ class WorkspaceLifecycleController(QObject):
             
         return editor_tab
 
-# controllers/workspace_lifecycle_controller.py
-
     def create_editor_tab(self, absolute_path: str, contents: str) -> EditorTab:
         path_obj = Path(absolute_path)
         display_name = path_obj.name
 
         # 1. Instantiate the view panel. It will now auto-initialize its own LatexHighlighter!
         editor_tab = EditorTab(parent=self.tabs)
-        editor_tab.file_path = absolute_path
+        editor_tab.set_absolute_path(absolute_path)
         editor_tab.load_document_content(contents)
 
         # 2. Query your shared static configuration state models
-        from views.app_style_configuration import AppStyleConfiguration
         broker = AppStyleConfiguration.event_broker()
         
         current_family = str(broker.property("font_family") or "Arial")
@@ -226,3 +225,7 @@ class WorkspaceLifecycleController(QObject):
             )
         )
         return editor_tab
+
+    def set_tabs_widget(self, tabs_widget) -> None:
+        """Public contract for updating the active tab container reference."""
+        self.tabs = tabs_widget

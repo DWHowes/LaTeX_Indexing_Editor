@@ -212,8 +212,10 @@ class AppPipelineController(QObject):
 
         # Synchronize the live widgets here. This completely bridges the split container bug, 
         # routing tab generation directly to your screen.
-        self.lc_ctrl.tabs = self.window.tabs
-        self.doc_io.tabs = self.window.tabs
+        # self.lc_ctrl.tabs = self.window.tabs
+        # self.doc_io.tabs = self.window.tabs
+        self.lc_ctrl.set_tabs_widget(self.window.tabs)
+        self.doc_io.set_tabs_widget(self.window.tabs)
 
         fallback_name = os.path.basename(file_path)
         self.lc_ctrl.navigate_to_embedded_index_coordinate(
