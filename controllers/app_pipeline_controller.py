@@ -9,6 +9,9 @@ from shiboken6 import isValid
 from views.app_style_configuration import AppStyleConfiguration
 from views.editor_tab import EditorTab
 from views.latex_index_window import ReferenceCarrier
+from models.index_tree_model_engine import IndexTreeModelEngine
+from views.index_tree_view import IndexTreeView
+from controllers.index_tree_controller import IndexTreeController
 
 class AppPipelineController(QObject):
     def __init__(self, window, prefs_model, backup_manager, doc_controller, index_controller, 
@@ -25,6 +28,8 @@ class AppPipelineController(QObject):
         self._tree_modified = False
         self._load_thread = None
         self._search_window = None
+
+        self.index_model_engine = None  # Will be initialized in the index subsystem setup
 
         # =====================================================================
         # 1. VIEW COMPOSITION & COMPONENT INJECTION
@@ -74,13 +79,11 @@ class AppPipelineController(QObject):
 
     def initialize_index_subsystem(self) -> None:
         """Maps pre-instantiated data models directly to controller view components."""
-        active_database_model = self.scope_ctrl.model if self.scope_ctrl else None
+        active_database_model = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
 
-        from models.index_tree_model_engine import IndexTreeModelEngine
-        if not hasattr(self, 'index_model_engine') or self.index_model_engine is None:
+        if self.index_model_engine is None:
             self.index_model_engine = IndexTreeModelEngine(active_database_model)
         
-        from views.index_tree_view import IndexTreeView
         self.index_tree_view = IndexTreeView(model_engine=self.index_model_engine)
         
         # Pure presentation layer boundary swap contract execution
@@ -89,7 +92,6 @@ class AppPipelineController(QObject):
         
         # Only assign if no instance was passed from main.py
         if self.idx_ctrl is None:
-            from controllers.index_tree_controller import IndexTreeController
             self.idx_ctrl = IndexTreeController(self.index_model_engine, self)
 
     def _bind_signal_pipelines(self):

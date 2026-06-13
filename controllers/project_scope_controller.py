@@ -84,3 +84,7 @@ class ProjectScopeController(QObject):
         """Routes out-of-band data arrays safely down into the persistence model layer."""
         self.model.serialize_scraped_index_manifest(headings, references)
         self.scope_mutated.emit()
+
+    def get_persistence_model(self):
+        """Public contract exposing the underlying persistence model."""
+        return self.model        

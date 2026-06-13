@@ -19,8 +19,9 @@ class IndexTreeModelEngine:
     def has_unsaved_changes(self) -> bool:
         return len(self._staged_db_entries) > 0
 
-    def clear_staged_entries(self):
-        self._staged_db_entries.clear()
+    def clear_staged_entries(self) -> None:
+        """Delegates to the full transaction reset for consistency."""
+        self.reset_transaction_arrays()
 
     def reset_transaction_arrays(self) -> None:
         """
@@ -31,8 +32,11 @@ class IndexTreeModelEngine:
         self._cross_reference_cache.clear()
 
     def commit_staged_changes(self) -> bool:
-        if not self._staged_db_entries or not self.repo:
-            return True
+        if not self._staged_db_entries:
+            return False  # nothing to commit — consistent with controller's "no changes" path
+        if not self.repo:
+            return False  # no repository — genuine failure
+        
         success = self.repo.save_batch_index_manifest(self._staged_db_entries)
         if success:
             self._staged_db_entries.clear()
