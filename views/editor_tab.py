@@ -1,7 +1,7 @@
 import re
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit
 from PySide6.QtGui import QPalette, QTextDocument, QTextCursor, QColor, QFont
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, Qt, Signal
 
 from models.latex_highlighter import LatexHighlighter
 from views.app_style_configuration import AppStyleConfiguration
@@ -13,18 +13,23 @@ class EditorTab(QPlainTextEdit):
     Strict MVC Compliance: Standardized entirely on a public 'file_path' property contract.
     Ensures a completely non-editable canvas for the user while allowing programmatic write-tunnels.
     """
+    undo_performed = Signal()
+    redo_performed = Signal()
+    
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self.syntax_highlighter = None  # Placeholder for the syntax highlighter instance
 
+        self.setReadOnly(False)   # kept editable so cursor blinks
+        self.setCursorWidth(1)
         # 1. Establish the non-editable baseline presentation state
-        self.setReadOnly(True)  # Protects text from user typing or deletions
-        self.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse | 
-            Qt.TextInteractionFlag.TextSelectableByKeyboard |
-            Qt.TextInteractionFlag.LinksAccessibleByMouse
-        )        
+        # self.setReadOnly(True)  # Protects text from user typing or deletions
+        # self.setTextInteractionFlags(
+        #     Qt.TextInteractionFlag.TextSelectableByMouse | 
+        #     Qt.TextInteractionFlag.TextSelectableByKeyboard |
+        #     Qt.TextInteractionFlag.LinksAccessibleByMouse
+        # )        
 
         # Harmonized single public tracker for file path mappings
         self.file_path = "" 
@@ -108,12 +113,12 @@ class EditorTab(QPlainTextEdit):
         Temporarily unlocks the read-only flag to load full file data,
         then safely locks the user interface canvas back down.
         """
-        self.setReadOnly(False)  # Open programmatic write-tunnel
+        # self.setReadOnly(False)  # Open programmatic write-tunnel
         self.setPlainText(str(raw_text_content))
         self.document().setModified(False)
         # Force block geometry calculation while the write-tunnel is active to ensure the text paints on screen.
         self.document().documentLayout().update.emit()
-        self.setReadOnly(True)   # Restore non-editable user guard
+        # self.setReadOnly(True)   # Restore non-editable user guard
 
     def replace_text_at_coordinates(self, start_pos: int, end_pos: int, text_payload: str) -> tuple[int, int]:
         """
@@ -224,7 +229,7 @@ class EditorTab(QPlainTextEdit):
 
     def inject_index_macro_direct(self, latex_chain_string: str) -> tuple[int, int]:
         """Injects a raw LaTeX macro string at the active position via a brief write-tunnel."""
-        self.setReadOnly(False)
+        # self.setReadOnly(False)
         cursor = self.textCursor()
         cursor.beginEditBlock()
         try:
@@ -237,7 +242,7 @@ class EditorTab(QPlainTextEdit):
             return line_num, col_offset
         finally:
             cursor.endEditBlock()
-            self.setReadOnly(True)
+            # self.setReadOnly(True)
 
     def toggle_find_dialog(self):
         """Toggles the floating search panel layout visibility."""
@@ -350,12 +355,49 @@ class EditorTab(QPlainTextEdit):
         self.reposition_find_dialog()
 
     def keyPressEvent(self, event):
-        """Drops selection highlight maps instantly if the user strikes Escape."""
-        if event and event.key() == Qt.Key.Key_Escape:
+        key = event.key()
+        ctrl = event.modifiers() & Qt.KeyboardModifier.ControlModifier
+
+        if key == Qt.Key.Key_Escape:
             cursor = self.textCursor()
             if cursor.hasSelection():
                 cursor.clearSelection()
                 self.setTextCursor(cursor)
             event.accept()
+            return
+
+        # Undo — let Qt handle the document, then notify controller
+        if ctrl and key == Qt.Key.Key_Z:
+            super().keyPressEvent(event)
+            self.undo_performed.emit()
+            return
+
+        # Redo — let Qt handle the document, then notify controller
+        if ctrl and key == Qt.Key.Key_Y:
+            super().keyPressEvent(event)
+            self.redo_performed.emit()
+            return
+
+        # Whitelist: navigation, selection, copy, select-all, find
+        allowed_keys = {
+            Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
+            Qt.Key.Key_Home, Qt.Key.Key_End, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown,
+        }
+        allowed_ctrl = {Qt.Key.Key_C, Qt.Key.Key_A, Qt.Key.Key_F}
+
+        if key in allowed_keys:
+            super().keyPressEvent(event)
+        elif ctrl and key in allowed_ctrl:
+            super().keyPressEvent(event)
         else:
-            super().keyPressEvent(event)            
+            event.ignore()
+    # def keyPressEvent(self, event):
+    #     """Drops selection highlight maps instantly if the user strikes Escape."""
+    #     if event and event.key() == Qt.Key.Key_Escape:
+    #         cursor = self.textCursor()
+    #         if cursor.hasSelection():
+    #             cursor.clearSelection()
+    #             self.setTextCursor(cursor)
+    #         event.accept()
+    #     else:
+    #         super().keyPressEvent(event)            

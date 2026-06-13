@@ -184,6 +184,47 @@ class IndexTreeView(QTreeView):
             self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
             self.expandAll()
 
+    def remove_last_entry(self, parts_list: list) -> None:
+        """
+        Removes the leaf node identified by parts_list and prunes any
+        ancestors that become empty as a result. Called by the undo stack.
+        """
+        if not parts_list:
+            return
+
+        self.setSortingEnabled(False)
+        try:
+            # Walk down the tree following parts_list to find the leaf
+            parent_item = self.base_model.invisibleRootItem()
+            node_chain = []  # [(parent_item, row_index), ...]
+
+            for token in parts_list:
+                found = None
+                for row in range(parent_item.rowCount()):
+                    child = parent_item.child(row, 0)
+                    if child and str(child.data(Qt.ItemDataRole.ToolTipRole) or "").strip().lower() == token.strip().lower():
+                        found = child
+                        node_chain.append((parent_item, row))
+                        break
+                if found is None:
+                    return  # path not found — nothing to remove
+                parent_item = found
+
+            # Remove the leaf, then prune empty ancestors bottom-up
+            for ancestor, row in reversed(node_chain):
+                child = ancestor.child(row, 0)
+                if child is None or child.rowCount() > 0:
+                    break  # stop pruning — node still has children
+                ancestor.removeRow(row)
+        finally:
+            self.setSortingEnabled(True)
+            self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+            self.expandAll()
+
+    def reinsert_entry(self, parts_list: list, refs: list) -> None:
+        """Re-inserts an entry that was removed by undo. Called by the redo stack."""
+        self.append_entry(parts_list, refs)
+
     @Slot(list, list)
     def populate_hierarchy_tree(self, headings: list, references: list):
         """

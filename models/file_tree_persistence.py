@@ -49,7 +49,11 @@ class FileTreePersistence:
     def get_active_database_path(self) -> str:
         """Public Model Contract. Returns the valid pre-calculated database path."""
         return self.db_path
-        
+    
+    def get_active_model(self):
+        """Public contract for the model engine. FileTreePersistence is its own model."""
+        return self        
+    
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -175,52 +179,39 @@ class FileTreePersistence:
         return os.path.normpath(raw_path) if raw_path else ""
 
     def prune_file_record(self, absolute_path: str) -> bool:
-        """
-        Removes a tracked file record from the internal SQLite schema table.
-        Strict MVC Compliance: Modifies active transaction states in memory but
-        defers the physical disk .commit() pass to the system save workflows.
-        """
-        # Ensure an active database connection context exists
-        if not hasattr(self, "connection") or not self.connection:
-            print("[DB ERROR] Failed to prune file: Database connection context is missing.")
+        """Removes a tracked file record. Transaction is staged; caller commits."""
+        if not self.db_path:
             return False
-
         try:
-            # Open an explicit SQL execution stream cursor
-            cursor = self.connection.cursor()
-            
-            # Parametrized query targeting the specific absolute file route row
-            # Replace 'project_files' with your exact database table name identifier
-            query = "DELETE FROM project_files WHERE absolute_path = ?;"
-            
-            cursor.execute(query, (absolute_path,))
-            
-            # Log structural metric outputs to help debug performance traces
-            rows_affected = cursor.rowcount
-            if rows_affected > 0:
-                print(f"[DB TRACE] Row cleared for path target: '{absolute_path}'. Transaction staged.")
-                return True
-            else:
-                print(f"[DB TRACE] Pruning target '{absolute_path}' not found in database schema records.")
-                return False
-                
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM project_files WHERE absolute_path = ?;",
+                    (absolute_path,)
+                )
+                rows_affected = cursor.rowcount
+                if rows_affected > 0:
+                    print(f"[DB TRACE] Row cleared for path target: '{absolute_path}'. Transaction staged.")
+                    return True
+                else:
+                    print(f"[DB TRACE] Pruning target '{absolute_path}' not found in database schema records.")
+                    return False
         except Exception as db_err:
-            print(f"[DB CRITICAL FAILURE] Failed to execute deletion statement block: {db_err}")
+            print(f"[DB CRITICAL FAILURE] Failed to execute deletion statement: {db_err}")
             return False
-
+    
     def extract_project_manifest_tables(self, absolute_path: str) -> tuple[list[dict], list[dict]]:
         """
         Thread-safe relational extraction engine. Parses existing DB tables 
         for structurally mapped index headers and references matching the path.
         Strict MVC: Executes pure SQL operations with no UI synchronization.
         """
-        import sqlite3
-        
+
         headings = []
         references = []
         
         # Ensure self.connection_string or self.db_path is defined on your model
-        if not hasattr(self, 'db_path') or not self.db_path:
+        if not self.db_path:
             return headings, references
 
         # Establish isolated connection to guarantee thread-safe reading out-of-band
@@ -276,8 +267,7 @@ class FileTreePersistence:
 
     def get_metadata_value(self, key: str) -> str | None:
         """Isolated query contract to extract unique project parameters."""
-        import sqlite3
-        if not hasattr(self, 'db_path') or not self.db_path:
+        if not self.db_path:
             return None
 
         conn = sqlite3.connect(self.db_path)
@@ -292,8 +282,7 @@ class FileTreePersistence:
 
     def set_metadata_value(self, key: str, value: str) -> None:
         """Atomic upsert transaction to modify project state flags."""
-        import sqlite3
-        if not hasattr(self, 'db_path') or not self.db_path:
+        if not self.db_path:
             return
 
         conn = sqlite3.connect(self.db_path)

@@ -1,4 +1,7 @@
 import os
+
+from collections import deque
+
 from PySide6.QtCore import QObject, Slot, QModelIndex, Qt
 from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog
 from shiboken6 import isValid
@@ -63,6 +66,10 @@ class AppPipelineController(QObject):
         
         # Wire layout signals after all instances are completely finalized
         self._bind_signal_pipelines()
+        # Parallel undo/redo stacks for index tree operations
+        # Each entry: (parts_list, ref_records)
+        self._index_undo_stack = deque()
+        self._index_redo_stack = deque()        
         self._synchronize_initial_workspace_theme()    
 
     def initialize_index_subsystem(self) -> None:
@@ -146,7 +153,9 @@ class AppPipelineController(QObject):
         # Pure contract invocation on the active view instance
         self.macro_editing_ctrl.macro_substitution_completed.connect(lambda: self.index_tree_widget.expandAll())
         
-        self.scope_ctrl.scope_mutated.connect(lambda: self.window.synchronize_window_title(self.scope_ctrl.active_project_name))        
+        self.scope_ctrl.scope_mutated.connect(lambda: self.window.synchronize_window_title(self.scope_ctrl.active_project_name))    
+
+        self._rewire_undo_redo_signals(self, self.window.tabs.currentIndex())  # Initial wiring for the first tab
 
     def _synchronize_initial_workspace_theme(self):
         """Pushes initial theme choices down to the view layout tree."""
@@ -155,6 +164,41 @@ class AppPipelineController(QObject):
         AppStyleConfiguration.configure_application_theme(is_dark)
         self.window.tool_bar.refresh_theme_presentation(is_dark)
 
+    @Slot(int)
+    def _rewire_undo_redo_signals(self, index: int) -> None:
+        for i in range(self.window.tabs.count()):
+            tab = self.window.tabs.widget(i)
+            if isinstance(tab, EditorTab):
+                try:
+                    tab.undo_performed.disconnect(self._handle_index_undo)
+                    tab.redo_performed.disconnect(self._handle_index_redo)
+                except RuntimeError:
+                    pass
+
+        active_tab = self.window.tabs.widget(index)
+        if isinstance(active_tab, EditorTab):
+            active_tab.undo_performed.connect(self._handle_index_undo)
+            active_tab.redo_performed.connect(self._handle_index_redo)
+            
+    @Slot()
+    def _handle_index_undo(self) -> None:
+        """Pops the last index insertion off the undo stack and removes it from the tree."""
+        if not self._index_undo_stack:
+            return
+        parts_list, refs = self._index_undo_stack.pop()
+        self.index_tree_widget.remove_last_entry(parts_list)
+        self._index_redo_stack.append((parts_list, refs))
+        self._tree_modified = True
+
+    @Slot()
+    def _handle_index_redo(self) -> None:
+        """Pops from the redo stack and re-inserts the entry into the tree."""
+        if not self._index_redo_stack:
+            return
+        parts_list, refs = self._index_redo_stack.pop()
+        self.index_tree_widget.reinsert_entry(parts_list, refs)
+        self._index_undo_stack.append((parts_list, refs))
+        self._tree_modified = True
 
     @Slot(str)
     def handle_file_activation_request(self, file_path: str):
@@ -366,13 +410,6 @@ class AppPipelineController(QObject):
         tex_success = self.doc_io.commit_all_open_buffers() if self.doc_io else False
         db_success = self.idx_ctrl.commit_staged_changes_to_db() if self.idx_ctrl else False
 
-        if self.window.file_persistence:
-            try:
-                self.window.file_persistence.connection.commit()
-                self._tree_modified = False
-            except Exception as e:
-                print(f"[DB ERROR] File persistence commit failed: {e}")
-
         if tex_success or db_success:
             self._tree_modified = False
             self.backup_manager.clear_session_backups()
@@ -441,15 +478,15 @@ class AppPipelineController(QObject):
                     self.execute_project_save_workflow()
                     self.safely_terminate_application_lifecycle()
                 elif clicked == discard_btn:
-                    if self.window.backup_manager:
-                        self.window.backup_manager.revert_session_changes()
+                    if self.backup_manager:
+                        self.backup_manager.revert_session_changes()
                     self.safely_terminate_application_lifecycle()
                 elif clicked == cancel_btn:
                     self.window.status_bar.showMessage("Shutdown aborted. Returned to active workspace.", 2000)
                     return
             else:
-                if self.window.backup_manager:
-                    self.window.backup_manager.clear_session_backups()
+                if self.backup_manager:
+                    self.backup_manager.clear_session_backups()
                 self.safely_terminate_application_lifecycle()
                 
         except Exception as shutdown_err:
@@ -463,23 +500,27 @@ class AppPipelineController(QObject):
                 if self.worker:
                     self.worker.stop()
                 self._load_thread.quit()
-                self._load_thread.wait()
-        
+                if not self._load_thread.wait(3000):  # 3-second timeout
+                    print("[SHUTDOWN] Load thread did not exit cleanly — forcing termination.")
+                    self._load_thread.terminate()
+                    self._load_thread.wait()          # wait for terminate to land        
+
         self._load_thread = None
         self.worker = None
         self._force_application_exit()
 
     def _force_application_exit(self):
-        """Bypasses closing hooks to teardown the visual layout cleanly."""
         try:
             self.window.window_close_requested.disconnect(self.coordinate_application_shutdown)
         except Exception:
             pass
         self.window.close()
+        from PySide6.QtWidgets import QApplication
+        QApplication.quit()  # ensures the event loop actually exits
 
     @Slot(list, dict)
     def _handle_manual_index_insertion(self, parts_list: list, metadata: dict):
-        """Intercepts indexInserted events and incrementally appends the new node to the tree."""
+        # Intercepts indexInserted events and incrementally appends the new node to the tree.
         # Normalize key names: handle_insert's uid_dict uses "path"/"line"/"col",
         # but IndexTreeView._populate_row_metadata expects "file_path"/"line_number"/"column_offset".
         ref_record = dict(metadata)
@@ -488,6 +529,11 @@ class AppPipelineController(QObject):
         ref_record["column_offset"] = metadata.get("col", 0)
 
         self.index_tree_widget.append_entry(parts_list, [ref_record])
+
+        # Push onto undo stack, clear redo (new action invalidates redo history)
+        self._index_undo_stack.append((parts_list, [ref_record]))
+        self._index_redo_stack.clear()
+
         self._tree_modified = True
 
     @Slot(object, object)

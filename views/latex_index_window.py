@@ -443,8 +443,7 @@ class LatexIndexWindow(QDockWidget):
         def process_field(field: QLineEdit) -> str | None:
             val = field.text().strip()
             if not val: 
-                print("Error: Main entry field cannot be empty.")
-                return None
+               return None
                 
             # Rule 1: Respect manual explicit '@' override descriptor sequence immediately
             if "@" in val:

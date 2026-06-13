@@ -11,6 +11,9 @@ class ProjectScopeController(QObject):
     def __init__(self, file_persistence_model, parent=None):
         super().__init__(parent)
 
+        if file_persistence_model is None:
+            raise ValueError("ProjectScopeController requires a valid file_persistence_model.")
+
         self.model = file_persistence_model  # Refers strictly to Model data layer
         self.active_project_name: str = "Untitled Project"        
 
@@ -74,19 +77,10 @@ class ProjectScopeController(QObject):
         return self.model.discover_existing_project_name(target_directory)
     
     def get_active_database_path(self) -> str | None:
-        """
-        Public boundary contract to extract the calculated project database path.
-        Exposes the model's internally tracked path attribute directly
-        to enable asynchronous load threads to target the correct workspace storage.
-        """
-        if not self.model:
-            return None
-            
-        # Read the explicit, statically typed public path attribute from the model
-        return self.model.db_path
+        """Public boundary contract to extract the calculated project database path."""
+        return self.model.get_active_database_path()
 
     def save_scraped_index_data(self, headings: list[dict], references: list[dict]) -> None:
         """Routes out-of-band data arrays safely down into the persistence model layer."""
-        if self.model:
-            self.model.serialize_scraped_index_manifest(headings, references)
-            self.scope_mutated.emit()
+        self.model.serialize_scraped_index_manifest(headings, references)
+        self.scope_mutated.emit()
