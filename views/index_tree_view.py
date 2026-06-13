@@ -1,3 +1,4 @@
+import os
 import re
 from PySide6.QtWidgets import QTreeView, QAbstractItemView
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QCursor, QFontMetrics
@@ -128,7 +129,7 @@ class IndexTreeView(QTreeView):
         column_num = int(record_payload.get("column_offset") or 1)
         
         # Retain the identifier token string if available
-        match_text = str(record_payload.get("uid") or "")
+        match_text = str(record_payload.get("fallback_label") or "")
 
         if file_path:
             # Emit type-safe parameters across the architectural boundary
@@ -165,41 +166,23 @@ class IndexTreeView(QTreeView):
             # Route through the exact same internal translation mechanism
             self._unpack_delegate_payload(target_dict)
 
-    # def _process_embedded_metrics_click(self, index: QModelIndex):
-    #     """Calculates precise text coordinate offsets to emit jump location tokens."""
-    #     # Query metadata records safely via the engine role identifiers
-    #     records = index.data(Qt.ItemDataRole.UserRole + 1)
-    #     display_text = index.data(Qt.ItemDataRole.DisplayRole) or ""
-    #     if not records or not display_text: 
-    #         return
+    def append_entry(self, parts_list: list, refs: list) -> None:
+        """
+        Public incremental-append contract.
+        Inserts a single new index entry into the existing tree without
+        rebuilding/clearing the rest of the model. Re-sorts and re-expands
+        afterward so the new node is visible in its correct alphabetical slot.
+        """
+        if not parts_list:
+            return
 
-    #     visual_rect = self.visualRect(index)
-    #     click_x = self.viewport().mapFromGlobal(QCursor.pos()).x() - visual_rect.x()
-    #     metrics = QFontMetrics(self.font())
-
-    #     tokens = display_text.split(" ")
-    #     current_offset_x = 0
-        
-    #     for token in tokens:
-    #         if not token: continue
-    #         token_width = metrics.horizontalAdvance(token)
-    #         if current_offset_x <= click_x <= (current_offset_x + token_width):
-    #             try:
-    #                 target_uid = int(token.strip("[]"))
-    #                 for rec in records:
-    #                     if int(rec.get("unique_id_number", -1)) == target_uid:
-    #                         fallback = f"\\index{{{rec.get('entry_path_latex_format', '')}}}"
-    #                         self.coordinate_navigation_requested.emit(
-    #                             rec.get("file_path"), 
-    #                             rec.get("line_number"), 
-    #                             rec.get("column_offset"), 
-    #                             fallback
-    #                         )
-    #                         return
-    #             except ValueError: 
-    #                 pass
-    #             break
-    #         current_offset_x += token_width + metrics.horizontalAdvance(" ")
+        self.setSortingEnabled(False)
+        try:
+            self._insert_visual_node(self.base_model.invisibleRootItem(), parts_list, refs)
+        finally:
+            self.setSortingEnabled(True)
+            self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+            self.expandAll()
 
     @Slot(list, list)
     def populate_hierarchy_tree(self, headings: list, references: list):
@@ -301,6 +284,7 @@ class IndexTreeView(QTreeView):
             
             for r in (refs or []):
                 if not r or not isinstance(r, dict): continue
+                file_path = str(r.get("file_path") or "")
                 r_uid = r.get("uid") or f"{r.get('file_path')}:{r.get('line_number')}"
                 
                 if r_uid not in [ex.get("uid") for ex in new_records if ex]:
@@ -312,7 +296,8 @@ class IndexTreeView(QTreeView):
                         "unique_id_number": int(stable_id),
                         "file_path": str(r.get("file_path") or ""),
                         "line_number": int(r.get("line_number") or 0),
-                        "column_offset": int(r.get("column_offset") or 0)
+                        "column_offset": int(r.get("column_offset") or 0),
+                        "fallback_label": os.path.basename(file_path) if file_path else ""
                     })
                     
                     # Track hierarchy keys to build back-end transaction tokens

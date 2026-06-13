@@ -90,25 +90,22 @@ class LatexEditor(QMainWindow):
         )
         return project_name.strip() if (ok and project_name.strip()) else None
 
-    def get_all_open_tab_buffers(self) -> list[dict]:
-        buffers = []
-        for index in range(self.tabs.count()):
-            editor_tab = self.tabs.widget(index)
-            buffers.append({
-                "file_path": self.tabs.tabToolTip(index),
-                "content": editor_tab.toPlainText()
-            })
-        return buffers
+    # def get_all_open_tab_buffers(self) -> list[dict]:
+    #     buffers = []
+    #     for index in range(self.tabs.count()):
+    #         editor_tab = self.tabs.widget(index)
+    #         buffers.append({
+    #             "file_path": self.tabs.tabToolTip(index),
+    #             "content": editor_tab.toPlainText()
+    #         })
+    #     return buffers
 
     def synchronize_window_title(self, updated_project_name: str) -> None:
         self.setWindowTitle(f"LaTeX Indexing Editor — [{updated_project_name}]")    
 
     def closeEvent(self, event) -> None:
-        open_buffers = self.get_all_open_tab_buffers()
-        if self.backup_manager:
-            self.backup_manager.execute_emergency_save_flush(open_buffers)
         self.window_close_requested.emit()
-        event.accept()
+        event.ignore()
 
     def _initialize_monitor_proportional_geometry(self):
         """Calculates and maps initial window boundaries relative to screen space."""

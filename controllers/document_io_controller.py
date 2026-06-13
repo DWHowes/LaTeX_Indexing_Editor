@@ -44,10 +44,10 @@ class DocumentIOController(QObject):
             
             editor.document().setModified(False)
                 
-            try:
-                self.backup_manager.sync_file_modification_backup(cleaned_path)
-            except Exception as backup_err:
-                self.operation_status_emitted.emit(f"Session backup skipped: {backup_err}")
+            # try:
+            #     self.backup_manager.sync_file_modification_backup(cleaned_path)
+            # except Exception as backup_err:
+            #     self.operation_status_emitted.emit(f"Session backup skipped: {backup_err}")
 
             self.file_saved_successfully.emit(cleaned_path)
             return True
@@ -72,7 +72,6 @@ class DocumentIOController(QObject):
         """Forces immediate serialization flushes across all open workspace tabs."""
         if not self.tabs:
             return False
-
         all_successful = True
         for i in range(self.tabs.count()):
             editor = self.tabs.widget(i)
@@ -80,7 +79,12 @@ class DocumentIOController(QObject):
                 if editor.document().isModified():
                     target_path = editor.get_absolute_path()
                     if target_path:
+                        self.backup_manager.register_file_for_session(target_path)
                         success = self.save_tex_file_to_disk(editor, target_path)
                         if not success:
                             all_successful = False
+                        # if success:
+                        #     self.backup_manager.sync_file_modification_backup(target_path)
+                        # else:
+                        #     all_successful = False
         return all_successful

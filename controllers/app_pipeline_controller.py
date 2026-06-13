@@ -183,18 +183,20 @@ class AppPipelineController(QObject):
     def _handle_workspace_sync_request(self, editor_tab: EditorTab, path_carrier: ReferenceCarrier):
         """
         Populates the view's requested path carrier using explicit public contracts.
-        Also flushes changes to disk if the active file is already tracked.
+        Also flushes changes to disk and the session backup if the active file is already tracked.
         """
         if not isinstance(editor_tab, EditorTab):
             path_carrier.value = "Untitled"
             return
 
-        # FIXED: Removed getattr. Interacting purely through the public contract
         target_path = editor_tab.get_absolute_path()
         path_carrier.value = target_path if target_path else "Untitled"
 
         if target_path and target_path != "Untitled" and self.doc_io:
+            # Ensure a pristine backup exists before the live file is overwritten
+            self.backup_manager.register_file_for_session(target_path)
             self.doc_io.save_tex_file_to_disk(editor_tab, target_path)
+            # self.backup_manager.sync_file_modification_backup(target_path)
             self.window.status_bar.showMessage("Active canvas buffer synchronized to disk.", 2000)
 
     @Slot(str)
@@ -235,11 +237,14 @@ class AppPipelineController(QObject):
         if not selected_dir:
             self.window.status_bar.showMessage("Project loading canceled.", 2000)
             return
+        
+        # Anchor the backup manager to the newly selected project root
+        self.backup_manager.initialize_project_context(selected_dir)
 
-        # 1. VERIFICATION GATE: Query the scope controller using its exact method signature
+        # Query the scope controller using its exact method signature
         existing_project_name = self.scope_ctrl.detect_pre_existing_project(target_directory=selected_dir)
 
-        # 2. CONDITIONAL BRANCHING: Skip name input prompts if a project configuration already exists
+        # Skip name input prompts if a project configuration already exists
         if existing_project_name:
             print(f"[PIPELINE CONTROLLER] Pre-existing project localized: '{existing_project_name}'")
             
@@ -370,6 +375,7 @@ class AppPipelineController(QObject):
 
         if tex_success or db_success:
             self._tree_modified = False
+            self.backup_manager.clear_session_backups()
             self.window.status_bar.showMessage("Workspace saved successfully.", 3000)
         else:
             self.window.status_bar.showMessage("No uncommitted modifications detected.", 2000)
@@ -473,31 +479,36 @@ class AppPipelineController(QObject):
 
     @Slot(list, dict)
     def _handle_manual_index_insertion(self, parts_list: list, metadata: dict):
-        """Intercepts indexInserted events and appends nodes to the tree model engine state."""
-        heading_payload = [{"heading_text": "!".join(parts_list), "id": metadata.get("id", 0)}]
-        # Safely pass parameters to your unified type-safe rendering contract
-        self.index_tree_widget.populate_hierarchy_tree(heading_payload, [metadata])
+        """Intercepts indexInserted events and incrementally appends the new node to the tree."""
+        # Normalize key names: handle_insert's uid_dict uses "path"/"line"/"col",
+        # but IndexTreeView._populate_row_metadata expects "file_path"/"line_number"/"column_offset".
+        ref_record = dict(metadata)
+        ref_record["file_path"] = metadata.get("path", "")
+        ref_record["line_number"] = metadata.get("line", 0)
+        ref_record["column_offset"] = metadata.get("col", 0)
+
+        self.index_tree_widget.append_entry(parts_list, [ref_record])
         self._tree_modified = True
 
     @Slot(object, object)
     def _handle_view_save_request(self, editor_tab: EditorTab, save_carrier: ReferenceCarrier) -> None:
-        """Handles emergency file-saving operations when inserts are requested in untitled tabs."""
-        if isinstance(editor_tab, EditorTab) and self.doc_io:
-            # Trigger your file system model workflow (e.g., Save As dialog)
-            success, resolved_path = self.doc_io.execute_save_as_workflow(editor_tab)
-            if success and resolved_path:
-                editor_tab.set_absolute_path(resolved_path)
-                save_carrier.value = True
-                return
+        """
+        Untitled tabs cannot receive index entries — there is no tracked file path
+        for the backup/session system to anchor to. No dialog is forced; the user
+        must save the document through the normal workflow first.
+        """
+        self.window.status_bar.showMessage(
+            "Save this document before inserting an index entry.", 4000
+        )
         save_carrier.value = False
 
     @Slot(object)
     def _handle_next_id_request(self, id_carrier: ReferenceCarrier) -> None:
         """Pulls an incremented atomic primary key integer index out-of-band."""
-        if self.project_model: 
-            id_carrier.value = self.project_model.get_and_increment_id()
+        if self.macro_id_generator:
+            id_carrier.value = self.macro_id_generator.get_and_increment_id()
         else:
-            id_carrier.value = 1        
+            id_carrier.value = 1
 
     @Slot(dict)
     def _handle_index_deletion_request(self, payload: dict):

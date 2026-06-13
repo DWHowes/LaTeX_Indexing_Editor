@@ -108,7 +108,7 @@ class LatexIndexWindow(QDockWidget):
 
     # ARCHITECTURAL SIGNALS: Hand off file operations to the main window controller
     saveRequested = Signal(object, object)  # Emits (editor_widget, ReferenceCarrier)
-    syncRequested = Signal(object, str)   # Emits (editor_widget, file_path_string)
+    syncRequested = Signal(object, object)   # Emits (editor_widget, ReferenceCarrier)
     # Use Signal(object) in order to prevent pyside container duplication
     # Emits a custom mutable ReferenceCarrier instance
     nextIdRequested = Signal(object) 
