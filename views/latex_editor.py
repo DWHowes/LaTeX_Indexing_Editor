@@ -6,7 +6,7 @@ class LatexEditor(QMainWindow):
     """
     Passive visual frame layout.
     Strict MVC View: Does not hold, own, or mount sub-views. 
-    Exposes its layout layout framework directly to the Controller.
+    Exposes its layout framework directly to the Controller.
     """
     window_close_requested = Signal()
 
@@ -18,6 +18,9 @@ class LatexEditor(QMainWindow):
         self.init_ui_layout()
         self._assemble_visual_furniture()
         self._initialize_monitor_proportional_geometry()        
+        
+        # FIX: Force the 80/20 layout distribution on the right pane on boot
+        self.refresh_right_pane_proportions()
 
     def init_ui_layout(self):
         """Pure Structural Layout Architecture Configuration."""
@@ -62,11 +65,22 @@ class LatexEditor(QMainWindow):
         return self.main_splitter
 
     def refresh_splitter_proportions(self) -> None:
-        """Public layout trigger to enforce the 20/80 spatial split."""
+        """Public layout trigger to enforce the 30/70 spatial split on the main horizontal panel."""
         target_width = self.width()
-        left_allocation = int(target_width * 0.20)
-        right_allocation = int(target_width * 0.80)
+        left_allocation = int(target_width * 0.30)
+        right_allocation = int(target_width * 0.70)
         self.main_splitter.setSizes([left_allocation, right_allocation])
+
+    def refresh_right_pane_proportions(self) -> None:
+        """
+        Public View Contract.
+        Enforces a precise 80/20 spatial relationship between the 
+        document editor tab window and the index entry window panels.
+        """
+        target_height = self.height()
+        editor_allocation = int(target_height * 0.80)
+        index_allocation = int(target_height * 0.20)
+        self.right_splitter.setSizes([editor_allocation, index_allocation])
 
     def prompt_for_project_name(self, default_suggestion: str) -> str | None:
         project_name, ok = QInputDialog.getText(

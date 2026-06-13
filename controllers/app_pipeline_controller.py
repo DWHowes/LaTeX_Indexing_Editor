@@ -5,6 +5,7 @@ from shiboken6 import isValid
 
 from views.app_style_configuration import AppStyleConfiguration
 from views.editor_tab import EditorTab
+from views.latex_index_window import ReferenceCarrier
 
 class AppPipelineController(QObject):
     def __init__(self, window, prefs_model, backup_manager, doc_controller, index_controller, 
@@ -32,6 +33,7 @@ class AppPipelineController(QObject):
         master_splitter = self.window.layout_splitter
         master_splitter.insertWidget(0, self.sidebar_view_panel)
         self.window.refresh_splitter_proportions()
+        self.window.refresh_right_pane_proportions()
         
         # Capture the static child tree view cleanly
         self.file_tree_widget = self.sidebar_view_panel.tree_files
@@ -95,10 +97,13 @@ class AppPipelineController(QObject):
         # Map direct file double-clicks to a dedicated single-argument slot contract
         self.file_tree_widget.file_requested.connect(self.handle_file_activation_request)
 
-        # --- Presentation Workspace Component Overlays ---
+        # Connect the direct tree view update to the indexInserted signal
         self.window.latex_index_window.indexInserted.connect(self._handle_manual_index_insertion)
-        # Route through an internal adapter slot instead of direct binding to prevent argument mismatches
+
+        # Route file-saving requests to your workspace synchronization engine
+        self.window.latex_index_window.saveRequested.connect(self._handle_view_save_request)
         self.window.latex_index_window.syncRequested.connect(self._handle_workspace_sync_request)
+        self.window.latex_index_window.nextIdRequested.connect(self._handle_next_id_request)
 
         # Connect the file activation signal directly to the document routing engine
         self.file_tree_widget.file_requested.connect(self.handle_file_open_request)
@@ -150,6 +155,7 @@ class AppPipelineController(QObject):
         AppStyleConfiguration.configure_application_theme(is_dark)
         self.window.tool_bar.refresh_theme_presentation(is_dark)
 
+
     @Slot(str)
     def handle_file_activation_request(self, file_path: str):
         """
@@ -173,23 +179,23 @@ class AppPipelineController(QObject):
             fallback=fallback_name
         )
 
-    @Slot()
-    def _handle_workspace_sync_request(self):
+    @Slot(object, object)
+    def _handle_workspace_sync_request(self, editor_tab: EditorTab, path_carrier: ReferenceCarrier):
         """
-        Adapts argument-free view layer synchronization requests for the document controller.
-        Strict MVC: Identifies the active text buffer before calling the target persistence model.
+        Populates the view's requested path carrier using explicit public contracts.
+        Also flushes changes to disk if the active file is already tracked.
         """
-        if not self.window or not self.doc_io:
+        if not isinstance(editor_tab, EditorTab):
+            path_carrier.value = "Untitled"
             return
 
-        active_editor = self.window.tabs.currentWidget()
-        from views.editor_tab import EditorTab
-        
-        if isinstance(active_editor, EditorTab):
-            target_path = getattr(active_editor, "file_path", "")
-            if target_path:
-                self.doc_io.save_tex_file_to_disk(active_editor, target_path)
-                self.window.status_bar.showMessage("Active canvas buffer synchronized to disk.", 2000)
+        # FIXED: Removed getattr. Interacting purely through the public contract
+        target_path = editor_tab.get_absolute_path()
+        path_carrier.value = target_path if target_path else "Untitled"
+
+        if target_path and target_path != "Untitled" and self.doc_io:
+            self.doc_io.save_tex_file_to_disk(editor_tab, target_path)
+            self.window.status_bar.showMessage("Active canvas buffer synchronized to disk.", 2000)
 
     @Slot(str)
     def handle_file_open_request(self, file_path: str):
@@ -298,12 +304,6 @@ class AppPipelineController(QObject):
         self._load_thread.finished.connect(self.handle_project_loading_completed, Qt.ConnectionType.QueuedConnection)
         self._load_thread.finished.connect(self._load_thread.deleteLater)
         self._load_thread.start()
-
-    # def _wire_worker_signals(self):
-    #     """Binds worker signal channels directly on background execution startup."""
-    #     self._load_thread.worker.status_updated.connect(self.window.status_bar.showMessage, Qt.ConnectionType.QueuedConnection)
-    #     self._load_thread.worker.finished.connect(self.handle_project_loading_completed, Qt.ConnectionType.QueuedConnection)
-    #     self._load_thread.worker.error_occurred.connect(self.handle_pipeline_failure, Qt.ConnectionType.QueuedConnection)
 
     @Slot(bool, list, list, list, str)
     def handle_project_loading_completed(self, success: bool, headings: list, references: list, file_tree_payload: list, db_path: str) -> None:
@@ -473,9 +473,31 @@ class AppPipelineController(QObject):
 
     @Slot(list, dict)
     def _handle_manual_index_insertion(self, parts_list: list, metadata: dict):
+        """Intercepts indexInserted events and appends nodes to the tree model engine state."""
         heading_payload = [{"heading_text": "!".join(parts_list), "id": metadata.get("id", 0)}]
+        # Safely pass parameters to your unified type-safe rendering contract
         self.index_tree_widget.populate_hierarchy_tree(heading_payload, [metadata])
         self._tree_modified = True
+
+    @Slot(object, object)
+    def _handle_view_save_request(self, editor_tab: EditorTab, save_carrier: ReferenceCarrier) -> None:
+        """Handles emergency file-saving operations when inserts are requested in untitled tabs."""
+        if isinstance(editor_tab, EditorTab) and self.doc_io:
+            # Trigger your file system model workflow (e.g., Save As dialog)
+            success, resolved_path = self.doc_io.execute_save_as_workflow(editor_tab)
+            if success and resolved_path:
+                editor_tab.set_absolute_path(resolved_path)
+                save_carrier.value = True
+                return
+        save_carrier.value = False
+
+    @Slot(object)
+    def _handle_next_id_request(self, id_carrier: ReferenceCarrier) -> None:
+        """Pulls an incremented atomic primary key integer index out-of-band."""
+        if self.project_model: 
+            id_carrier.value = self.project_model.get_and_increment_id()
+        else:
+            id_carrier.value = 1        
 
     @Slot(dict)
     def _handle_index_deletion_request(self, payload: dict):

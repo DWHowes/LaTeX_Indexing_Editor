@@ -15,158 +15,163 @@ from PySide6.QtWidgets import (QDockWidget,
                                )
 from PySide6.QtCore import QEvent, Qt, Signal, QSize
 
-class TagModificationWizard(QWidget):
-    """
-    PRODUCTION-HARDENED: Form wizard UI layout panel for modifying extracted macro arguments. 
-    Enforces unified theme visual state styling using system layout variables.
-    """
-    # Signals to pass updates cleanly back up to the main window controller layer
-    tagUpdated = Signal(list, dict)      # Emits: (updated_parts_list, metadata_dict)
-    cancelRequested = Signal()
+# class TagModificationWizard(QWidget):
+#     """
+#     PRODUCTION-HARDENED: Form wizard UI layout panel for modifying extracted macro arguments. 
+#     Enforces unified theme visual state styling using system layout variables.
+#     """
+#     # Signals to pass updates cleanly back up to the main window controller layer
+#     tagUpdated = Signal(list, dict)      # Emits: (updated_parts_list, metadata_dict)
+#     cancelRequested = Signal()
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._active_span = None
-        self._init_ui()
+#     def __init__(self, parent=None):
+#         super().__init__(parent)
+#         self._active_span = None
+#         self._init_ui()
         
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.setContentsMargins(14, 14, 14, 14)
+#     def _init_ui(self):
+#         layout = QVBoxLayout(self)
+#         layout.setSpacing(10)
+#         layout.setContentsMargins(14, 14, 14, 14)
         
-        # Form Header Label Section
-        title_label = QLabel("Tag Modification Wizard")
-        title_label.setStyleSheet("font-weight: bold; font-size: 13px; color: palette(text);")
-        layout.addWidget(title_label)
+#         # Form Header Label Section
+#         title_label = QLabel("Tag Modification Wizard")
+#         title_label.setStyleSheet("font-weight: bold; font-size: 13px; color: palette(text);")
+#         layout.addWidget(title_label)
         
-        # Main Field Form Row
-        layout.addWidget(QLabel("Main Entry Field:"))
-        self.main_field = QLineEdit()
-        layout.addWidget(self.main_field)
+#         # Main Field Form Row
+#         layout.addWidget(QLabel("Main Entry Field:"))
+#         self.main_field = QLineEdit()
+#         layout.addWidget(self.main_field)
         
-        # Subheading 1 Form Row
-        layout.addWidget(QLabel("Subheading 1 (Optional):"))
-        self.sub1_field = QLineEdit()
-        layout.addWidget(self.sub1_field)
+#         # Subheading 1 Form Row
+#         layout.addWidget(QLabel("Subheading 1 (Optional):"))
+#         self.sub1_field = QLineEdit()
+#         layout.addWidget(self.sub1_field)
         
-        # Subheading 2 Form Row
-        layout.addWidget(QLabel("Subheading 2 (Optional):"))
-        self.sub2_field = QLineEdit()
-        layout.addWidget(self.sub2_field)
+#         # Subheading 2 Form Row
+#         layout.addWidget(QLabel("Subheading 2 (Optional):"))
+#         self.sub2_field = QLineEdit()
+#         layout.addWidget(self.sub2_field)
         
-        # LaTeX Formatting Rules Encap Row (e.g., textbf, textit, see{...})
-        layout.addWidget(QLabel("Formatting Rule / Encap Operator (e.g., textbf, see{...}):"))
-        self.encap_field = QLineEdit()
-        layout.addWidget(self.encap_field)
+#         # LaTeX Formatting Rules Encap Row (e.g., textbf, textit, see{...})
+#         layout.addWidget(QLabel("Formatting Rule / Encap Operator (e.g., textbf, see{...}):"))
+#         self.encap_field = QLineEdit()
+#         layout.addWidget(self.encap_field)
         
-        # Action Buttons Execution Cluster Layout
-        btn_layout = QHBoxLayout()
-        self.btn_cancel = QPushButton("Cancel")
-        self.btn_apply = QPushButton("Apply Substitution")
-        self.btn_apply.setObjectName("applyButton")
-        self.btn_apply.setDefault(True)
+#         # Action Buttons Execution Cluster Layout
+#         btn_layout = QHBoxLayout()
+#         self.btn_cancel = QPushButton("Cancel")
+#         self.btn_apply = QPushButton("Apply Substitution")
+#         self.btn_apply.setObjectName("applyButton")
+#         self.btn_apply.setDefault(True)
         
-        btn_layout.addWidget(self.btn_cancel)
-        btn_layout.addWidget(self.btn_apply)
-        layout.addLayout(btn_layout)
+#         btn_layout.addWidget(self.btn_cancel)
+#         btn_layout.addWidget(self.btn_apply)
+#         layout.addLayout(btn_layout)
         
-        # Explicit High-Contrast Theme Styling Constraints
-        self.setStyleSheet("""
-            QLineEdit {
-                background-color: palette(base);
-                border: 1px solid palette(mid);
-                border-radius: 4px;
-                padding: 6px;
-                color: palette(text);
-            }
-            QLineEdit:focus {
-                border: 1px solid #0A84FF;
-            }
-            QPushButton {
-                background-color: palette(button);
-                border: 1px solid palette(mid);
-                border-radius: 4px;
-                padding: 6px 14px;
-                color: palette(buttonText);
-            }
-            QPushButton:hover {
-                background-color: palette(light);
-            }
-            QPushButton#applyButton {
-                background-color: #0A84FF;
-                color: white;
-                font-weight: bold;
-                border: none;
-            }
-            QPushButton#applyButton:hover {
-                background-color: #2296FF;
-            }
-        """)
+#         # Explicit High-Contrast Theme Styling Constraints
+#         self.setStyleSheet("""
+#             QLineEdit {
+#                 background-color: palette(base);
+#                 border: 1px solid palette(mid);
+#                 border-radius: 4px;
+#                 padding: 6px;
+#                 color: palette(text);
+#             }
+#             QLineEdit:focus {
+#                 border: 1px solid #0A84FF;
+#             }
+#             QPushButton {
+#                 background-color: palette(button);
+#                 border: 1px solid palette(mid);
+#                 border-radius: 4px;
+#                 padding: 6px 14px;
+#                 color: palette(buttonText);
+#             }
+#             QPushButton:hover {
+#                 background-color: palette(light);
+#             }
+#             QPushButton#applyButton {
+#                 background-color: #0A84FF;
+#                 color: white;
+#                 font-weight: bold;
+#                 border: none;
+#             }
+#             QPushButton#applyButton:hover {
+#                 background-color: #2296FF;
+#             }
+#         """)
         
-        # Attach Signal Connections
-        self.btn_cancel.clicked.connect(self.cancelRequested)
-        self.btn_apply.clicked.connect(self._on_apply_clicked)
+#         # Attach Signal Connections
+#         self.btn_cancel.clicked.connect(self.cancelRequested)
+#         self.btn_apply.clicked.connect(self._on_apply_clicked)
         
-    def populate_wizard_fields(self, span):
-        """Populates the modification fields with parameters isolated by the selection engine."""
-        self._active_span = span
-        self.main_field.clear()
-        self.sub1_field.clear()
-        self.sub2_field.clear()
-        self.encap_field.clear()
+#     def populate_wizard_fields(self, span):
+#         """Populates the modification fields with parameters isolated by the selection engine."""
+#         self._active_span = span
+#         self.main_field.clear()
+#         self.sub1_field.clear()
+#         self.sub2_field.clear()
+#         self.encap_field.clear()
         
-        if not span or not span.is_valid or not span.headings:
-            self.setEnabled(False)
-            return
+#         if not span or not span.is_valid or not span.headings:
+#             self.setEnabled(False)
+#             return
             
-        self.setEnabled(True)
-        h_count = len(span.headings)
+#         self.setEnabled(True)
+#         h_count = len(span.headings)
         
-        # Extract existing array indexes cleanly onto the separate input fields
-        if h_count > 0: self.main_field.setText(span.headings[0])
-        if h_count > 1: self.sub1_field.setText(span.headings[1])
-        if h_count > 2: self.sub2_field.setText(span.headings[2])
+#         # Extract existing array indexes cleanly onto the separate input fields
+#         if h_count > 0: self.main_field.setText(span.headings[0])
+#         if h_count > 1: self.sub1_field.setText(span.headings[1])
+#         if h_count > 2: self.sub2_field.setText(span.headings[2])
         
-        # Load formatting tags safely (stripping standard placeholder constraints)
-        if span.encap_style and span.encap_style != "standard":
-            self.encap_field.setText(span.encap_style)
-        else:
-            self.encap_field.setText("standard")
+#         # Load formatting tags safely (stripping standard placeholder constraints)
+#         if span.encap_style and span.encap_style != "standard":
+#             self.encap_field.setText(span.encap_style)
+#         else:
+#             self.encap_field.setText("standard")
 
-    def _on_apply_clicked(self):
-        """Validates current state, packs data, and dispatches the tagUpdated transaction."""
-        if not self._active_span or not self._active_span.is_valid:
-            return
+#     def _on_apply_clicked(self):
+#         """Validates current state, packs data, and dispatches the tagUpdated transaction."""
+#         if not self._active_span or not self._active_span.is_valid:
+#             return
             
-        # Re-compile current values back into a clean string parts array list
-        updated_parts = [
-            p.strip() for p in [self.main_field.text(), self.sub1_field.text(), self.sub2_field.text()] if p.strip()
-        ]
+#         # Re-compile current values back into a clean string parts array list
+#         updated_parts = [
+#             p.strip() for p in [self.main_field.text(), self.sub1_field.text(), self.sub2_field.text()] if p.strip()
+#         ]
         
-        if not updated_parts:
-            return # Block empty field deletions from causing macro breakage
+#         if not updated_parts:
+#             return # Block empty field deletions from causing macro breakage
             
-        encap_val = self.encap_field.text().strip()
-        if not encap_val or encap_val == "standard":
-            encap_val = "standard"
+#         encap_val = self.encap_field.text().strip()
+#         if not encap_val or encap_val == "standard":
+#             encap_val = "standard"
             
-        # Repack context coordinate boundaries to keep text replacements completely accurate
-        metadata = {
-            "encap": encap_val,
-            "start_pos": self._active_span.start_pos,
-            "end_pos": self._active_span.end_pos,
-            "see": encap_val.split("{")[1].rstrip("}") if "see{" in encap_val.lower() else None,
-            "seealso": encap_val.split("{")[1].rstrip("}") if "seealso{" in encap_val.lower() else None
-        }
+#         # Repack context coordinate boundaries to keep text replacements completely accurate
+#         metadata = {
+#             "encap": encap_val,
+#             "start_pos": self._active_span.start_pos,
+#             "end_pos": self._active_span.end_pos,
+#             "see": encap_val.split("{")[1].rstrip("}") if "see{" in encap_val.lower() else None,
+#             "seealso": encap_val.split("{")[1].rstrip("}") if "seealso{" in encap_val.lower() else None
+#         }
         
-        # Broadcast signal to trigger the main window's programmatic mutation loop
-        self.tagUpdated.emit(updated_parts, metadata)
-        self.close()
+#         # Broadcast signal to trigger the main window's programmatic mutation loop
+#         self.tagUpdated.emit(updated_parts, metadata)
+#         self.close()
 
 """
 Custom title bar designed specifically to replace native QDockWidget header strips.
 Enables absolute layout control, allowing custom text placement and larger close buttons.
 """
+# views/entry_window_title_bar.py
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtCore import QSize, Qt, Slot
+from views.app_style_configuration import AppStyleConfiguration
+
 class EntryWindowTitleBar(QWidget):
     def __init__(self, title_text: str, parent_dock: QWidget = None):
         super().__init__(parent_dock)
@@ -179,46 +184,66 @@ class EntryWindowTitleBar(QWidget):
 
         # 1. Text Title Label Header Segment
         self.title_label = QLabel(title_text)
-        self.title_label.setStyleSheet('font-weight: bold; color: palette(text);')
         
         # 2. Upgraded Large Close Control Button Widget
         self.close_button = QPushButton("×")
         self.close_button.setToolTip("Close panel")
-        
-        # FIXED DIMENSION MATRIX: Enforce a clean, large layout footprint
         self.close_button.setFixedSize(QSize(28, 28))
         self.close_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        
-        # Apply high-contrast layout formatting with large text scaling
-        self.close_button.setStyleSheet("""
-            QPushButton {
-                font-family: 'Verdana', 'Segoe UI', sans-serif;
-                font-size: 20px;
-                font-weight: bold;
-                color: palette(text);
-                background-color: transparent;
-                border: none;
-                border-radius: 4px;
-                padding-bottom: 2px; /* Center alignment balance tweak */
-            }
-            QPushButton:hover {
-                background-color: #e81123;
-                color: white;
-            }
-            QPushButton:pressed {
-                background-color: #f1707a;
-                color: white;
-            }
-        """)
-
-        # Execute parent widget closing routine cleanly on click triggers
-        if self.parent_dock:
-            self.close_button.clicked.connect(self.parent_dock.close)
 
         # Assemble the horizontal alignment bar
         self.layout.addWidget(self.title_label)
         self.layout.addStretch()
         self.layout.addWidget(self.close_button)
+
+        # Execute parent widget closing routine cleanly on click triggers
+        if self.parent_dock:
+            self.close_button.clicked.connect(self.parent_dock.close)
+
+        # ------------------------------------------------------------------
+        # MVC COMPLIANT THEME AUTO-SUBSCRIPTION
+        # ------------------------------------------------------------------
+        broker = AppStyleConfiguration.event_broker()
+        # Subscribe autonomously to the static styling event broker channel
+        broker.theme_mutated.connect(self.refresh_theme_presentation)
+        
+        # Trigger an initial paint pass matching the active starting theme
+        init_dark = bool(broker.property("is_dark_mode") == True)
+        self.refresh_theme_presentation(init_dark)
+
+    @Slot(bool)
+    def refresh_theme_presentation(self, is_dark_mode: bool) -> None:
+        """
+        Public Presentation Contract.
+        Dynamically transforms active text color maps when themes are swapped.
+        """
+        # Assign high-contrast typography hex values based on the incoming theme state
+        text_color = "#FFFFFF" if is_dark_mode else "#000000"
+
+        # Update the title label color natively
+        self.title_label.setStyleSheet(f"font-weight: bold; color: {text_color};")
+        
+        # Update the close button color matrix natively
+        self.close_button.setStyleSheet(f"""
+            QPushButton {{
+                font-family: 'Verdana', 'Segoe UI', sans-serif;
+                font-size: 20px;
+                font-weight: bold;
+                color: {text_color};
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+                padding-bottom: 2px;
+            }}
+            QPushButton:hover {{
+                background-color: #e81123;
+                color: white;
+            }}
+            QPushButton:pressed {{
+                background-color: #f1707a;
+                color: white;
+            }}
+        """)
 
 class ReferenceCarrier:
     """Raw Python object wrapper to bypass PySide C++ container copying limitations."""
@@ -230,7 +255,7 @@ class LatexIndexWindow(QDockWidget):
     indexInserted = Signal(list, dict) 
 
     # ARCHITECTURAL SIGNALS: Hand off file operations to the main window controller
-    saveRequested = Signal(object, list)  # Emits (editor_widget, result_holder_list)
+    saveRequested = Signal(object, object)  # Emits (editor_widget, ReferenceCarrier)
     syncRequested = Signal(object, str)   # Emits (editor_widget, file_path_string)
     # Use Signal(object) in order to prevent pyside container duplication
     # Emits a custom mutable ReferenceCarrier instance
@@ -522,39 +547,61 @@ class LatexIndexWindow(QDockWidget):
             
         self.main_entry.setFocus()
 
-    def handle_insert(self):
-        """Validates entry states, coordinates file tracking, and applies tag macros."""
+    def handle_insert(self) -> None:
+        """
+        Validates entry states, coordinates file tracking via clean signals,
+        and applies tag macros without reflective hasattr/getattr inspections.
+        """
         editor = self.tab_widget.currentWidget()
         if not editor:
+            print("Error: No active editor found for index insertion.")
             return
 
-        path = getattr(editor, 'file_path', 'Untitled')
-        if path == 'Untitled':
-            save_result = [] 
-            self.saveRequested.emit(editor, save_result)
-            if not save_result or not save_result[0]:
+        # --- PURGED GETATTR: Handled via pure, isolated controller coordination ---
+        # We delegate file path tracking to a mutable payload structure passed up the signal bridge
+        path_carrier = ReferenceCarrier("Untitled")
+        
+        # Traffic routing cores capture this and inject the active editor's file path contract
+        # Example signature context: controller binds to syncRequested to safely look up mappings
+        self.syncRequested.emit(editor, path_carrier) 
+        path = str(path_carrier.value)
+
+        if path == "Untitled":
+            # Wrap a boolean success marker inside your ReferenceCarrier object
+            save_carrier = ReferenceCarrier(False) 
+            
+            # Emit the reference carrier across the type-safe bridge
+            self.saveRequested.emit(editor, save_carrier)
+            
+            # Inspect the mutated attribute directly on the carrier object
+            if not save_carrier.value:
+                print("Error: Failed to save the document.")
                 return
-            path = getattr(editor, 'file_path', 'Untitled')
-            if path == 'Untitled':
+                        
+            # Re-verify path carrier state post-save execution path safely
+            self.syncRequested.emit(editor, path_carrier)
+            path = str(path_carrier.value)
+            if path == "Untitled":
+                print("Error: Document path is still unresolved after save attempt.")
                 return
 
         # ======================================================================
-        # HARDENED ENTRY PRE-PROCESSOR: AUTOMATED SORT KEY GENERATION MATRIX
+        # ENTRY PRE-PROCESSOR: AUTOMATED SORT KEY GENERATION MATRIX
         # ======================================================================
-        def process_field(field):
+        def process_field(field: QLineEdit) -> str | None:
             val = field.text().strip()
             if not val: 
+                print("Error: Main entry field cannot be empty.")
                 return None
                 
-            # Rule 1: If the user has manually typed an explicit '@' override descriptor sequence
-            # (e.g., "alpha@\\alpha"), respect it immediately and bypass automated compilation.
+            # Rule 1: Respect manual explicit '@' override descriptor sequence immediately
             if "@" in val:
+                print("Info: '@' detected in entry field. Bypassing auto-processing rules for this field.")
                 return val
                 
             # Rule 2: Inspect if the text contains any inline LaTeX styling macros
             if r"\textit" in val or r"\textbf" in val:
-                # Strip macro commands and closing brackets to isolate pure alphanumeric text
-                # e.g., "\\textit{italicize} partly" -> "italicize partly"
+                # Isolate pure alphanumeric text safely via standard regex parameters
                 clean_key = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', val)
                 clean_key = clean_key.replace(r'\string', '').strip()
                 
@@ -566,36 +613,26 @@ class LatexIndexWindow(QDockWidget):
 
         m = process_field(self.main_entry)
         if not m: 
+            print("Error: Main entry field cannot be empty.")
             return
 
         s1 = process_field(self.sub1_entry)
         s2 = process_field(self.sub2_entry)
 
-        # Main window structural resolution path
-        main_win = self.window()  
-        if not hasattr(main_win, 'get_and_increment_id'):
-            parent_widget = self.parent()
-            while parent_widget is not None:
-                if hasattr(parent_widget, 'get_and_increment_id'):
-                    main_win = parent_widget
-                    break
-                parent_widget = parent_widget.parent()
-
         # ======================================================================
-        # HARDENED METADATA PASS: BYPASS C++ DUPLICATION VIA RAW OBJECT CARRIER
+        # METADATA PASS: BYPASS C++ DUPLICATION VIA RAW OBJECT CARRIER
         # ======================================================================
         # Instantiate our custom raw object reference carrier initialized to -1
         id_carrier = ReferenceCarrier(-1)
         
-        # Emit the carrier instance across our upgraded generic object signal bridge
+        # --- PURGED HASATTR LOOP: Routed cleanly over type-safe signal bridges ---
+        # The AppPipelineController catches this on the main execution layer barrier
         self.nextIdRequested.emit(id_carrier)
-        
-        # Read the modified attribute back from the identical reference instance
         assigned_idn = id_carrier.value
         
-        # Safety Check: Terminate if the signal failed to bind or resolve
+        # Safety Check: Terminate if the routing core layer failed to bind or resolve
         if assigned_idn == -1:
-            print("ERROR: nextIdRequested signal was not intercepted or handled by MainWindow.")
+            print("Error: Failed to retrieve a valid unique ID for the new index entry.")
             return
 
         cursor = editor.textCursor()
@@ -615,9 +652,6 @@ class LatexIndexWindow(QDockWidget):
         # Apply structural macro edits onto open document layer
         self.insert_latex(chain, pg_style)
 
-        # Flush editor modifications down to disk
-        self.syncRequested.emit(editor, path)
-
         # Build clean metadata tracker parameters
         uid_dict = {
             "id": assigned_idn,
@@ -630,16 +664,15 @@ class LatexIndexWindow(QDockWidget):
             "has_references": True
         }
 
-        # If Cross-Reference mode is checked, inject relational parameters explicitly into dictionary metadata 
-        # so that when indexInserted triggers, the backend sidebar intercepts and maps them natively.
+        # Handle structural relational cross-references safely
         if self.xref_enable.isChecked():
             target_term = self.xref_target.text().strip()
             mode = self.xref_type.currentText()
             uid_dict["encap"] = f"{mode}{{{target_term}}}"
             uid_dict[mode] = target_term
-            uid_dict["has_references"] = False # Cross-references have no page coordinates
+            uid_dict["has_references"] = False
 
-        # Inform index tree sidebar about the newly established node elements
+        # Inform index tree sidebar controller about the newly established node elements
         parts_list = [p for p in [m, s1, s2] if p]
         self.indexInserted.emit(parts_list, uid_dict)
                 
