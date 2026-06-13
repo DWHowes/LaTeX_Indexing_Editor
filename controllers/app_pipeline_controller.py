@@ -398,6 +398,7 @@ class AppPipelineController(QObject):
 
         # Synchronize presentation title text and status bars
         project_name = os.path.basename(project_root_dir)
+        self.prefs.update_project_context(project_root_dir, project_name)
         self.window.synchronize_window_title(project_name)
         self.window.status_bar.showMessage(f"Project '{project_name}' loaded successfully.", 3000)
 
@@ -511,6 +512,13 @@ class AppPipelineController(QObject):
 
         self._load_thread = None
         self.worker = None
+        
+        # Save window geometry before closing
+        self.prefs.serialize_layout_state({
+            "geometry": self.window.saveGeometry(),
+            "state": self.window.saveState()
+        })   
+
         self._force_application_exit()
 
     def _force_application_exit(self):

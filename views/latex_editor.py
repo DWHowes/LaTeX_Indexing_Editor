@@ -122,3 +122,10 @@ class LatexEditor(QMainWindow):
         self.resize(target_width, target_height)
         self.setMinimumSize(QSize(1024, 768))
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def restore_layout_state(self, geometry: bytes, state: bytes) -> None:
+        """Public contract to restore persisted window geometry."""
+        if geometry:
+            self.restoreGeometry(geometry)
+        if state:
+            self.restoreState(state)        

@@ -94,6 +94,11 @@ if __name__ == "__main__":
         index_controller.parent = pipeline_controller
 
         editor_window.backup_manager = backup_manager
+        
+        geometry = preferences_payload.get("geometry")
+        state = preferences_payload.get("state")
+        if geometry or state:
+            editor_window.restore_layout_state(geometry, state)
 
         exit_code = app.exec()
         

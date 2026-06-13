@@ -17,14 +17,25 @@ class PreferencesPersistence(QObject):
         Unpacks serialized parameters out of native platform storage.
         Transforms registry configurations into a type-safe Python payload dictionary.
         """
+        try:
+            font_size = int(self.settings.value("font_size", 12))
+        except (ValueError, TypeError):
+            font_size = 12
+
+        raw_geometry = self.settings.value("window_geometry")
+        raw_state = self.settings.value("window_state")
+
         payload = {
             "last_project_root": self.settings.value("last_project_root", ""),
             "last_project_name": self.settings.value("last_project_name", ""),
             "font_family": self.settings.value("font_family", "Arial"),
-            "font_size": int(self.settings.value("font_size", 12)),
-            "dark_mode": self.settings.value("dark_mode", "false") == "true",
-            "last_project_path": self.settings.value("last_project_path", QDir.homePath())
+            "font_size": font_size,
+            "dark_mode": str(self.settings.value("dark_mode", "false")).lower() == "true",
+            "last_project_path": self.settings.value("last_project_path", QDir.homePath()),
+            "geometry": raw_geometry,
+            "state": raw_state
         }
+        
         return payload
 
     def serialize_layout_state(self, closure_payload: dict):
@@ -56,11 +67,7 @@ class PreferencesPersistence(QObject):
     def get_last_project_path(self) -> str:
         """
         Retrieves the last navigated folder path constraint.
-        Strict MVC: Exposes clean primitives to seed native file selection prompts.
         """
-        from PySide6.QtCore import QDir
-        import os
-        
         # Pull cached data, falling back natively to the user's home directory path
         raw_path = self.settings.value("last_project_path", QDir.homePath())
         return os.path.normpath(str(raw_path))
