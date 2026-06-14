@@ -5,7 +5,7 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem, QCursor, QFontMetri
 from PySide6.QtCore import Qt, Signal, Slot, QModelIndex, QSortFilterProxyModel, QItemSelectionModel
 
 from views.index_text_formatter_delegate import IndexTextFormatterDelegate
-from models.index_tree_persistence import IndexTreePersistence
+# from models.index_tree_persistence import IndexTreePersistence
 from views.index_link_delegate import IndexLinkDelegate
 
 class CaseInsensitiveItem(QStandardItem):
