@@ -241,6 +241,7 @@ class IndexTreeView(QTreeView):
         try:
             self.base_model.clear()
             self.base_model.setHorizontalHeaderLabels(["Index Terms", "References"])
+            self.formatting_delegate.clear_cache()  # Clear cached segments to prevent stale data after full reload
             if not headings: return
 
             id_to_refs = {}
