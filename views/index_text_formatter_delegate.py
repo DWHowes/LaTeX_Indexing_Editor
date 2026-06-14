@@ -2,13 +2,17 @@ from PySide6.QtWidgets import QStyledItemDelegate, QStyle, QApplication, QStyleO
 from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtCore import Qt, QSize
 
-"""
-Layers on top of Column 0 to render LaTeX formatting (bold/italics) 
-while preserving tree hierarchy indentation positions.
-"""
 class IndexTextFormatterDelegate(QStyledItemDelegate):
+    """
+    Layers on top of Column 0 to render LaTeX formatting (bold/italics) 
+    while preserving tree hierarchy indentation positions.
+    """
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._segment_cache: dict[str, list[tuple[str, bool, bool]]] = {}
+
+    def clear_cache(self):
+        self._segment_cache.clear()
 
     def paint(self, painter, option, index):
         if index.column() == 0:
@@ -84,6 +88,7 @@ class IndexTextFormatterDelegate(QStyledItemDelegate):
             painter.restore()
         else:
             super().paint(painter, option, index)
+
     def sizeHint(self, option, index):
         """Ensures that bold text expansion rules do not result in clipped string layouts or layout drift."""
         if index.column() == 0:
@@ -116,13 +121,23 @@ class IndexTextFormatterDelegate(QStyledItemDelegate):
         return super().sizeHint(option, index)
 
     def _parse_latex_formatting_segments(self, text: str) -> list[tuple[str, bool, bool]]:
-        """Tokenizes text blocks into styled chunks using an explicit style stack to handle nested macros."""
+        """
+        Tokenizes text blocks into styled chunks using an explicit style stack to handle nested macros.
+        
+        Supported formatting macros: \\textbf{}, \\textit{}, \\emph{}, \\texttt{}, \\textrm{}
+        Unsupported macros are stripped silently to avoid raw macro text appearing in the tree.
+        
+        The '@' sort key split is the canonical stripping location for makeindex sort parameters.
+        If no '@' exists (database reload), the clean string is processed natively.
+        """
         if not text:
             return []
-            
-        # Hardened Support for BOTH Fresh Scrapes and Database Reload Sequences
-        # If the backend hasn't stripped the sorting parameter yet, isolate the right side.
-        # If no '@' exists (like during a database reload), process the clean string natively.
+        if text in self._segment_cache:
+            return self._segment_cache[text]
+        
+
+        # Canonical makeindex sort key stripping location.
+        # Isolates the right-hand display string from optional sort prefix (e.g. "sort@display").
         if '@' in text:
             parts = text.split('@', 1)
             text = parts[1] if len(parts) > 1 else parts[0]
@@ -130,52 +145,77 @@ class IndexTextFormatterDelegate(QStyledItemDelegate):
         segments = []
         idx = 0
         text_len = len(text)
-        
+
         # Style Stack holds tracking tuples: (is_italic, is_bold)
         style_stack = [(False, False)]
         accumulated_chars = []
 
+        # Mapping of supported formatting macros to (is_italic, is_bold) style overrides
+        MACRO_STYLES = {
+            r"\textbf{":  (None, True),   # bold, inherit italic
+            r"\textit{":  (True, None),   # italic, inherit bold
+            r"\emph{":    (True, None),   # treated as italic
+            r"\texttt{":  (False, False), # monospace — no bold/italic override
+            r"\textrm{":  (False, False), # roman — reset to plain
+        }
+
+        # Macros to consume silently with no output
+        SILENT_MACROS = [r"\string"]
+
         while idx < text_len:
             current_italic, current_bold = style_stack[-1]
 
-            if text.startswith(r"\textbf{", idx):
-                if accumulated_chars:
-                    segments.append(("".join(accumulated_chars), current_italic, current_bold))
-                    accumulated_chars = []
-                style_stack.append((current_italic, True))
-                idx += 8
-            elif text.startswith(r"\textit{", idx):
-                if accumulated_chars:
-                    segments.append(("".join(accumulated_chars), current_italic, current_bold))
-                    accumulated_chars = []
-                style_stack.append((True, current_bold))
-                idx += 8
-            elif text[idx] == '}':
-                # Only treat '}' as a formatting pop if we are actually inside an active style macro.
-                # If we hit a standard trailing curly brace matching an user string token, 
-                # treat it as a standard character primitive.
+            # Check silent macros first
+            matched_silent = False
+            for macro in SILENT_MACROS:
+                if text.startswith(macro, idx):
+                    # \string is followed by a single character it escapes (e.g. \string\{)
+                    # Advance past the macro keyword; the following character is handled normally
+                    idx += len(macro)
+                    matched_silent = True
+                    break
+            if matched_silent:
+                continue
+
+            # Check formatting macros
+            matched_macro = False
+            for macro, (italic_override, bold_override) in MACRO_STYLES.items():
+                if text.startswith(macro, idx):
+                    if accumulated_chars:
+                        segments.append(("".join(accumulated_chars), current_italic, current_bold))
+                        accumulated_chars = []
+                    new_italic = italic_override if italic_override is not None else current_italic
+                    new_bold = bold_override if bold_override is not None else current_bold
+                    style_stack.append((new_italic, new_bold))
+                    idx += len(macro)
+                    matched_macro = True
+                    break
+            if matched_macro:
+                continue
+
+            if text[idx] == '}':
+                # Only treat '}' as a formatting pop if inside an active style macro.
+                # A trailing brace with no matching macro is treated as a literal character.
                 if len(style_stack) > 1:
                     if accumulated_chars:
                         segments.append(("".join(accumulated_chars), current_italic, current_bold))
                         accumulated_chars = []
                     style_stack.pop()
-                    idx += 1
                 else:
                     accumulated_chars.append(text[idx])
-                    idx += 1
-            elif text.startswith(r"\string", idx):
-                idx += 7
+                idx += 1
             else:
                 accumulated_chars.append(text[idx])
                 idx += 1
 
-        # Flush remaining character array onto segments stack
+        # Flush remaining characters onto the segments stack
         if accumulated_chars:
             final_italic, final_bold = style_stack[-1]
             segments.append(("".join(accumulated_chars), final_italic, final_bold))
 
-        # Absolute Fallback Checklist Safeguard
+        # Absolute fallback — return plain text if parsing produced no segments
         if not segments and text:
             segments.append((text, False, False))
 
+        self._segment_cache[text] = segments
         return segments
