@@ -1,7 +1,7 @@
 import re
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit
 from PySide6.QtGui import QPalette, QTextDocument, QTextCursor, QColor, QFont
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, QTimer, Qt, Signal
 
 from models.latex_highlighter import LatexHighlighter
 from views.app_style_configuration import AppStyleConfiguration
@@ -23,13 +23,6 @@ class EditorTab(QPlainTextEdit):
 
         self.setReadOnly(False)   # kept editable so cursor blinks
         self.setCursorWidth(1)
-        # 1. Establish the non-editable baseline presentation state
-        # self.setReadOnly(True)  # Protects text from user typing or deletions
-        # self.setTextInteractionFlags(
-        #     Qt.TextInteractionFlag.TextSelectableByMouse | 
-        #     Qt.TextInteractionFlag.TextSelectableByKeyboard |
-        #     Qt.TextInteractionFlag.LinksAccessibleByMouse
-        # )        
 
         # Harmonized single public tracker for file path mappings
         self.file_path = "" 
@@ -47,25 +40,41 @@ class EditorTab(QPlainTextEdit):
         # 1. Retrieve a copy of the widget's existing color palette
         palette = editor_widget.palette()
 
+        is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
+        highlight_color = QColor(255, 255, 0, 100) if not is_dark else QColor(80, 200, 255, 100)
+        highlight_text = QColor(0, 0, 0) if not is_dark else QColor(255, 255, 255)
+
+        palette.setColor(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight, highlight_color)
+        palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Highlight, highlight_color)
+        palette.setColor(QPalette.ColorGroup.Active, QPalette.ColorRole.HighlightedText, highlight_text)
+        palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.HighlightedText, highlight_text)
+        editor_widget.setPalette(palette)
         # 2. Modify the highlight background brush to your exact yellow color matrix
-        palette.setColor(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight, QColor(255, 255, 0, 100))
-        palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Highlight, QColor(255, 255, 0, 100))
+        # palette.setColor(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight, QColor(255, 255, 0, 100))
+        # palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Highlight, QColor(255, 255, 0, 100))
 
-        # 3. Ensure the text characters on top of the yellow remain legible (black text)
-        palette.setColor(QPalette.ColorGroup.Active, QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
-        palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
+        # # 3. Ensure the text characters on top of the yellow remain legible (black text)
+        # palette.setColor(QPalette.ColorGroup.Active, QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
+        # palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
 
-        # 4. Bind the modified color palette back onto the active presentation widget
-        editor_widget.setPalette(palette)    
+        # # 4. Bind the modified color palette back onto the active presentation widget
+        # editor_widget.setPalette(palette)    
 
         document_canvas = self.document()
         
         if document_canvas:
-            # 3. Instantiate and bind the highlighter natively on creation.
+            # Instantiate and bind the highlighter natively on creation.
             # Passing document_canvas automatically registers it to the paint loop,
             # and storing it on self protects it from immediate garbage collection.
-            self.syntax_highlighter = LatexHighlighter(parent=document_canvas, is_dark=False)
-
+            is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
+            print(f"[EditorTab] Creating highlighter with is_dark={is_dark}")
+            self.syntax_highlighter = LatexHighlighter(parent=document_canvas, is_dark=is_dark)
+            # Defer rehighlight to after the event loop processes the initial theme application
+            QTimer.singleShot(0, self.syntax_highlighter.rehighlight)            
+            # Force correct colors after Qt finishes applying the initial theme
+            AppStyleConfiguration.event_broker().theme_mutated.connect(
+                lambda dark: self.apply_theme_configuration(dark)
+            )
 
     def get_absolute_path(self) -> str:
         """Public MVC Getter Contract. Returns the unified file path tracker."""
@@ -84,6 +93,15 @@ class EditorTab(QPlainTextEdit):
         # (e.g., self.syntax_highlighter)
         if self.syntax_highlighter is not None:
             self.syntax_highlighter.set_dark_mode(is_dark_mode)
+
+        palette = self.palette()
+        highlight_color = QColor(255, 255, 0, 100) if not is_dark_mode else QColor(80, 200, 255, 100)
+        highlight_text = QColor(0, 0, 0) if not is_dark_mode else QColor(255, 255, 255)
+        palette.setColor(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight, highlight_color)
+        palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Highlight, highlight_color)
+        palette.setColor(QPalette.ColorGroup.Active, QPalette.ColorRole.HighlightedText, highlight_text)
+        palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.HighlightedText, highlight_text)
+        self.setPalette(palette)            
 
     def apply_workspace_typography(self, font_family: str, font_size: int) -> None:
         """

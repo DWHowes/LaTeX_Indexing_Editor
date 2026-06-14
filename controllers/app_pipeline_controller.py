@@ -163,6 +163,7 @@ class AppPipelineController(QObject):
         """Pushes initial theme choices down to the view layout tree."""
         broker = AppStyleConfiguration.event_broker()
         is_dark = bool(broker.get_property("is_dark_mode"))
+        print(f"[Pipeline] Synchronizing theme: is_dark={is_dark}")
         AppStyleConfiguration.configure_application_theme(is_dark)
         self.window.tool_bar.refresh_theme_presentation(is_dark)
 

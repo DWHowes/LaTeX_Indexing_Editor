@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QTreeView, QAbstractItemView
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QCursor, QFontMetrics
 from PySide6.QtCore import Qt, Signal, Slot, QModelIndex, QSortFilterProxyModel, QItemSelectionModel
 
+from views.app_style_configuration import AppStyleConfiguration
 from views.index_text_formatter_delegate import IndexTextFormatterDelegate
 # from models.index_tree_persistence import IndexTreePersistence
 from views.index_link_delegate import IndexLinkDelegate
@@ -109,6 +110,9 @@ class IndexTreeView(QTreeView):
         self.reference_delegate = IndexLinkDelegate(self)
         self.setItemDelegateForColumn(1, self.reference_delegate)
 
+        AppStyleConfiguration.event_broker().theme_mutated.connect(
+            lambda: self.viewport().update()
+        )        
         # Single-click link tracking via Column 1 Delegate
         self.reference_delegate.linkClicked.connect(self._unpack_delegate_payload)
         # Double-click row navigation via the view's own signal-slot connection

@@ -3,6 +3,8 @@ from PySide6.QtCore import QPointF, Qt, QEvent, QPoint, Signal
 from PySide6.QtGui import QColor, QFont, QTextLayout, QTextOption
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle
 
+from views.app_style_configuration import AppStyleConfiguration
+
 class IndexLinkDelegate(QStyledItemDelegate):
     # Matches individual token patterns like [1], [12], or [48]
     TOKEN_REGEX = re.compile(r'\[\d+\]')
@@ -38,16 +40,15 @@ class IndexLinkDelegate(QStyledItemDelegate):
         return text_layout
 
     def paint(self, painter, option, index):
-        # Enforce strict Column 1 execution parameters
         if index.column() != 1:
             super().paint(painter, option, index)
             return
 
         painter.save()
-        
-        # Draw clean, isolated background matching native state (Selected vs Normal)
+
+        is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
+
         if option.state & QStyle.State_Selected:
-            # Highlight only the cell canvas background, not the full row
             painter.fillRect(option.rect, option.palette.highlight())
             text_color = option.palette.highlightedText().color()
         else:
@@ -56,28 +57,21 @@ class IndexLinkDelegate(QStyledItemDelegate):
                 painter.fillRect(option.rect, bg_brush)
             else:
                 painter.fillRect(option.rect, option.palette.base())
-            text_color = QColor("#0066cc")  # Classic clean hypertext blue
+            text_color = QColor("#8BE9FD") if is_dark else QColor("#0066cc")
 
         text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
         if not text:
             painter.restore()
             return
 
-        # Configure font attributes explicitly
         font = option.font
         font.setUnderline(True)
         painter.setFont(font)
         painter.setPen(text_color)
 
-        # Draw text via safe layout geometry alignment 
-        # (Bypasses super().paint() to completely kill ghosting/shadow artifacts)
         text_layout = self._setup_text_layout(text, font, option.rect.width())
-        
-        # Center the single line text vertically within the cell option bounding box
         line = text_layout.lineAt(0)
         y_offset = int((option.rect.height() - line.height()) / 2)
-        
-        # Render explicitly using target bounding rect constraints
         line.draw(painter, QPoint(option.rect.x(), option.rect.y() + y_offset))
         painter.restore()
 
