@@ -21,14 +21,11 @@ class ThemeChangedSignals(QObject):
         """Updates internal visualization variables state tracking records."""
         self._properties[name] = value
 
-    def property(self, name: str):
+    def get_property(self, name: str):
         """Safe extraction contract accessible across separate domain layers."""
         return self._properties.get(name, None)
 
-
-# Internal single instance gateway matrix container allocation
-_GlobalThemeChannel = ThemeChangedSignals()
-
+_GlobalThemeChannel = None  # Module-level singleton instance for the theme event broker
 
 class AppStyleConfiguration:
     """
@@ -43,8 +40,11 @@ class AppStyleConfiguration:
         Class-Anchored Singleton Gateway.
         Exposes the unified event signaling channel cleanly across all sub-views.
         """
+        global _GlobalThemeChannel
+        if _GlobalThemeChannel is None:
+            _GlobalThemeChannel = ThemeChangedSignals()
+            
         return _GlobalThemeChannel
-
     @staticmethod
     def get_unified_menu_stylesheet() -> str:
         return """
@@ -62,18 +62,24 @@ class AppStyleConfiguration:
     def get_tree_view_stylesheet(is_dark_mode: bool) -> str:
         if is_dark_mode:
             return "QTreeView { background-color: #191919; color: white; } QHeaderView::section { background-color: #353535; color: white; border: 1px solid #444; }"
+        # In light mode, we rely on the default palette colors, so we return an empty stylesheet.
+        # In future iterations, we could add specific light mode customizations here if desired.
         return ""
 
     @staticmethod
     def get_tab_pane_stylesheet(is_dark_mode: bool) -> str:
         if is_dark_mode:
             return "QTabWidget::pane { border: 1px solid #444; background: #252525; }"
+        # In light mode, we rely on the default palette colors, so we return an empty stylesheet.
+        # In future iterations, we could add specific light mode customizations here if desired.
         return ""
 
     @staticmethod
     def configure_application_theme(is_dark_mode: bool):
         app = QApplication.instance()
-        if not app: return
+        if not app: 
+            print("Theme Error: No QApplication instance found. Theme configuration requires an active QApplication.")
+            return
 
         # Synchronize parameters cache data state records right inside the broker instance
         AppStyleConfiguration.event_broker().set_property("is_dark_mode", is_dark_mode)
@@ -108,3 +114,4 @@ class AppStyleConfiguration:
             palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.HighlightedText, Qt.GlobalColor.white)
 
         app.setPalette(palette)
+        AppStyleConfiguration.event_broker().theme_mutated.emit(is_dark_mode)
