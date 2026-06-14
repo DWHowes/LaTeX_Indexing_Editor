@@ -67,7 +67,6 @@ class EditorTab(QPlainTextEdit):
             # Passing document_canvas automatically registers it to the paint loop,
             # and storing it on self protects it from immediate garbage collection.
             is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
-            print(f"[EditorTab] Creating highlighter with is_dark={is_dark}")
             self.syntax_highlighter = LatexHighlighter(parent=document_canvas, is_dark=is_dark)
             # Defer rehighlight to after the event loop processes the initial theme application
             QTimer.singleShot(0, self.syntax_highlighter.rehighlight)            
