@@ -1,5 +1,5 @@
 import re
-from PySide6.QtCore import Qt, QEvent, QPoint, Signal
+from PySide6.QtCore import QPointF, Qt, QEvent, QPoint, Signal
 from PySide6.QtGui import QColor, QFont, QTextLayout, QTextOption
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle
 
@@ -75,34 +75,28 @@ class IndexLinkDelegate(QStyledItemDelegate):
         
         # Center the single line text vertically within the cell option bounding box
         line = text_layout.lineAt(0)
-        y_offset = (option.rect.height() - line.height()) / 2
+        y_offset = int((option.rect.height() - line.height()) / 2)
         
         # Render explicitly using target bounding rect constraints
         line.draw(painter, QPoint(option.rect.x(), option.rect.y() + y_offset))
         painter.restore()
 
     def editorEvent(self, event, model, option, index):
-        # Block mutations if structural preconditions aren't met
-        # FIX: Allow MouseButtonRelease to flow through the filter loop cleanly
-        if index.column() != 1 or not (event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.MouseMove)):
+        if index.column() != 1 or not (event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease, QEvent.Type.MouseMove)):
             return super().editorEvent(event, model, option, index)
 
         text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
         if not text:
             return super().editorEvent(event, model, option, index)
 
-        # Reconstruct native text layout match map
         text_layout = self._setup_text_layout(text, option.font, option.rect.width())
         line = text_layout.lineAt(0)
-        
-        # Calculate local tracking position relative to the text layout drawing vector
-        y_offset = (option.rect.height() - line.height()) / 2
+
+        y_offset = int((option.rect.height() - line.height()) / 2)
         local_pos = event.pos() - QPoint(option.rect.x(), option.rect.y() + y_offset)
 
-        # Native character translation mapping via layout engine
         char_index = line.xToCursor(local_pos.x())
 
-        # Validate if cursor position explicitly intersects any discrete brackets context tokens
         tokens = self._parse_tokens(text)
         target_token = None
         for token in tokens:
@@ -111,34 +105,34 @@ class IndexLinkDelegate(QStyledItemDelegate):
                 break
 
         if target_token:
-            # FIX: Trigger the controller jump explicitly on MouseButtonRelease 
-            # instead of MouseButtonPress to bypass window-focus state restrictions.
-            if event.type() == QEvent.MouseButtonRelease:
-                # Retrieve the full metadata list from UserRole + 1
+            if event.type() == QEvent.Type.MouseButtonRelease:
+                if option.widget:
+                    option.widget.setCursor(Qt.CursorShape.ArrowCursor)
                 metadata_list = index.data(Qt.ItemDataRole.UserRole + 1)
-                
                 if isinstance(metadata_list, list):
                     token_index = tokens.index(target_token)
-                    
                     if token_index < len(metadata_list):
                         record_payload = metadata_list[token_index]
-                        # Emit the record directly to any connected view or controller slots
                         self.linkClicked.emit(record_payload)
-                        
-                return True # Event handled cleanly, stops selection engine overrides
-                
-            elif event.type() == QEvent.MouseButtonPress:
-                # Accept the press event silently to tell Qt this is an interactive cell,
-                # preventing the parent view from suppressing the subsequent release event.
                 return True
-                
-            elif event.type() == QEvent.MouseMove:
-                # Dynamically transform active viewport hover cursor shape
-                option.widget.setCursor(Qt.CursorShape.PointingHandCursor)
+
+            elif event.type() == QEvent.Type.MouseButtonPress:
                 return True
-                
+
+            elif event.type() == QEvent.Type.MouseMove:
+                if option.widget:
+                    option.widget.setCursor(Qt.CursorShape.PointingHandCursor)
+                return True
+
         else:
-            if event.type() == QEvent.MouseMove:
-                option.widget.setCursor(Qt.CursorShape.ArrowCursor)
+            if event.type() == QEvent.Type.MouseMove:
+                if option.widget:
+                    option.widget.setCursor(Qt.CursorShape.ArrowCursor)
 
         return super().editorEvent(event, model, option, index)
+    
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Leave:
+            if obj.parent():  # obj is the viewport, parent is the view
+                obj.setCursor(Qt.CursorShape.ArrowCursor)
+        return super().eventFilter(obj, event)

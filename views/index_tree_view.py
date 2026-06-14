@@ -103,6 +103,7 @@ class IndexTreeView(QTreeView):
 
         # Connect formatting delegates explicitly (delegating logic, keeping views clear)
         self.formatting_delegate = IndexTextFormatterDelegate(self)
+        self.viewport().installEventFilter(self.formatting_delegate)
         self.setItemDelegateForColumn(0, self.formatting_delegate)
 
         self.reference_delegate = IndexLinkDelegate(self)
