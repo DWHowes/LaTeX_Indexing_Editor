@@ -96,8 +96,12 @@ if __name__ == "__main__":
         
         geometry = preferences_payload.get("geometry")
         state = preferences_payload.get("state")
+        splitter_state = preferences_payload.get("splitter_state")
+
         if geometry or state:
             editor_window.restore_layout_state(geometry, state)
+        if splitter_state:
+            editor_window.layout_splitter.restoreState(splitter_state)
 
         exit_code = app.exec()
         

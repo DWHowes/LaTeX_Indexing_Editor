@@ -517,7 +517,8 @@ class AppPipelineController(QObject):
         # Save window geometry before closing
         self.prefs.serialize_layout_state({
             "geometry": self.window.saveGeometry(),
-            "state": self.window.saveState()
+            "state": self.window.saveState(),
+            "splitter_state": self.window.layout_splitter.saveState()
         })   
 
         self._force_application_exit()

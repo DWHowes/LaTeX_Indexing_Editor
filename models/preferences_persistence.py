@@ -1,5 +1,5 @@
 import os
-from PySide6.QtCore import QObject, QSettings, QDir
+from PySide6.QtCore import QObject, QSettings, QDir, QByteArray
 
 class PreferencesPersistence(QObject):
     """
@@ -24,7 +24,16 @@ class PreferencesPersistence(QObject):
 
         raw_geometry = self.settings.value("window_geometry")
         raw_state = self.settings.value("window_state")
+        raw_splitter = self.settings.value("splitter_state")
 
+        # QSettings may return str instead of QByteArray on some platforms
+        if isinstance(raw_geometry, str):
+            raw_geometry = QByteArray.fromHex(raw_geometry.encode())
+        if isinstance(raw_state, str):
+            raw_state = QByteArray.fromHex(raw_state.encode())
+        if isinstance(raw_splitter, str):
+            raw_splitter = QByteArray.fromHex(raw_splitter.encode())
+            
         payload = {
             "last_project_root": self.settings.value("last_project_root", ""),
             "last_project_name": self.settings.value("last_project_name", ""),
@@ -33,7 +42,8 @@ class PreferencesPersistence(QObject):
             "dark_mode": str(self.settings.value("dark_mode", "false")).lower() == "true",
             "last_project_path": self.settings.value("last_project_path", QDir.homePath()),
             "geometry": raw_geometry,
-            "state": raw_state
+            "state": raw_state,
+            "splitter_state": raw_splitter
         }
         
         return payload
@@ -45,9 +55,14 @@ class PreferencesPersistence(QObject):
         """
         # Save geometry and state byte arrays passed from the window closing payload
         if "geometry" in closure_payload:
-            self.settings.setValue("window_geometry", closure_payload["geometry"])
+            geom = closure_payload["geometry"]
+            self.settings.setValue("window_geometry", geom.toHex().data().decode() if isinstance(geom, QByteArray) else geom)
         if "state" in closure_payload:
-            self.settings.setValue("window_state", closure_payload["state"])
+            state = closure_payload["state"]
+            self.settings.setValue("window_state", state.toHex().data().decode() if isinstance(state, QByteArray) else state)
+        if "splitter_state" in closure_payload:
+            splitter = closure_payload["splitter_state"]
+            self.settings.setValue("splitter_state", splitter.toHex().data().decode() if isinstance(splitter, QByteArray) else splitter)
 
     def update_project_context(self, root_path: str, project_name: str):
         """Maintains environmental records tracking the last active project state."""
