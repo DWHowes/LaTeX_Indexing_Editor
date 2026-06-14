@@ -1,23 +1,26 @@
 import sys
 import os
 import datetime
+import threading
+import shutil
 from PySide6.QtCore import QObject
 
 class SessionLogger(QObject):
     """
-    PRODUCTION-HARDENED: Stream Interception Subsystem.
     Captures sys.stdout and sys.stderr console output across all app layers, 
     prepending real-time timestamp indices and writing them to an active session log file.
     """
     def __init__(self, target_directory: str = None, parent=None):
         super().__init__(parent)
+
+        self._write_lock = threading.Lock()        
         
-        # 1. Establish log folder infrastructure boundaries natively
+        # Establish log folder infrastructure boundaries natively
         if not target_directory:
             target_directory = os.path.abspath(os.path.join(os.getcwd(), ".session_logs"))
         os.makedirs(target_directory, exist_ok=True)
 
-        # 2. Compile unique file signature names tracking session start coordinates
+        # Compile unique file signature names tracking session start coordinates
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         self.log_file_path = os.path.join(target_directory, f"session_{timestamp}.log")
         
@@ -28,6 +31,8 @@ class SessionLogger(QObject):
         # Force baseline initialization signature into the log surface
         with open(self.log_file_path, "w", encoding="utf-8") as f:
             f.write(f"=== LATEX EDITING WORKSPACE SESSION LOG START: {datetime.datetime.now()} ===\n")
+
+        self.start_intercept()
 
     def start_intercept(self):
         """Reassigns standard system output descriptors down onto our stream capture methods."""
@@ -44,30 +49,19 @@ class SessionLogger(QObject):
         Intercept core endpoint. Intercepts incoming standard string characters,
         formats text layout parameters, and writes data directly to disk blocks.
         """
-        # Ignore empty layout formatting calls or newline echoes passing through streams
-        if not data or data == '\n':
-            if data == '\n':
-                try:
-                    with open(self.log_file_path, "a", encoding="utf-8") as f:
-                        f.write('\n')
-                except Exception:
-                    pass
+        if not data or not data.strip():
             return
 
-        # Prepend clean, high-precision timing indices to track processing transactions
         timestamp_prefix = f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] "
-        cleaned_payload = str(data).strip()
-        
-        formatted_entry = f"{timestamp_prefix}{cleaned_payload}"
+        formatted_entry = f"{timestamp_prefix}{data.strip()}\n"
 
-        # Commit log strings directly down onto disk tables immediately (un-buffered)
-        try:
-            with open(self.log_file_path, "a", encoding="utf-8") as f:
-                f.write(formatted_entry)
-        except Exception as io_fault:
-            # Fallback path back onto the raw native terminal line if disk access is blocked
-            self._original_stdout.write(f"LOG FAULT: {str(io_fault)}\n")
-            self._original_stdout.write(formatted_entry + '\n')
+        with self._write_lock:
+            try:
+                with open(self.log_file_path, "a", encoding="utf-8") as f:
+                    f.write(formatted_entry)
+            except Exception as io_fault:
+                self._original_stdout.write(f"LOG FAULT: {str(io_fault)}\n")
+                self._original_stdout.write(formatted_entry)
 
     def realign_log_to_project_root(self, project_root_path: str):
         """
@@ -80,7 +74,7 @@ class SessionLogger(QObject):
             return
 
         try:
-            # 1. Establish the new log directory structure under the user's project root
+            # Establish the new log directory structure under the user's project root
             new_target_dir = os.path.abspath(os.path.join(project_root_path, ".session_logs"))
             os.makedirs(new_target_dir, exist_ok=True)
             
@@ -99,34 +93,52 @@ class SessionLogger(QObject):
             if os.path.normpath(old_file_path) == os.path.normpath(new_file_path):
                 return
 
-            # 2. Safely read and transfer early boot logging metrics to the new file target
-            if os.path.exists(old_file_path):
-                import shutil
-                # Temporarily drop intercept to avoid recursive self-logs during file transfer
+            # Safely read and transfer early boot logging metrics to the new file target
+            with self._write_lock:
                 sys.stdout = self._original_stdout
                 sys.stderr = self._original_stderr
-                
                 try:
                     shutil.move(old_file_path, new_file_path)
                     self.log_file_path = new_file_path
-                except Exception as move_fault:
-                    # Fallback copy-and-delete routine if cross-drive partition issues block a direct move
-                    shutil.copy2(old_file_path, new_file_path)
-                    os.remove(old_file_path)
-                    self.log_file_path = new_file_path
+                except Exception:
+                    try:
+                        shutil.copy2(old_file_path, new_file_path)
+                        self.log_file_path = new_file_path
+                    except Exception as copy_fault:
+                        self._original_stdout.write(f"LOGGER COPY FAULT: {str(copy_fault)}\n")
+                        sys.stdout = self
+                        sys.stderr = self
+                        return
+                    try:
+                        os.remove(old_file_path)
+                    except Exception as remove_fault:
+                        self._original_stdout.write(f"LOGGER CLEANUP WARNING: Old log file not removed: {str(remove_fault)}\n")
                 finally:
-                    # Reactivate the stream interception pipeline instantly
                     sys.stdout = self
                     sys.stderr = self
 
-            # 3. Commit a dynamic marker indicating the explicit output redirect coordinates
-            with open(self.log_file_path, "a", encoding="utf-8") as f:
-                f.write(f"\n[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [SYSTEM] Stream output redirected to active workspace: {new_target_dir}\n")
+            # Commit a dynamic marker indicating the explicit output redirect coordinates
+            print(f"[SYSTEM] Stream output redirected to active workspace: {new_target_dir}")            
 
         except Exception as redirect_err:
             self._original_stdout.write(f"LOGGER RE-ROUTE ERROR: Cannot shift log tables: {str(redirect_err)}\n")
 
 
     def flush(self):
-        """Required stream compliance signature mapping to support internal engine sweeps."""
-        pass
+        """
+        Stream compliance implementation.
+        Since write() opens and closes a fresh file handle on each call there is
+        nothing buffered to flush on the log file itself. Flushing the original
+        terminal handles ensures any fallback output written directly to them
+        during fault conditions is not left buffered.
+        """
+        try:
+            if self._original_stdout:
+                self._original_stdout.flush()
+        except Exception:
+            pass
+        try:
+            if self._original_stderr:
+                self._original_stderr.flush()
+        except Exception:
+            pass

@@ -26,7 +26,6 @@ from controllers.index_tree_controller import IndexTreeController
 """
 if __name__ == "__main__":
     logger = SessionLogger()
-    logger.start_intercept()
     
     try:
         app = QApplication(sys.argv)
