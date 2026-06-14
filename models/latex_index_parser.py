@@ -7,7 +7,6 @@ class LatexIndexParser:
     
     INDEX_PATTERN = re.compile(r'\\index\{')
     # Modified macro start pattern: supports word boundaries or direct backslash triggers (\def\fn)
-    # MACRO_START_PATTERN = re.compile(r'\\(newcommand|renewcommand|def|providecommand|DeclareRobustCommand)(?=\b|\\)')
     MACRO_START_PATTERN = re.compile(r'\\(newcommand|renewcommand|providecommand|DeclareRobustCommand|def)(?=\b|\\)')
 
     @classmethod
@@ -25,13 +24,13 @@ class LatexIndexParser:
             print(f"ERROR: Failed to read file {norm_path_str} for indexing: {e}")
             return extracted_payloads, start_id
         
-        # 1. CRITICAL: Standardize line breaks across ALL operating systems (\r\n -> \n)
+        # Standardize line breaks across ALL operating systems (\r\n -> \n)
         # This guarantees that the string layout inside Python perfectly matches QPlainTextEdit
         full_content = full_content.replace('\r\n', '\n').replace('\r', '\n')
         
-        # 2. ANCHOR: Build the immutable baseline offset map immediately from raw, unmutated text
+        # Build the immutable baseline offset map immediately from raw, unmutated text
         line_offsets = cls._build_line_offset_map(full_content)
-        cls._offset_map = line_offsets # Keep for backward compatibility
+        # cls._offset_map = line_offsets # Keep for backward compatibility
 
         # Scrubbing uses strict 1:1 character index masking (preserving exact \n positions)
         working_content = cls._scrub_macro_definitions(full_content)
@@ -168,19 +167,6 @@ class LatexIndexParser:
         return text, "standard"
 
     @classmethod
-    def _find_closing_brace_index(cls, text: str, start_brace_pos: int) -> int:
-        """Caller's existing implementation — signature preserved exactly."""
-        depth = 0
-        for i in range(start_brace_pos, len(text)):
-            if text[i] == '{':
-                depth += 1
-            elif text[i] == '}':
-                depth -= 1
-                if depth == 0:
-                    return i
-        return -1
-
-    @classmethod
     def _scan_to_char(cls, text: str, idx: int, target: str) -> int:
         """
         Advance idx forward through optional whitespace and LaTeX comment lines
@@ -260,21 +246,8 @@ class LatexIndexParser:
         \\providecommand{\\name}[n]{body}
         \\DeclareRobustCommand{\\name}[n]{body}
         \\def\\name#1#2{body}          ← no brace-wrapped name block
-
-        Key fix over the previous implementation
-        -----------------------------------------
-        The old code called _find_closing_brace_index on the FIRST '{' it found,
-        which for \\newcommand is the *name* block '{\\cmd}'.  The balancer exits
-        at the end of that name block and the body '{...}' is left fully exposed,
-        leaking '#1' and any \\index calls inside into the parser.
-
-        The corrected sequence is:
-        1. Detect whether this is a \\def-style macro (no brace-wrapped name).
-        2. For \\newcommand-style: consume the name block, then skip optional
-            argument blocks [n] / [default].
-        3. Find and balance the BODY block.
-        4. Mask from the macro keyword to the end of the body block.
         """
+
         working_chars = list(text)
         text_len = len(text)
 
@@ -289,7 +262,7 @@ class LatexIndexParser:
             idx = match.end()                 # first char after the keyword token
 
             # ------------------------------------------------------------------
-            # Step 1 — Handle the name token
+            # Handle the name token
             # ------------------------------------------------------------------
             if keyword in DEF_STYLE_KEYWORDS:
                 # \def syntax:  \def\cmdname#1#2{body}
@@ -316,9 +289,7 @@ class LatexIndexParser:
                     idx += 1
 
                 # Consume any #n parameter tokens  (#1, #2, …)
-                while idx < text_len and text[idx] in (' ', '\t', '#', '0',
-                                                        '1', '2', '3', '4',
-                                                        '5', '6', '7', '8', '9'):
+                while idx < text_len and text[idx] in (' ', '\t') or (text[idx] == '#') or text[idx].isdigit():
                     idx += 1
 
             else:
@@ -342,7 +313,7 @@ class LatexIndexParser:
                 idx = cls._skip_optional_args(text, idx)
 
             # ------------------------------------------------------------------
-            # Step 2 — Find and balance the BODY block  { ... }
+            # Find and balance the BODY block  { ... }
             # ------------------------------------------------------------------
             body_open = cls._scan_to_char(text, idx, '{')
             if body_open == -1:
@@ -354,7 +325,7 @@ class LatexIndexParser:
                 continue
 
             # ------------------------------------------------------------------
-            # Step 3 — Mask from the macro keyword through the end of the body
+            # Mask from the macro keyword through the end of the body
             # Preserve '\n' / '\r' so editor line/column offsets stay intact.
             # ------------------------------------------------------------------
             for fill_idx in range(start_macro_idx, body_close + 1):
@@ -362,50 +333,6 @@ class LatexIndexParser:
                     working_chars[fill_idx] = ' '
 
         return "".join(working_chars)
-
-    # @classmethod
-    # def _scrub_macro_definitions(cls, text: str) -> str:
-    #     """
-    #     Masks structural LaTeX macro definitions using a simplified outer-brace sweep.
-    #     Strict MVC Compliance: Completely free of type reflection or file I/O operations.
-    #     Identifies macro keywords, targets the first open brace, and clears everything up to the outer closing brace.
-    #     """
-    #     working_chars = list(text)
-    #     text_len = len(text)
-        
-    #     # Use MACRO_START_PATTERN to find the command keywords (\newcommand, \def, etc.)
-    #     for match in cls.MACRO_START_PATTERN.finditer(text):
-    #         start_macro_idx = match.start()
-    #         idx = match.end()
-            
-    #         # Step A: Scan forward to find the VERY FIRST open brace '{' of this macro expression
-    #         first_open_brace_idx = -1
-    #         while idx < text_len:
-    #             char = text[idx]
-    #             if char == '{':
-    #                 first_open_brace_idx = idx
-    #                 break
-    #             elif char == '%' and (idx == 0 or text[idx - 1] != '\\'):
-    #                 # Skip comment noise lines if they occur before the first brace
-    #                 while idx < text_len and text[idx] != '\n':
-    #                     idx += 1
-    #             idx += 1
-                
-    #         if first_open_brace_idx == -1:
-    #             continue
-                
-    #         # Find the matching outer balancing closing brace
-    #         outer_closing_brace_idx = cls._find_closing_brace_index(text, first_open_brace_idx)
-    #         if outer_closing_brace_idx == -1:
-    #             continue
-                
-    #         # Mask out everything from the start of the command word up to the final outer brace
-    #         # Preserve newlines (\n) to keep vertical coordinates stable for the editor viewport
-    #         for fill_idx in range(start_macro_idx, outer_closing_brace_idx + 1):
-    #             if working_chars[fill_idx] not in ('\n', '\r'):
-    #                 working_chars[fill_idx] = ' '
-                    
-    #     return "".join(working_chars)
 
     @classmethod
     def _find_closing_brace_index(cls, text: str, start_brace_pos: int) -> int:
@@ -488,33 +415,42 @@ class LatexIndexParser:
 
     @classmethod
     def _extract_see_modifiers(cls, text: str) -> tuple[str, list[str], list[str]]:
-        """Extracts main index content and parses embedded \\see and \\seealso references safely."""
         see_refs = []
         seealso_refs = []
-        
-        see_pattern = re.compile(r'\\seealso\{([^}]+)\}|\\see\{([^}]+)\}')
+        cleaned_chars = list(text)
+
+        see_pattern = re.compile(r'\\(seealso|see)\{')
         for match in see_pattern.finditer(text):
-            ref_text = match.group(1) if match.group(1) else match.group(2)
-            if match.group(1):  
-                seealso_refs.append(ref_text.strip())
-            else:  
-                see_refs.append(ref_text.strip())
-        
-        cleaned_text = see_pattern.sub('', text).strip()
-        
-        # Fix Data Corruption Hazard: Remove dangling or orphan makeindex pipe operators
+            keyword = match.group(1)
+            inner = cls._extract_balanced_braces(text, match.end())
+            if inner:  # skip empty \see{} or \seealso{}
+                ref = inner.strip()
+                if keyword == "seealso":
+                    seealso_refs.append(ref)
+                else:
+                    see_refs.append(ref)
+
+            # Mask out the full match including braces from cleaned output
+            # regardless of whether inner was empty, to avoid leaving \see{} debris
+            end_pos = match.end() + len(inner) + 1  # +1 for closing brace
+            for i in range(match.start(), end_pos):
+                if i < len(cleaned_chars):
+                    cleaned_chars[i] = ' '
+
+        cleaned_text = "".join(cleaned_chars).strip()
+
         if cleaned_text.endswith('|'):
             cleaned_text = cleaned_text[:-1].strip()
         if cleaned_text.startswith('|'):
             cleaned_text = cleaned_text[1:].strip()
-            
+
         return cleaned_text, see_refs, seealso_refs
 
     @classmethod
     def _build_see_reference_payload(cls, see_list: list[str], seealso_list: list[str]) -> dict:
         """Structures see/seealso references into a normalized dictionary format."""
         return {
-            "see": see_list if see_list else None,
-            "seealso": seealso_list if seealso_list else None,
+            "see": see_list or [],
+            "seealso": seealso_list or [],
             "has_references": bool(see_list or seealso_list)
         }
