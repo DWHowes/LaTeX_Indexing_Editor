@@ -348,10 +348,10 @@ class AppPipelineController(QObject):
         # Pass the verified database path into the background loading worker thread
         from models.project_load_worker import SafeProjectLoadThread 
         self._load_thread = SafeProjectLoadThread(
-            db_path=db_target_path, 
-            project_root=selected_dir, 
-            parent=self
-        )
+                db_persistence=self.scope_ctrl.get_persistence_model(), 
+                project_root=selected_dir, 
+                parent=self
+            )
         
         self._load_thread.status_updated.connect(self.window.status_bar.showMessage, Qt.ConnectionType.QueuedConnection)
         self._load_thread.error_occurred.connect(self.handle_pipeline_failure, Qt.ConnectionType.QueuedConnection)

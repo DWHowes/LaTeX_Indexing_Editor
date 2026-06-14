@@ -14,10 +14,10 @@ class ProjectLoadWorker(QObject):
     finished = Signal(bool, list, list, list, str) 
     error_occurred = Signal(str)
 
-    def __init__(self, db_path: str, project_root: str):
+    def __init__(self, db_persistence, project_root: str):
         # Explicitly removed repository parameters to prevent thread cross-talk
         super().__init__()
-        self.db_path_str = str(db_path)
+        self.db_persist = db_persistence
         self.project_root_str = str(project_root)
         self._tex_file_paths = []
         self._is_abort_requested = False
@@ -29,7 +29,7 @@ class ProjectLoadWorker(QObject):
             if self._is_abort_requested:
                 return
             
-            db_path = Path(self.db_path_str).resolve()
+            db_path = Path(self.db_persist.get_active_database_path()).resolve()
             project_root = Path(self.project_root_str).resolve()
             
             self.status_updated.emit("Scanning project directory tree nodes...")
@@ -49,7 +49,7 @@ class ProjectLoadWorker(QObject):
             if actual_db_to_load:
                 self.status_updated.emit("Database file localized. Validating data manifest records...")
                 
-                headings, references = self._thread_local_database_extract(str(actual_db_to_load))
+                headings, references = self.db_persist.fetch_index_manifest()
                 
                 # Check if the tables actually contain entries (Legacy vs Brand New Empty Database)
                 if headings or references:
@@ -67,55 +67,6 @@ class ProjectLoadWorker(QObject):
             import traceback
             print(f"CRITICAL WORKER TRACEBACK:\n{traceback.format_exc()}")
             self.error_occurred.emit(str(e))
-
-# models/project_load_worker.py
-
-    def _thread_local_database_extract(self, target_db_file: str) -> tuple[list, list]:
-        """Creates a short-lived thread connection and reconstructs list structures."""
-        import json
-        conn = None
-        headings = []
-        references = []
-        try:
-            conn = sqlite3.connect(target_db_file)
-            conn.row_factory = sqlite3.Row  
-            cursor = conn.cursor()
-            
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='project_headings';")
-            if cursor.fetchone():
-                # Extract Headings
-                cursor.execute("SELECT * FROM project_headings")
-                headings = [dict(row) for row in cursor.fetchall()]
-                
-                # Extract References
-                cursor.execute("SELECT * FROM project_references")
-                for row in cursor.fetchall():
-                    r_dict = dict(row)
-                    
-                    # Unpack JSON references back to native Python list variables cleanly
-                    try:
-                        r_dict["see_references"] = json.loads(r_dict["see_references"]) if r_dict["see_references"] else None
-                    except Exception:
-                        r_dict["see_references"] = None
-                        
-                    try:
-                        r_dict["seealso_references"] = json.loads(r_dict["seealso_references"]) if r_dict["seealso_references"] else None
-                    except Exception:
-                        r_dict["seealso_references"] = None
-                        
-                    # Re-convert structural flag integers back to booleans
-                    r_dict["has_references"] = bool(r_dict["has_references"])
-                    
-                    references.append(r_dict)
-                    
-        except sqlite3.Error as se:
-            print(f"[Worker Thread DB Error] {se}")
-        finally:
-            if conn:
-                conn.close() 
-        return headings, references
-
-# Inside models/project_load_worker.py
 
     def _scan_folder_data(self, current_path: str, output_list: list):
         """Recursively gathers folder assets onto tree dictionary blocks using unified path shapes."""
@@ -193,7 +144,7 @@ class ProjectLoadWorker(QObject):
                 abs_pos_coord = uid_dict.get("absolute_index") or uid_dict.get("absolute_position")
                 
                 see_array = uid_dict.get("see") or None
-                seealso_array = uid_array = uid_dict.get("seealso") or None
+                seealso_array = uid_dict.get("seealso") or None
                 has_ref_flag = bool(uid_dict.get("has_references") or see_array or seealso_array)
 
                 references_payload.append({
@@ -223,14 +174,13 @@ class SafeProjectLoadThread(QThread):
     finished = Signal(bool, list, list, list, str)
     error_occurred = Signal(str)
 
-    def __init__(self, db_path: str, project_root: str, parent=None):
+    def __init__(self, db_persistence, project_root: str, parent=None):
         super().__init__(parent)
-        self.db_path_str = str(db_path)
+        self.db_persist = db_persistence
         self.project_root_str = str(project_root)
         
         # Instantiate the worker safely on initialization
-        from models.project_load_worker import ProjectLoadWorker
-        self.worker = ProjectLoadWorker(db_path=self.db_path_str, project_root=self.project_root_str)
+        self.worker = ProjectLoadWorker(db_persistence=self.db_persist, project_root=self.project_root_str)
         
         # Relocate the worker's operational context down onto this thread container
         self.worker.moveToThread(self)

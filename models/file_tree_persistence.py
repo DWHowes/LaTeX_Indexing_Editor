@@ -200,59 +200,59 @@ class FileTreePersistence:
             print(f"[DB CRITICAL FAILURE] Failed to execute deletion statement: {db_err}")
             return False
     
-    def extract_project_manifest_tables(self, absolute_path: str) -> tuple[list[dict], list[dict]]:
-        """
-        Thread-safe relational extraction engine. Parses existing DB tables 
-        for structurally mapped index headers and references matching the path.
-        Strict MVC: Executes pure SQL operations with no UI synchronization.
-        """
+    # def extract_project_manifest_tables(self, absolute_path: str) -> tuple[list[dict], list[dict]]:
+    #     """
+    #     Thread-safe relational extraction engine. Parses existing DB tables 
+    #     for structurally mapped index headers and references matching the path.
+    #     Strict MVC: Executes pure SQL operations with no UI synchronization.
+    #     """
 
-        headings = []
-        references = []
+    #     headings = []
+    #     references = []
         
-        # Ensure self.connection_string or self.db_path is defined on your model
-        if not self.db_path:
-            return headings, references
+    #     # Ensure self.connection_string or self.db_path is defined on your model
+    #     if not self.db_path:
+    #         return headings, references
 
-        # Establish isolated connection to guarantee thread-safe reading out-of-band
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+    #     # Establish isolated connection to guarantee thread-safe reading out-of-band
+    #     conn = sqlite3.connect(self.db_path)
+    #     conn.row_factory = sqlite3.Row
+    #     cursor = conn.cursor()
         
-        try:
-            # 1. Gather structural headings mapped to this file target
-            cursor.execute(
-                """
-                SELECT id, line_number, column_offset, heading_text, fallback_tag 
-                FROM project_headings 
-                WHERE file_path = ? 
-                ORDER BY line_number ASC
-                """,
-                (absolute_path,)
-            )
-            headings = [dict(row) for row in cursor.fetchall()]
+    #     try:
+    #         # 1. Gather structural headings mapped to this file target
+    #         cursor.execute(
+    #             """
+    #             SELECT id, line_number, column_offset, heading_text, fallback_tag 
+    #             FROM project_headings 
+    #             WHERE file_path = ? 
+    #             ORDER BY line_number ASC
+    #             """,
+    #             (absolute_path,)
+    #         )
+    #         headings = [dict(row) for row in cursor.fetchall()]
 
-            # 2. Gather cross-references (see / seealso) mapped to this file target
-            cursor.execute(
-                """
-                SELECT id, line_number, column_offset, reference_source, reference_target, fallback_tag 
-                FROM project_references 
-                WHERE file_path = ? 
-                ORDER BY line_number ASC
-                """,
-                (absolute_path,)
-            )
-            references = [dict(row) for row in cursor.fetchall()]
+    #         # 2. Gather cross-references (see / seealso) mapped to this file target
+    #         cursor.execute(
+    #             """
+    #             SELECT id, line_number, column_offset, reference_source, reference_target, fallback_tag 
+    #             FROM project_references 
+    #             WHERE file_path = ? 
+    #             ORDER BY line_number ASC
+    #             """,
+    #             (absolute_path,)
+    #         )
+    #         references = [dict(row) for row in cursor.fetchall()]
             
-        except sqlite3.Error as e:
-            print(f"sqlite3 error: {e}")
-            # Graceful fallback to prevent background worker crashes on schema mismatches
-            pass
-        finally:
-            cursor.close()
-            conn.close()
+    #     except sqlite3.Error as e:
+    #         print(f"sqlite3 error: {e}")
+    #         # Graceful fallback to prevent background worker crashes on schema mismatches
+    #         pass
+    #     finally:
+    #         cursor.close()
+    #         conn.close()
 
-        return headings, references
+    #     return headings, references
 
     def update_active_database_connection(self, new_db_path: str) -> None:
         """
@@ -440,3 +440,45 @@ class FileTreePersistence:
                 
         except sqlite3.Error as err:
             print(f"[MODEL PERSISTENCE CRITICAL FAILURE] Serialization failed: {err}")
+
+    def fetch_index_manifest(self) -> tuple[list[dict], list[dict]]:
+        """
+        Thread-safe read of project_headings and project_references.
+        Opens and closes its own connection, safe to call from a worker thread.
+        """
+        import json
+        headings, references = [], []
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='project_headings'")
+            if not cursor.fetchone():
+                conn.close()
+                return headings, references
+
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='project_references'")
+            if not cursor.fetchone():
+                conn.close()
+                return headings, references
+
+            headings = [dict(r) for r in cursor.execute("SELECT * FROM project_headings").fetchall()]
+
+            for row in cursor.execute("SELECT * FROM project_references").fetchall():
+                r = dict(row)
+                try:
+                    r["see_references"] = json.loads(r["see_references"]) if r["see_references"] else None
+                except Exception:
+                    r["see_references"] = None
+                try:
+                    r["seealso_references"] = json.loads(r["seealso_references"]) if r["seealso_references"] else None
+                except Exception:
+                    r["seealso_references"] = None
+                r["has_references"] = bool(r["has_references"])
+                references.append(r)
+
+            conn.close()
+        except sqlite3.Error as e:
+            print(f"[FileTreePersistence] fetch_index_manifest error: {e}")
+        return headings, references
