@@ -31,7 +31,7 @@ class TextSanitizer:
         return normalized
     
     @staticmethod
-    def sanitize(self, raw_file_contents_string: str) -> str:
+    def sanitize(raw_file_contents_string: str) -> str:
         """
         Model Layer Business Logic Contract.
         Normalizes line endings and clears non-printable control blocks 
