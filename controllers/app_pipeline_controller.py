@@ -100,7 +100,7 @@ class AppPipelineController(QObject):
         self.window.window_close_requested.connect(self.coordinate_application_shutdown)
         
         # --- Project Sidebar & Navigation Trees ---
-        self.file_tree_widget.file_tree_state_changed.connect(self.handle_file_scope_mutation)
+        # self.file_tree_widget.file_tree_state_changed.connect(self.handle_file_scope_mutation)
         self.index_tree_widget.coordinate_navigation_requested.connect(self.handle_index_navigation)
         
         # Map direct file double-clicks to a dedicated single-argument slot contract
@@ -390,7 +390,7 @@ class AppPipelineController(QObject):
             self.idx_ctrl.clear_staged_entries()
 
         # Render the workspace file tree structure rows
-        self.file_tree_widget.populate_file_hierarchy(file_tree_payload, {})
+        self.file_tree_widget.populate_file_hierarchy(file_tree_payload)
 
         # Realign session logging paths natively
         project_root_dir = os.path.dirname(os.path.normpath(db_path))
@@ -688,12 +688,12 @@ class AppPipelineController(QObject):
         print(f"Project Loading Failure: {err_msg}")
         QMessageBox.critical(self.window, "Project Loading Failure", f"An out-of-thread error occurred:\n{err_msg}")
 
-    @Slot(str, bool)
-    def handle_file_scope_mutation(self, file_path: str, is_included: bool):
-        if self.window.file_persistence:
-            self.window.file_persistence.update_file_active_state(file_path, is_included)
-            self._tree_modified = True
-            self.window.status_bar.set_status_text("Scope configuration adjustment recorded.")
+    # @Slot(str, bool)
+    # def handle_file_scope_mutation(self, file_path: str, is_included: bool):
+    #     if self.window.file_persistence:
+    #         self.window.file_persistence.update_file_active_state(file_path, is_included)
+    #         self._tree_modified = True
+    #         self.window.status_bar.set_status_text("Scope configuration adjustment recorded.")
 
     @Slot(str, int, int, str)
     def handle_index_navigation(self, path: str, line: int, col: int, fallback: str):
