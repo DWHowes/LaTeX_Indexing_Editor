@@ -7,7 +7,7 @@ class TextSanitizer:
     """
     
     @staticmethod
-    def clean_windows_path(raw_path: str) -> str:
+    def normalize_file_path(raw_path: str) -> str:
         """
         Removes hidden control characters, strips enclosing quotes, 
         and normalizes slashes to cross-platform safe formats.
@@ -29,7 +29,8 @@ class TextSanitizer:
             normalized = os.path.normpath(os.path.abspath(normalized))
         
         return normalized
-
+    
+    @staticmethod
     def sanitize(self, raw_file_contents_string: str) -> str:
         """
         Model Layer Business Logic Contract.

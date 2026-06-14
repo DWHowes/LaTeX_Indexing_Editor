@@ -35,7 +35,7 @@ class DocumentIOController(QObject):
         if not file_path:
             return False
 
-        cleaned_path = self.text_sanitizer.clean_windows_path(file_path)
+        cleaned_path = self.text_sanitizer.normalize_file_path(file_path)
         self.backup_manager.register_file_for_session(cleaned_path)
         
         try:
@@ -61,7 +61,7 @@ class DocumentIOController(QObject):
         if not resolved_file_path or not isinstance(editor, EditorTab):
             return ""
             
-        norm_path = self.text_sanitizer.clean_windows_path(resolved_file_path)
+        norm_path = self.text_sanitizer.normalize_file_path(resolved_file_path)
         editor.set_absolute_path(norm_path)
         
         if self.save_tex_file_to_disk(editor, norm_path):
