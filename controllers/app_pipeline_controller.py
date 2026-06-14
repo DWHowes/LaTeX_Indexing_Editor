@@ -129,7 +129,7 @@ class AppPipelineController(QObject):
         self.window.menu_bar.toggle_edit_list_requested.connect(lambda: self._orchestrate_sidebar_focus(2))        
         self.window.menu_bar.toggle_entry_window_requested.connect(self._handle_index_entry_window_toggle)
         self.window.menu_bar.toggle_dark_mode_requested.connect(
-            lambda: self._handle_dark_mode_toggle(not bool(AppStyleConfiguration.event_broker().property("is_dark_mode")))
+            lambda: self._handle_dark_mode_toggle(not bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode")))
         )
 
         # --- Toolbar Controls ---
@@ -162,7 +162,7 @@ class AppPipelineController(QObject):
     def _synchronize_initial_workspace_theme(self):
         """Pushes initial theme choices down to the view layout tree."""
         broker = AppStyleConfiguration.event_broker()
-        is_dark = bool(broker.property("is_dark_mode"))
+        is_dark = bool(broker.get_property("is_dark_mode"))
         AppStyleConfiguration.configure_application_theme(is_dark)
         self.window.tool_bar.refresh_theme_presentation(is_dark)
 
@@ -600,8 +600,8 @@ class AppPipelineController(QObject):
         broker.set_property("is_dark_mode", is_dark)
         if self.prefs:
             self.prefs.update_visual_preferences(
-                font_family=str(broker.property("font_family") or "Arial"),
-                font_size=int(broker.property("font_size") or 12),
+                font_family=str(broker.get_property("font_family") or "Arial"),
+                font_size=int(broker.get_property("font_size") or 12),
                 dark_mode=is_dark
             )
         AppStyleConfiguration.configure_application_theme(is_dark)
@@ -627,14 +627,14 @@ class AppPipelineController(QObject):
         if self.prefs:
             self.prefs.update_visual_preferences(
                 font_family=family_name,
-                font_size=broker.property("font_size"),
-                dark_mode=broker.property("is_dark_mode")
+                font_size=broker.get_property("font_size"),
+                dark_mode=broker.get_property("is_dark_mode")
             )
             
         # ------------------------------------------------------------------
         # MVC COMPLIANT BROADCAST LOOP: Push updates to live tabs
         # ------------------------------------------------------------------
-        current_size = int(broker.property("font_size") or 12)
+        current_size = int(broker.get_property("font_size") or 12)
         tabs_container = self.window.tabs
         
         if tabs_container:
@@ -653,15 +653,15 @@ class AppPipelineController(QObject):
         broker.set_property("font_size", size)
         if self.prefs:
             self.prefs.update_visual_preferences(
-                font_family=broker.property("font_family"),
+                font_family=broker.get_property("font_family"),
                 font_size=size,
-                dark_mode=broker.property("is_dark_mode")
+                dark_mode=broker.get_property("is_dark_mode")
             )
             
         # ------------------------------------------------------------------
         # MVC COMPLIANT BROADCAST LOOP: Push adjustments to live tabs
         # ------------------------------------------------------------------
-        current_family = str(broker.property("font_family") or "Arial")
+        current_family = str(broker.get_property("font_family") or "Arial")
         tabs_container = self.window.tabs
         
         if tabs_container:
