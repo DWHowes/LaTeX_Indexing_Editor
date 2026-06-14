@@ -157,7 +157,7 @@ class AppPipelineController(QObject):
         
         self.scope_ctrl.scope_mutated.connect(lambda: self.window.synchronize_window_title(self.scope_ctrl.active_project_name))    
 
-        self._rewire_undo_redo_signals(self, self.window.tabs.currentIndex())  # Initial wiring for the first tab
+        self._rewire_undo_redo_signals(self.window.tabs.currentIndex())  # Initial wiring for the first tab
 
     def _synchronize_initial_workspace_theme(self):
         """Pushes initial theme choices down to the view layout tree."""
@@ -175,6 +175,7 @@ class AppPipelineController(QObject):
                     tab.undo_performed.disconnect(self._handle_index_undo)
                     tab.redo_performed.disconnect(self._handle_index_redo)
                 except RuntimeError:
+                    print(f"Warning: Failed to disconnect undo/redo signals from tab index {i}. This may indicate a stale reference or a non-EditorTab widget.")
                     pass
 
         active_tab = self.window.tabs.widget(index)

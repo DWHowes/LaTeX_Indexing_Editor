@@ -148,9 +148,9 @@ class WorkspaceLifecycleController(QObject):
         if isinstance(active_tab, EditorTab):
             active_tab.toggle_find_dialog()
 
-    # def halt_active_search_workers(self) -> None:
-    #     """Public cleanup contract invoked during application shutdown."""
-    #     pass
+    def halt_active_search_workers(self) -> None:
+        """Public cleanup contract invoked during application shutdown."""
+        pass
 
     def open_file_by_path(self, absolute_path: str) -> EditorTab:
         """

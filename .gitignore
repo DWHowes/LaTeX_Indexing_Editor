@@ -1,6 +1,7 @@
 .venv
 .vscode
 .session_logs
+.session_backups
 __pycache__
 documentation
 tests
