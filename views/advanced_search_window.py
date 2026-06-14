@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, Signal, QSettings, Slot
 from PySide6.QtGui import QStandardItem, QStandardItemModel, QCursor
 
 # Use explicit snake_case naming style for import file paths
-from models.search_worker import SearchWorker
+from models.search_worker import SafeSearchThread
 from views.fuzzy_search_panel import FuzzySearchPanel
 from views.exact_search_panel import ExactSearchPanel
 
@@ -132,7 +132,7 @@ class AdvancedSearchWindow(QDialog):
         threshold_val = self.fuzzy_panel.get_threshold() if is_fuzzy_mode else 100
 
         # Launch the background model search thread worker loop
-        self.worker = SearchWorker(active_project_files, term, threshold_val, is_fuzzy_mode)
+        self.worker = SafeSearchThread(active_project_files, term, threshold_val, is_fuzzy_mode)
         self.worker.match_found.connect(self.append_search_record)
         self.worker.finished.connect(self._on_search_finished)
         self.worker.start()
