@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QListView, QVBoxLayout, QWidget, QLabel
-from PySide6.QtCore import Signal, Slot, Qt
+from PySide6.QtCore import QModelIndex, Signal, Slot, Qt
 
 class EntryModifierList(QWidget):
     """
@@ -14,11 +14,6 @@ class EntryModifierList(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
-
-        # Enforce viewport palette inheritance natively inside the child component
-        # self.setAutoFillBackground(True)
-        # if self.viewport():
-        #     self.viewport().setAutoFillBackground(True)
 
         # Presentation Header
         self.title_label = QLabel("Active Entry Records Editor", self)
@@ -36,7 +31,7 @@ class EntryModifierList(QWidget):
         # Self-bind interaction hooks to map internal events out cleanly later
         self.entries_list_view.doubleClicked.connect(self._on_row_double_clicked)
 
-    @Slot(object)
+    @Slot(QModelIndex)
     def _on_row_double_clicked(self, model_index):
         """Assembles data primitives from chosen indices to fire up streams."""
         if not model_index.isValid():
