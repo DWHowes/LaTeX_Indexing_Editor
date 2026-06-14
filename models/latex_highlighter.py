@@ -9,16 +9,7 @@ class LatexHighlighter(QSyntaxHighlighter):
     def __init__(self, parent=None, is_dark=False):
         super().__init__(parent)
         self.is_dark = is_dark
-        
-        # Fix Crash: Initialize the missing configuration styles matrix tracking container
-        self.styles = {
-            "keyword": {"bold": True, "italic": False},
-            "command": {"bold": False, "italic": False},
-            "comment": {"bold": False, "italic": True},
-            "math":    {"bold": False, "italic": False},
-            "brace":   {"bold": True, "italic": False}
-        }
-        
+               
         self.refresh_rules() # Initialize color rules based on the current theme state
 
     def set_dark_mode(self, is_dark: bool):
@@ -28,46 +19,26 @@ class LatexHighlighter(QSyntaxHighlighter):
         self.rehighlight() # Force the editor view canvas to repaint instantly
 
     def refresh_rules(self):
-        """Configures color matrices dynamically based on theme parameters safely casting to native formats."""
+        """Configures styles matrix dynamically based on theme parameters safely casting to native formats."""
         if self.is_dark:
-            # High-contrast vibrant shades for charcoal dark editor backgrounds
-            self.colors = {
-                "keyword": "#FF79C6",  # Pink
-                "command": "#8BE9FD",  # Cyan
-                "comment": "#6272A4",  # Muted Blue-Grey
-                "math":    "#50FA7B",  # Radiant Green
-                "brace":   "#FFB86C"   # Orange
+            self.styles = {
+                "keyword": {"bold": True,  "italic": False, "color": "#FF79C6"},
+                "command": {"bold": False, "italic": False, "color": "#8BE9FD"},
+                "comment": {"bold": False, "italic": True,  "color": "#6272A4"},
+                "math":    {"bold": False, "italic": False, "color": "#50FA7B"},
+                "brace":   {"bold": True,  "italic": False, "color": "#FFB86C"},
             }
         else:
-            # OPTIMIZED: Deep, saturated LaTeX IDE palette for crisp paper environments
-            self.colors = {
-                "keyword": "#800000",  # Rich Maroon / Deep Crimson (Excellent legibility)
-                "command": "#0000BB",  # True Royal Blue (Deeper saturation than standard navy)
-                "comment": "#555555",  # Dark Charcoal Grey (Substantial contrast boost from #A0A0A0)
-                "math":    "#006600",  # Deep Forest Green (Deeper, earthier hue prevents glare)
-                "brace":   "#B22222"   # Firebrick Red (Deeper structural accent for structural braces)
+            self.styles = {
+                "keyword": {"bold": True,  "italic": False, "color": "#800000"},
+                "command": {"bold": False, "italic": False, "color": "#0000BB"},
+                "comment": {"bold": False, "italic": True,  "color": "#555555"},
+                "math":    {"bold": False, "italic": False, "color": "#006600"},
+                "brace":   {"bold": True,  "italic": False, "color": "#B22222"},
             }
 
-        # Sync colors hex records back down onto the styles matrix configuration
-        for key in self.colors:
-            if key in self.styles:
-                self.styles[key]["color"] = self.colors[key]
-
-        # Fix Priority Overlap Bug: Order patterns carefully from generic to specific.
-        patterns = [
-            (r"\\\w+", "command"),
-            (r"\\(?:begin|end|section|subsection|chapter)\b", "keyword"),
-            (r"(?<!\\)%.*", "comment"),  
-            (r"\$[^\$\n]*?\$", "math"),   
-            (r"\{|\}", "brace")
-        ]
-
         # Pre-compile regular expressions using native QRegularExpression objects
-        self.rules = []
-        for pattern_str, style_key in patterns:
-            fmt = self.create_format(style_key)
-            q_regex = QRegularExpression(pattern_str)
-            self.rules.append((q_regex, fmt))
+        self._recompile_rules()
 
     def create_format(self, style_key: str) -> QTextCharFormat:
         """Assembles QTextCharFormat tracking records from the core style dictionary matrix safely."""
@@ -87,11 +58,35 @@ class LatexHighlighter(QSyntaxHighlighter):
         return fmt
     
     def update_style(self, style_key: str, color_hex: str):
-        """Updates a specific styling segment dynamically and pushes text updates back out to the editor canvas."""
+        """Updates a single style entry. Use update_styles() for multiple changes."""
         if style_key in self.styles:
             self.styles[style_key]["color"] = str(color_hex)
-            self.refresh_rules()
-            self.rehighlight() # Force the text editor layout to refresh instantly
+            self._recompile_rules()
+            self.rehighlight()
+
+    def update_styles(self, updates: dict):
+        """Batch-updates multiple style entries with a single recompile and repaint."""
+        for style_key, color_hex in updates.items():
+            if style_key in self.styles:
+                self.styles[style_key]["color"] = str(color_hex)
+        self._recompile_rules()
+        self.rehighlight()
+
+    def _recompile_rules(self):
+        """Compiles QRegularExpression rule objects from current styles. Called after any style change."""
+        patterns = [
+            (r"\\(?:begin|end|section|subsection|chapter)\b", "keyword"),
+            (r"\\\w+", "command"),
+            (r"(?<!\\)%.*", "comment"),
+            (r"(?<!\\)\$[^\$\n]*?(?<!\\)\$", "math"),
+            (r"\{|\}", "brace"),
+        ]
+
+        self.rules = []
+        for pattern_str, style_key in patterns:
+            fmt = self.create_format(style_key)
+            q_regex = QRegularExpression(pattern_str)
+            self.rules.append((q_regex, fmt))
 
     def highlightBlock(self, text: str):
         """
