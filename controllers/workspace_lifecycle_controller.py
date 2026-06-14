@@ -204,9 +204,9 @@ class WorkspaceLifecycleController(QObject):
         # 2. Query your shared static configuration state models
         broker = AppStyleConfiguration.event_broker()
         
-        current_family = str(broker.property("font_family") or "Arial")
-        current_size = int(broker.property("font_size") or 12)
-        current_dark = bool(broker.property("is_dark_mode") == True)
+        current_family = str(broker.get_property("font_family") or "Arial")
+        current_size = int(broker.get_property("font_size") or 12)
+        current_dark = bool(broker.get_property("is_dark_mode") == True)
 
         # 3. MVC COMPLIANT STATE SYNCHRONIZATION
         # Pass data states down through public view signature contracts
