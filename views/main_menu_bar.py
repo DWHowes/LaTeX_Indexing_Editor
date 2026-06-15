@@ -6,6 +6,7 @@ class MainMenuBar(QMenuBar):
     # Explicit PySide6 Event Interface Contracts
     open_project_requested = Signal()
     save_project_requested = Signal()
+    close_project_requested = Signal()
     find_action_triggered = Signal()
     advanced_search_requested = Signal()
     toggle_file_sidebar_requested = Signal()
@@ -32,8 +33,13 @@ class MainMenuBar(QMenuBar):
         save_action = file_menu.addAction("&Save Project", QKeySequence("Ctrl+S"))
         save_action.triggered.connect(lambda: self.save_project_requested.emit())
         
+        close_action = file_menu.addAction("&Close Project", QKeySequence("Ctrl+W"))
+        close_action.triggered.connect(lambda: self.close_project_requested.emit())
+        
         file_menu.addSeparator()
-        file_menu.addAction("&Exit", self.window.close, QKeySequence("Alt+F4"))
+        
+        exit_action = file_menu.addAction("&Exit", self.window.close, QKeySequence("Alt+F4"))
+        exit_action.triggered.connect(lambda: self.close_project_requested.emit())
 
         # --- Edit Menu Dropdowns ---
         edit_menu = self.addMenu("&Edit")

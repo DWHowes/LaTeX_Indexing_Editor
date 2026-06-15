@@ -229,3 +229,49 @@ class WorkspaceLifecycleController(QObject):
     def set_tabs_widget(self, tabs_widget) -> None:
         """Public contract for updating the active tab container reference."""
         self.tabs = tabs_widget
+
+    def close_all_tabs(self, prompt: bool = True, doc_io=None) -> bool:
+        """
+        Closes all open editor tabs from right to left.
+        If prompt=True, raises save/discard/cancel dialog for unsaved tabs.
+        Returns False if the user cancels at any point — caller must abort.
+        doc_io: DocumentIOController reference, required only when prompt=True.
+        """
+        if not self.tabs:
+            return True
+
+        for i in range(self.tabs.count() - 1, -1, -1):
+            tab = self.tabs.widget(i)
+            if not isinstance(tab, EditorTab):
+                self.tabs.removeTab(i)
+                continue
+
+            if prompt and tab.is_modified():
+                self.tabs.setCurrentIndex(i)
+                from PySide6.QtWidgets import QMessageBox
+                box = QMessageBox(self.tabs.window())
+                box.setWindowTitle("Unsaved Changes")
+                file_name = tab.get_absolute_path() or "Untitled"
+                box.setText(f"'{file_name}' has unsaved changes. Save before closing?")
+                save_btn = box.addButton(QMessageBox.StandardButton.Save)
+                discard_btn = box.addButton(QMessageBox.StandardButton.Discard)
+                cancel_btn = box.addButton(QMessageBox.StandardButton.Cancel)
+                box.exec()
+                clicked = box.clickedButton()
+
+                if clicked == cancel_btn:
+                    return False  # Abort entire close sequence
+                elif clicked == save_btn:
+                    path = tab.get_absolute_path()
+                    if path and doc_io:
+                        doc_io.save_tex_file_to_disk(tab, path)
+
+            file_path = tab.get_absolute_path()
+            if self.file_watcher and file_path:
+                self.file_watcher.unregister_file_path(file_path)
+
+            self.tabs.removeTab(i)
+            tab.on_dialog_closed()
+            tab.deleteLater()
+
+        return True

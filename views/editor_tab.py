@@ -49,16 +49,6 @@ class EditorTab(QPlainTextEdit):
         palette.setColor(QPalette.ColorGroup.Active, QPalette.ColorRole.HighlightedText, highlight_text)
         palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.HighlightedText, highlight_text)
         editor_widget.setPalette(palette)
-        # 2. Modify the highlight background brush to your exact yellow color matrix
-        # palette.setColor(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight, QColor(255, 255, 0, 100))
-        # palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Highlight, QColor(255, 255, 0, 100))
-
-        # # 3. Ensure the text characters on top of the yellow remain legible (black text)
-        # palette.setColor(QPalette.ColorGroup.Active, QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
-        # palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
-
-        # # 4. Bind the modified color palette back onto the active presentation widget
-        # editor_widget.setPalette(palette)    
 
         document_canvas = self.document()
         
@@ -408,13 +398,7 @@ class EditorTab(QPlainTextEdit):
             super().keyPressEvent(event)
         else:
             event.ignore()
-    # def keyPressEvent(self, event):
-    #     """Drops selection highlight maps instantly if the user strikes Escape."""
-    #     if event and event.key() == Qt.Key.Key_Escape:
-    #         cursor = self.textCursor()
-    #         if cursor.hasSelection():
-    #             cursor.clearSelection()
-    #             self.setTextCursor(cursor)
-    #         event.accept()
-    #     else:
-    #         super().keyPressEvent(event)            
+
+    def is_modified(self) -> bool:
+        """Public contract exposing the underlying document's modified state."""
+        return self.document().isModified()            

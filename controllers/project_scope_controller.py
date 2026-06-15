@@ -93,3 +93,13 @@ class ProjectScopeController(QObject):
         """Public contract to route pruning requests for index terms."""
         self.model.prune_index_record(full_path_str)
         self.scope_mutated.emit()
+
+    def close_active_project(self) -> None:
+        """
+        Resets all active project state back to a neutral baseline.
+        Inverse of initialize_project_database — clears DB reference without
+        touching the persistence model's schema or disk files.
+        """
+        self.active_project_name = "Untitled Project"
+        self.model.reset_to_default_state()
+        self.scope_mutated.emit()        

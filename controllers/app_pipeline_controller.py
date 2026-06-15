@@ -123,8 +123,10 @@ class AppPipelineController(QObject):
         # --- Menu Navigation Actions ---
         self.window.menu_bar.open_project_requested.connect(self.select_project_folder_workflow)
         self.window.menu_bar.save_project_requested.connect(self.execute_project_save_workflow)
+        self.window.menu_bar.close_project_requested.connect(self._execute_project_close_workflow)        
         self.window.menu_bar.find_action_triggered.connect(self.lc_ctrl.route_find_to_active_tab)
         self.window.menu_bar.advanced_search_requested.connect(self._spawn_advanced_search_view)
+        self.window.menu_bar.preferences_requested.connect(self._spawn_preferences_dialog)        
 
         # Structural Layout Hotkey Configurations
         self.window.menu_bar.toggle_file_sidebar_requested.connect(lambda: self._orchestrate_sidebar_focus(0))
@@ -134,7 +136,6 @@ class AppPipelineController(QObject):
         self.window.menu_bar.toggle_dark_mode_requested.connect(
             lambda: self._handle_dark_mode_toggle(not bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode")))
         )
-        self.window.menu_bar.preferences_requested.connect(self._spawn_preferences_dialog)        
 
         # --- Toolbar Controls ---
         self.window.tool_bar.sidebar_panel_requested.connect(self._orchestrate_sidebar_focus)
@@ -259,6 +260,12 @@ class AppPipelineController(QObject):
             self.window.status_bar.showMessage("Project loading canceled.", 2000)
             return
         
+        # Close the active project before loading a new one.
+        # Abort the incoming load if the user cancels the unsaved-tabs prompt.
+        if self.scope_ctrl.active_project_name != "Untitled Project":
+            if not self._execute_project_close_workflow():
+                return        
+            
         # Anchor the backup manager to the newly selected project root
         self.backup_manager.initialize_project_context(selected_dir)
 
@@ -383,6 +390,31 @@ class AppPipelineController(QObject):
     def _spawn_preferences_dialog(self) -> None:
         """Instantiates and executes the preferences configuration flow."""
         self._index_prefs_ctrl.execute_configuration_flow()
+
+    @Slot()
+    def _execute_project_close_workflow(self) -> bool:
+        """
+        Coordinates full project teardown sequence.
+        Returns False if the user cancels at the unsaved-tabs prompt — 
+        callers must check the return value before proceeding.
+        """
+        if not self.lc_ctrl.close_all_tabs(prompt=True, doc_io=self.doc_io):
+            self.window.status_bar.showMessage("Project close cancelled.", 2000)
+            return False
+
+        if self.idx_ctrl:
+            self.idx_ctrl.clear_staged_entries()
+
+        self.index_tree_widget.clear()
+        self.file_tree_widget.clear()
+
+        self.scope_ctrl.close_active_project()
+        self._index_prefs_ctrl.set_active_project(None)
+
+        self._tree_modified = False
+        self.window.synchronize_window_title(None)
+        self.window.status_bar.showMessage("Project closed.", 2000)
+        return True
         
     @Slot()
     def execute_project_save_workflow(self):
