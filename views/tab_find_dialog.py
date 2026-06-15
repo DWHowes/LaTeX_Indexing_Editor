@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLineEdit, QPushButton, 
-                             QLabel, QCheckBox, QFrame, QWidget, QApplication, QWidget)
+                             QLabel, QCheckBox, QFrame, QWidget, QApplication,)
 from PySide6.QtCore import Qt, Signal, QSize, QEvent
 from PySide6.QtGui import QPainter, QPen, QCursor, QPalette
 
@@ -39,6 +39,7 @@ class CustomVectorButton(QPushButton):
                 painter.drawLine(cx - 5, cy - 3, cx, cy + 2)
                 painter.drawLine(cx, cy + 2, cx + 5, cy - 3)
 
+from views.app_style_configuration import AppStyleConfiguration
 
 class TabFindDialog(QDialog):
     """
@@ -117,15 +118,16 @@ class TabFindDialog(QDialog):
         current_global_palette = QApplication.palette()
         self.setPalette(current_global_palette)
         
-        # Determine separator tracking lines visibility based on window background index brightness
-        is_dark = current_global_palette.color(QPalette.ColorRole.Window).value() < 100
-        if hasattr(self, "separator_line") and self.separator_line:
-            sep_style = "color: #555555;" if is_dark else "color: #d0d0d0;"
-            self.separator_line.setStyleSheet(sep_style)
+        # Determine separator tracking lines visibility based on application style.
+        broker = AppStyleConfiguration.event_broker()
+        is_dark = bool(broker.get_property("is_dark_mode"))
 
+        sep_style = "color: #555555;" if is_dark else "color: #d0d0d0;"
+        self.separator_line.setStyleSheet(sep_style)
         for child in self.findChildren(QWidget):
             child.setPalette(current_global_palette)
             child.update()
+            
         self.update()
 
     def changeEvent(self, event):
@@ -165,7 +167,7 @@ class TabFindDialog(QDialog):
             self.close()
             event.accept()
         else:
-            super().keyPressEvent(self, event)
+            super().keyPressEvent(event)
 
     def closeEvent(self, event):
         self.closed.emit()
