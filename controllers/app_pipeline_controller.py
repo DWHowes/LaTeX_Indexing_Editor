@@ -3,16 +3,22 @@ import os
 from collections import deque
 
 from PySide6.QtCore import QObject, Slot, QModelIndex, Qt
-from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog
+from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplication
 from shiboken6 import isValid
 
 from views.app_style_configuration import AppStyleConfiguration
 from views.editor_tab import EditorTab
 from views.latex_index_window import ReferenceCarrier
-from models.index_tree_model_engine import IndexTreeModelEngine
 from views.index_tree_view import IndexTreeView
-from controllers.index_tree_controller import IndexTreeController
 from views.project_sidebar_view import ProjectSidebarView
+from views.advanced_search_window import AdvancedSearchWindow
+from controllers.index_tree_controller import IndexTreeController
+from controllers.macro_editing_controller import MacroEditingController
+from controllers.context_menu_subsystem import FileTreeContextMenuManager
+from controllers.context_menu_subsystem import IndexTreeContextMenuManager
+from models.index_tree_model_engine import IndexTreeModelEngine
+from models.macro_id_generator import MacroIDGenerator
+from models.project_load_worker import SafeProjectLoadThread 
 
 class AppPipelineController(QObject):
     def __init__(self, window, prefs_model, backup_manager, doc_controller, index_controller, 
@@ -51,10 +57,8 @@ class AppPipelineController(QObject):
         self.initialize_index_subsystem()
 
         # Instantiate isolated macro calculation tracking engines
-        from models.macro_id_generator import MacroIDGenerator
         self.macro_id_generator = MacroIDGenerator(starting_id=1001)
 
-        from controllers.macro_editing_controller import MacroEditingController
         self.macro_editing_ctrl = MacroEditingController(
             id_generator_model=self.macro_id_generator,
             index_controller=self.idx_ctrl,
@@ -62,8 +66,6 @@ class AppPipelineController(QObject):
         )
 
         # Map context menu structures straight to the newly instantiated widgets
-        from controllers.context_menu_subsystem import FileTreeContextMenuManager
-        from controllers.context_menu_subsystem import IndexTreeContextMenuManager
         self._file_context_manager = FileTreeContextMenuManager(self.file_tree_widget)
         self._index_context_manager = IndexTreeContextMenuManager(self.index_tree_widget)
 
@@ -346,7 +348,6 @@ class AppPipelineController(QObject):
             self._load_thread.wait()
 
         # Pass the verified database path into the background loading worker thread
-        from models.project_load_worker import SafeProjectLoadThread 
         self._load_thread = SafeProjectLoadThread(
                 db_persistence=self.scope_ctrl.get_persistence_model(), 
                 project_root=selected_dir, 
@@ -394,8 +395,8 @@ class AppPipelineController(QObject):
 
         # Realign session logging paths natively
         project_root_dir = os.path.dirname(os.path.normpath(db_path))
-        if self.window.global_session_logger:
-            self.window.global_session_logger.realign_log_to_project_root(project_root_dir)
+        # if self.window.global_session_logger:
+        #     self.window.global_session_logger.realign_log_to_project_root(project_root_dir)
 
         # Synchronize presentation title text and status bars
         project_name = os.path.basename(project_root_dir)
@@ -438,8 +439,6 @@ class AppPipelineController(QObject):
                 return
             except RuntimeError:
                 self._search_window = None
-
-        from views.advanced_search_window import AdvancedSearchWindow
 
         self._search_window = AdvancedSearchWindow(
             db_file_paths_provider=self.scope_ctrl.get_active_search_scope,
@@ -529,7 +528,6 @@ class AppPipelineController(QObject):
         except Exception:
             pass
         self.window.close()
-        from PySide6.QtWidgets import QApplication
         QApplication.quit()  # ensures the event loop actually exits
 
     @Slot(list, dict)
