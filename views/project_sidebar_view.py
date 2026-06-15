@@ -18,11 +18,6 @@ class ProjectSidebarView(QTabWidget):
         self.setDocumentMode(True)
         self.setMovable(False)
         
-        # Initialize placeholders and sub-components
-        self.tree_files = None
-        self.tree_index = None
-        self.entry_modifier_panel = None
-        
         self.init_sub_components()
 
     def init_sub_components(self):
@@ -49,17 +44,13 @@ class ProjectSidebarView(QTabWidget):
         """
         if not fully_built_index_view:
             return
-            
-        # 1. Store the active decoupled view instance reference locally
+        
+        if self.tree_index is not None:
+            return  # Already swapped — guard against double-call
+        
         self.tree_index = fully_built_index_view
-        
-        # 2. Drop the placeholder panel sitting at the second index slot (Index 1)
         self.removeTab(1)
-        
-        # 3. Mount the true production-ready tree widget back into place
         self.insertTab(1, self.tree_index, "📌 Index References")
-        
-        # 4. Trigger an instant repaint loop to align style sheets
         self.update()
 
     def bring_panel_to_foreground(self, panel_index: int):
