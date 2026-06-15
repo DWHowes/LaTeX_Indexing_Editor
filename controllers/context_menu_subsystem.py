@@ -1,12 +1,8 @@
-# views/context_menu_subsystem.py
-import os
 from PySide6.QtCore import QObject, Qt, Signal, Slot, QModelIndex, QPoint
 from PySide6.QtWidgets import QMenu, QTreeView
 from PySide6.QtGui import QAction
 
-# =====================================================================
-# VIEW Presentation Layer Components (Purely Passive)
-# =====================================================================
+from views.app_style_configuration import AppStyleConfiguration
 
 class BaseContextMenuManager(QObject):
     """
@@ -32,15 +28,11 @@ class BaseContextMenuManager(QObject):
         proxy_index = self.tree_view.indexAt(viewport_pos)
         
         if not proxy_index.isValid():
-            proxy_index = self.tree_view.indexAt(pixel_position)
-
-        if not proxy_index.isValid():
             return
 
         context_menu = QMenu(self.tree_view)
         
         try:
-            from views.app_style_configuration import AppStyleConfiguration
             context_menu.setStyleSheet(AppStyleConfiguration.get_unified_menu_stylesheet())
         except ImportError:
             context_menu.setStyleSheet("""
