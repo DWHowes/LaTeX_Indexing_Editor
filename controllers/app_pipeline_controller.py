@@ -12,6 +12,7 @@ from views.latex_index_window import ReferenceCarrier
 from models.index_tree_model_engine import IndexTreeModelEngine
 from views.index_tree_view import IndexTreeView
 from controllers.index_tree_controller import IndexTreeController
+from views.project_sidebar_view import ProjectSidebarView
 
 class AppPipelineController(QObject):
     def __init__(self, window, prefs_model, backup_manager, doc_controller, index_controller, 
@@ -34,7 +35,6 @@ class AppPipelineController(QObject):
         # =====================================================================
         # 1. VIEW COMPOSITION & COMPONENT INJECTION
         # =====================================================================
-        from views.project_sidebar_view import ProjectSidebarView
         self.sidebar_view_panel = ProjectSidebarView(self.window)
         
         # Inject the master layout container into the visual window framework
