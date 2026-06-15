@@ -21,14 +21,14 @@ from models.macro_id_generator import MacroIDGenerator
 from models.project_load_worker import SafeProjectLoadThread 
 
 class AppPipelineController(QObject):
-    def __init__(self, window, prefs_model, backup_manager, doc_controller, index_controller, 
+    def __init__(self, window, prefs_model, backup_manager, doc_controller,  
                  lifecycle_controller, scope_controller, worker=None): 
         super().__init__()
         self.window = window
         self.prefs = prefs_model
         self.backup_manager = backup_manager
         self.doc_io = doc_controller
-        self.idx_ctrl = index_controller
+        # self.idx_ctrl = index_controller
         self.lc_ctrl = lifecycle_controller
         self.scope_ctrl = scope_controller 
         self.worker = worker  
@@ -39,7 +39,7 @@ class AppPipelineController(QObject):
         self.index_model_engine = None  # Will be initialized in the index subsystem setup
 
         # =====================================================================
-        # 1. VIEW COMPOSITION & COMPONENT INJECTION
+        # VIEW COMPOSITION & COMPONENT INJECTION
         # =====================================================================
         self.sidebar_view_panel = ProjectSidebarView(self.window)
         
@@ -83,18 +83,14 @@ class AppPipelineController(QObject):
         """Maps pre-instantiated data models directly to controller view components."""
         active_database_model = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
 
-        if self.index_model_engine is None:
-            self.index_model_engine = IndexTreeModelEngine(active_database_model)
-        
+        self.index_model_engine = IndexTreeModelEngine(active_database_model)
         self.index_tree_view = IndexTreeView(model_engine=self.index_model_engine)
-        
+
         # Pure presentation layer boundary swap contract execution
         self.sidebar_view_panel.replace_index_tree_view(self.index_tree_view)
         self.index_tree_widget = self.index_tree_view
-        
-        # Only assign if no instance was passed from main.py
-        if self.idx_ctrl is None:
-            self.idx_ctrl = IndexTreeController(self.index_model_engine, self)
+
+        self.idx_ctrl = IndexTreeController(self.index_model_engine, self)
 
     def _bind_signal_pipelines(self):
         """Bridges presentation signals directly to controller slots with explicit contracts."""
@@ -102,7 +98,6 @@ class AppPipelineController(QObject):
         self.window.window_close_requested.connect(self.coordinate_application_shutdown)
         
         # --- Project Sidebar & Navigation Trees ---
-        # self.file_tree_widget.file_tree_state_changed.connect(self.handle_file_scope_mutation)
         self.index_tree_widget.coordinate_navigation_requested.connect(self.handle_index_navigation)
         
         # Map direct file double-clicks to a dedicated single-argument slot contract
@@ -115,9 +110,6 @@ class AppPipelineController(QObject):
         self.window.latex_index_window.saveRequested.connect(self._handle_view_save_request)
         self.window.latex_index_window.syncRequested.connect(self._handle_workspace_sync_request)
         self.window.latex_index_window.nextIdRequested.connect(self._handle_next_id_request)
-
-        # Connect the file activation signal directly to the document routing engine
-        self.file_tree_widget.file_requested.connect(self.handle_file_open_request)
 
         # --- Menu Navigation Actions ---
         self.window.menu_bar.open_project_requested.connect(self.select_project_folder_workflow)
@@ -135,7 +127,6 @@ class AppPipelineController(QObject):
         )
 
         # --- Toolbar Controls ---
-        # FIX: Wire the missing buttons using your active window attribute ('tool_bar')
         self.window.tool_bar.sidebar_panel_requested.connect(self._orchestrate_sidebar_focus)
         self.window.tool_bar.dark_mode_toggle_requested.connect(self._handle_dark_mode_toggle)
         
@@ -145,7 +136,6 @@ class AppPipelineController(QObject):
         # --- Sub-Controller Bridges ---
         self.lc_ctrl.editor_metrics_updated.connect(self.window.status_bar.set_status_text)
         self.doc_io.save_error_encountered.connect(self._display_document_io_error)
-        self._file_context_manager.prune_file_triggered.connect(self.scope_ctrl.process_file_pruning_request)
 
         if self.idx_ctrl:
             self._index_context_manager.add_subheading_triggered.connect(self.idx_ctrl.handle_add_subheading_slot)
@@ -177,7 +167,6 @@ class AppPipelineController(QObject):
                     tab.undo_performed.disconnect(self._handle_index_undo)
                     tab.redo_performed.disconnect(self._handle_index_redo)
                 except RuntimeError:
-                    print(f"Warning: Failed to disconnect undo/redo signals from tab index {i}. This may indicate a stale reference or a non-EditorTab widget.")
                     pass
 
         active_tab = self.window.tabs.widget(index)
@@ -215,10 +204,6 @@ class AppPipelineController(QObject):
             self.window.status_bar.showMessage("Error: Selection target does not exist on disk.", 3000)
             return
 
-        # Synchronize the live widgets here. This completely bridges the split container bug, 
-        # routing tab generation directly to your screen.
-        # self.lc_ctrl.tabs = self.window.tabs
-        # self.doc_io.tabs = self.window.tabs
         self.lc_ctrl.set_tabs_widget(self.window.tabs)
         self.doc_io.set_tabs_widget(self.window.tabs)
 
@@ -247,32 +232,7 @@ class AppPipelineController(QObject):
             # Ensure a pristine backup exists before the live file is overwritten
             self.backup_manager.register_file_for_session(target_path)
             self.doc_io.save_tex_file_to_disk(editor_tab, target_path)
-            # self.backup_manager.sync_file_modification_backup(target_path)
             self.window.status_bar.showMessage("Active canvas buffer synchronized to disk.", 2000)
-
-    @Slot(str)
-    def handle_file_open_request(self, file_path: str):
-        """
-        Orchestrates workspace file ingestion routes.
-        Strict MVC: Validates paths before passing requests down to operational routers.
-        """
-        if not file_path or not os.path.exists(file_path):
-            self.window.status_bar.showMessage("Error: Target path no longer valid on disk.", 3000)
-            return
-
-        # Route to your Document IO or Workspace Lifecycle controllers to launch a tab panel
-        if self.lc_ctrl:
-            # Invokes standard coordinate text component workspace landing metrics
-            self.lc_ctrl.navigate_to_embedded_index_coordinate(
-                path=file_path, 
-                line=1, 
-                col=0, 
-                fallback=os.path.basename(file_path)
-            )
-            
-            # Push clean confirmation logs natively to status updates
-            file_name = os.path.basename(file_path)
-            self.window.status_bar.showMessage(f"Opened document: '{file_name}'", 2000)
 
     @Slot()
     def select_project_folder_workflow(self) -> None:
@@ -395,8 +355,6 @@ class AppPipelineController(QObject):
 
         # Realign session logging paths natively
         project_root_dir = os.path.dirname(os.path.normpath(db_path))
-        # if self.window.global_session_logger:
-        #     self.window.global_session_logger.realign_log_to_project_root(project_root_dir)
 
         # Synchronize presentation title text and status bars
         project_name = os.path.basename(project_root_dir)
@@ -572,10 +530,13 @@ class AppPipelineController(QObject):
     def _handle_index_deletion_request(self, payload: dict):
         if not payload or "path_parts" not in payload:
             return
+        
         path_parts = payload["path_parts"]
         full_path_str = " / ".join(path_parts)
-        if self.scope_ctrl and self.scope_ctrl.model:
-            self.scope_ctrl.model.prune_file_record(full_path_str)
+
+        if self.scope_ctrl:
+            self.scope_ctrl.prune_index_term(full_path_str)
+
         self._tree_modified = True
         self.window.status_bar.set_status_text("Index term safely marked for deletion.")
 
@@ -607,17 +568,15 @@ class AppPipelineController(QObject):
         self.window.tool_bar.refresh_theme_presentation(is_dark)
 
         # Propagate theme changes down to all open editor tabs by querying the live container directly
-        tabs_container = self.window.tabs
-        if tabs_container:
-            # Query all open document panels via standard public container boundaries
-            for i in range(tabs_container.count()):
-                tab_widget = tabs_container.widget(i)
-                
-                # Verify the type contract explicitly instead of using reflection
-                if isinstance(tab_widget, EditorTab):
-                    # Direct signature invocation to swap the internal regex colors
-                    tab_widget.apply_theme_configuration(is_dark)
+        self._broadcast_theme_to_tabs(is_dark)
 
+    def _broadcast_theme_to_tabs(self, is_dark:bool) -> None:
+        tabs = self.window.tabs
+        if tabs:
+            for i in range(tabs.count()):
+                tab = tabs.widget(i)
+                if isinstance(tab, EditorTab):
+                    tab.apply_theme_configuration(is_dark)
     @Slot(str)
     def _handle_font_family_change(self, family_name: str):
         """Intercepts toolbar typography alterations and pushes changes down to open editors."""
@@ -630,20 +589,8 @@ class AppPipelineController(QObject):
                 dark_mode=broker.get_property("is_dark_mode")
             )
             
-        # ------------------------------------------------------------------
-        # MVC COMPLIANT BROADCAST LOOP: Push updates to live tabs
-        # ------------------------------------------------------------------
         current_size = int(broker.get_property("font_size") or 12)
-        tabs_container = self.window.tabs
-        
-        if tabs_container:
-            # Query open tabs using standard public container boundaries
-            for i in range(tabs_container.count()):
-                tab_widget = tabs_container.widget(i)
-                
-                # Enforce clean type contract verification instead of reflection checks
-                if isinstance(tab_widget, EditorTab):
-                    tab_widget.apply_workspace_typography(family_name, current_size)
+        self._broadcast_typography_to_tabs(family_name, current_size)
 
     @Slot(int)
     def _handle_font_size_change(self, size: int):
@@ -657,29 +604,20 @@ class AppPipelineController(QObject):
                 dark_mode=broker.get_property("is_dark_mode")
             )
             
-        # ------------------------------------------------------------------
-        # MVC COMPLIANT BROADCAST LOOP: Push adjustments to live tabs
-        # ------------------------------------------------------------------
         current_family = str(broker.get_property("font_family") or "Arial")
-        tabs_container = self.window.tabs
-        
-        if tabs_container:
-            # Query open tabs using standard public container boundaries
-            for i in range(tabs_container.count()):
-                tab_widget = tabs_container.widget(i)
-                
-                # Enforce clean type contract verification instead of reflection checks
-                if isinstance(tab_widget, EditorTab):
-                    tab_widget.apply_workspace_typography(current_family, size)
+
+        self._broadcast_typography_to_tabs(current_family, size)
                     
         self.window.status_bar.showMessage(f"Font size updated: {size}pt", 2000)
 
-    @Slot()
-    def _reset_thread_state_references(self) -> None:
-        self._load_thread = None
-        self.worker = None
-        self.window.centralWidget().setEnabled(True)
 
+    def _broadcast_typography_to_tabs(self, family: str, size: int) -> None:
+        tabs = self.window.tabs
+        if tabs:
+            for i in range(tabs.count()):
+                tab = tabs.widget(i)
+                if isinstance(tab, EditorTab):
+                    tab.apply_workspace_typography(family, size)
     @Slot(str)
     def handle_pipeline_failure(self, err_msg: str):
         self.window.centralWidget().setEnabled(True)
@@ -687,30 +625,10 @@ class AppPipelineController(QObject):
         print(f"Project Loading Failure: {err_msg}")
         QMessageBox.critical(self.window, "Project Loading Failure", f"An out-of-thread error occurred:\n{err_msg}")
 
-    # @Slot(str, bool)
-    # def handle_file_scope_mutation(self, file_path: str, is_included: bool):
-    #     if self.window.file_persistence:
-    #         self.window.file_persistence.update_file_active_state(file_path, is_included)
-    #         self._tree_modified = True
-    #         self.window.status_bar.set_status_text("Scope configuration adjustment recorded.")
-
     @Slot(str, int, int, str)
     def handle_index_navigation(self, path: str, line: int, col: int, fallback: str):
         if self.lc_ctrl:
             self.lc_ctrl.navigate_to_embedded_index_coordinate(path, line, col, fallback)
-
-    @Slot(QModelIndex)
-    def process_file_pruning_request(self, proxy_index: QModelIndex):
-        if not proxy_index.isValid() or not self.window.file_persistence:
-            return
-        persistence = self.window.file_persistence
-        if persistence.is_directory_node(proxy_index):
-            return
-        clean_absolute_path = persistence.get_absolute_path(proxy_index)
-        if clean_absolute_path:
-            persistence.prune_file_record(clean_absolute_path) 
-            self._tree_modified = True
-            self.window.status_bar.set_status_text("File asset successfully pruned from search index scope.")
 
     @Slot()
     def _handle_index_entry_window_toggle(self):

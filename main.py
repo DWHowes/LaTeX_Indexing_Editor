@@ -10,13 +10,13 @@ from models.session_backup_manager import SessionBackupManager
 # Import all core operational controllers
 from controllers.app_pipeline_controller import AppPipelineController
 from controllers.document_io_controller import DocumentIOController
-from controllers.index_tree_controller import IndexTreeController
+# from controllers.index_tree_controller import IndexTreeController
 from controllers.workspace_lifecycle_controller import WorkspaceLifecycleController
 from views.app_style_configuration import AppStyleConfiguration
 from controllers.external_file_watcher_engine import ExternalFileWatcherEngine
 from models.file_tree_persistence import FileTreePersistence
 from controllers.project_scope_controller import ProjectScopeController
-from models.index_tree_model_engine import IndexTreeModelEngine
+# from models.index_tree_model_engine import IndexTreeModelEngine
 
 if __name__ == "__main__":
     """
@@ -73,8 +73,8 @@ if __name__ == "__main__":
         file_persistence = FileTreePersistence(db_path=initial_db_path)         
         scope_controller = ProjectScopeController(file_persistence)
 
-        index_model_engine = IndexTreeModelEngine(file_persistence.get_active_model())
-        index_controller = IndexTreeController(index_model_engine, None)
+        # index_model_engine = IndexTreeModelEngine(file_persistence.get_active_model())
+        # index_controller = IndexTreeController(index_model_engine, None)
 
         # Bind all components together via the master application orchestrator
         pipeline_controller = AppPipelineController(
@@ -82,13 +82,12 @@ if __name__ == "__main__":
             prefs_model=preferences_model,
             backup_manager=backup_manager,
             doc_controller=doc_controller,
-            index_controller=index_controller, 
             lifecycle_controller=lifecycle_controller,
             scope_controller=scope_controller 
         )
 
         # Link the parent relationship back safely after construction
-        index_controller.parent = pipeline_controller
+        # index_controller.parent = pipeline_controller
        
         geometry = preferences_payload.get("geometry")
         state = preferences_payload.get("state")

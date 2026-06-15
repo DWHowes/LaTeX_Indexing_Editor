@@ -88,3 +88,8 @@ class ProjectScopeController(QObject):
     def get_persistence_model(self):
         """Public contract exposing the underlying persistence model."""
         return self.model        
+
+    def prune_index_term(self, full_path_str:str) -> None:
+        """Public contract to route pruning requests for index terms."""
+        self.model.prune_index_record(full_path_str)
+        self.scope_mutated.emit()
