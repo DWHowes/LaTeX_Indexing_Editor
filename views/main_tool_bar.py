@@ -1,7 +1,8 @@
-# views/main_tool_bar.py - Pure Presentation Layer Architecture
+import os
+
 from PySide6.QtWidgets import QToolBar, QPushButton, QLabel, QFontComboBox, QSpinBox, QWidget, QSizePolicy, QStyle, QButtonGroup
 from PySide6.QtCore import QSize, Qt, Signal, Slot
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
 
 from views.app_style_configuration import AppStyleConfiguration
 
@@ -10,7 +11,6 @@ class MainToolBar(QToolBar):
     Decoupled view presentation layer for the central application toolbar.
     Natively manages hosted controls and broadcasts state signals out to controllers.
     """
-    # FIXED: Declared the unified out-of-band radio selection panel signature contract
     sidebar_panel_requested = Signal(int)
     
     dark_mode_toggle_requested = Signal(bool)
@@ -19,7 +19,7 @@ class MainToolBar(QToolBar):
 
     def __init__(self, parent_window):
         super().__init__("Main", parent_window)
-        self.window = parent_window
+        self._parent_window = parent_window
         self.icon_size = 32
         
         # Subscribe autonomously to the static styling event broker channel
@@ -30,9 +30,9 @@ class MainToolBar(QToolBar):
     def _init_toolbar_ui(self):
         """Assembles radio-grouped selection buttons using native system assets."""
         broker = AppStyleConfiguration.event_broker()
-        init_dark = broker.property("is_dark_mode") == True
-        init_font = broker.property("font_family") or "Arial"
-        init_size = int(broker.property("font_size") or 12)
+        init_dark = bool(broker.get_property("is_dark_mode"))
+        init_font = broker.get_property("font_family") or "Arial"
+        init_size = int(broker.get_property("font_size") or 12)
         
         native_style = self.style()
 
@@ -82,19 +82,18 @@ class MainToolBar(QToolBar):
         self.addWidget(self.index_toggle)     
         self.addWidget(self.edit_list_toggle)
 
-        # FIXED: This lamda connector now fires perfectly against the verified class-level signal!
         self.sidebar_group.idClicked.connect(lambda panel_id: self.sidebar_panel_requested.emit(panel_id))
 
         self.addSeparator()
         
-        # 4. Font Family Selector Control
+        # Font Family Selector Control
         self.addWidget(QLabel(" Font: "))
         self.font_picker = QFontComboBox()
         self.font_picker.setCurrentFont(QFont(init_font))
         self.font_picker.currentFontChanged.connect(lambda f: self.font_family_changed.emit(f.family()))
         self.addWidget(self.font_picker)
 
-        # 5. Font Size Selector Control
+        # Font Size Selector Control
         self.addWidget(QLabel(" Size: "))
         self.size_picker = QSpinBox()
         self.size_picker.setRange(8, 72)
@@ -102,17 +101,17 @@ class MainToolBar(QToolBar):
         self.size_picker.valueChanged.connect(lambda s: self.font_size_changed.emit(s))
         self.addWidget(self.size_picker)
 
-        # 6. Layout Spacer
+        # Layout Spacer
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.addWidget(spacer)
 
-        # 7. Exit Application Control
+        # Exit Application Control
         self.close_btn = QPushButton()
         self.close_btn.setIcon(native_style.standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton))
         self.close_btn.setIconSize(QSize(self.icon_size, self.icon_size))
         self.close_btn.setToolTip("Close Application (Alt+F4)")
-        self.close_btn.clicked.connect(self.window.close)
+        self.close_btn.clicked.connect(self._parent_window.close)
         self.addWidget(self.close_btn)
 
     @Slot(int)
@@ -131,9 +130,6 @@ class MainToolBar(QToolBar):
     @Slot(bool)
     def refresh_theme_presentation(self, is_dark_mode: bool):
         """Synchronizes dark mode checkbox statuses and toggles button graphics instantly."""
-        from PySide6.QtGui import QIcon
-        import os
-
         self.dark_toggle.blockSignals(True)
         self.dark_toggle.setChecked(is_dark_mode)
         self.dark_toggle.blockSignals(False)
