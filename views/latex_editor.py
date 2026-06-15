@@ -2,6 +2,11 @@ from PySide6.QtWidgets import QMainWindow, QSplitter, QTabWidget, QSizePolicy, Q
 from PySide6.QtCore import Signal, QSize, Qt
 from PySide6.QtGui import QGuiApplication
 
+from views.main_menu_bar import MainMenuBar
+from views.main_tool_bar import MainToolBar
+from views.main_status_bar import MainStatusBar
+from views.latex_index_window import LatexIndexWindow
+
 class LatexEditor(QMainWindow):
     """
     Passive visual frame layout.
@@ -23,11 +28,6 @@ class LatexEditor(QMainWindow):
 
     def init_ui_layout(self):
         """Pure Structural Layout Architecture Configuration."""
-        from views.main_menu_bar import MainMenuBar
-        from views.main_tool_bar import MainToolBar
-        from views.main_status_bar import MainStatusBar
-        from views.latex_index_window import LatexIndexWindow
-
         self.menu_bar = MainMenuBar(self)
         self.tool_bar = MainToolBar(self)
         self.status_bar = MainStatusBar(self)
