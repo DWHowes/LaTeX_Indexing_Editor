@@ -19,6 +19,8 @@ from controllers.context_menu_subsystem import IndexTreeContextMenuManager
 from models.index_tree_model_engine import IndexTreeModelEngine
 from models.macro_id_generator import MacroIDGenerator
 from models.project_load_worker import SafeProjectLoadThread 
+from models.index_prefs_config_model import IndexPrefsConfigModel
+from controllers.index_prefs_config_controller import IndexPrefsConfigController
 
 class AppPipelineController(QObject):
     def __init__(self, window, prefs_model, backup_manager, doc_controller,  
@@ -64,6 +66,13 @@ class AppPipelineController(QObject):
             index_controller=self.idx_ctrl,
             parent=self
         )
+
+        self._index_prefs_model = IndexPrefsConfigModel()
+        self._index_prefs_ctrl = IndexPrefsConfigController(
+            model=self._index_prefs_model,
+            prefs_persistence=self.prefs,
+            parent_window=self.window
+        )        
 
         # Map context menu structures straight to the newly instantiated widgets
         self._file_context_manager = FileTreeContextMenuManager(self.file_tree_widget)
@@ -125,6 +134,7 @@ class AppPipelineController(QObject):
         self.window.menu_bar.toggle_dark_mode_requested.connect(
             lambda: self._handle_dark_mode_toggle(not bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode")))
         )
+        self.window.menu_bar.preferences_requested.connect(self._spawn_preferences_dialog)        
 
         # --- Toolbar Controls ---
         self.window.tool_bar.sidebar_panel_requested.connect(self._orchestrate_sidebar_focus)
@@ -360,6 +370,7 @@ class AppPipelineController(QObject):
         project_name = os.path.basename(project_root_dir)
         self.prefs.update_project_context(project_root_dir, project_name)
         self.window.synchronize_window_title(project_name)
+        self._index_prefs_ctrl.set_active_project(project_name)
         self.window.status_bar.showMessage(f"Project '{project_name}' loaded successfully.", 3000)
 
         # Force the finished tree hierarchy to expand fully
@@ -368,6 +379,11 @@ class AppPipelineController(QObject):
         if self._load_thread and self._load_thread.isRunning():
             self._load_thread.quit()
 
+    @Slot()
+    def _spawn_preferences_dialog(self) -> None:
+        """Instantiates and executes the preferences configuration flow."""
+        self._index_prefs_ctrl.execute_configuration_flow()
+        
     @Slot()
     def execute_project_save_workflow(self):
         """Coordinates synchronization blocks across file buffers and sqlite."""

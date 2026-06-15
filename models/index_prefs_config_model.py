@@ -35,17 +35,24 @@ class IndexPrefsConfigModel:
         self._data = IndexPrefsData()
 
     def update_data(self, updates: Dict[str, Any]) -> None:
-        valid_keys = set(self._get_contract_map().keys())
-        type_map = {f.name: f.type for f in fields(self._data)}  # from dataclasses import fields
+        valid_keys = asdict(self._data).keys()
+        field_types = {f.name: f.type for f in fields(self._data)}
+        coerce = {"bool": bool, "int": int, "str": str}
         for key, value in updates.items():
             if key not in valid_keys:
                 continue
-            setattr(self._data, key, value)
+            type_name = field_types.get(key, "str")
+            setattr(self._data, key, coerce.get(type_name, str)(value))
 
     def serialize_to_dict(self) -> Dict[str, Any]:
         return asdict(self._data)
 
+    def load_from_dict(self, data: dict) -> None:
+        """Hydrates model state from a persisted settings payload."""
+        self.update_data(data)
+
     def generate_ist_content(self) -> str:
+        """Retained for future explicit .ist export workflow."""
         lines = [
             "% ====================================================================",
             "% Generated LaTeX MakeIndex Custom Style File via Editor Config Engine",
@@ -58,20 +65,15 @@ class IndexPrefsConfigModel:
             lines.append(r'heading_suffix "}\\nopagebreak\\n"')
         else:
             lines.append("headings_flag 0")
-            
+
         lines.append(f'symhead_positive "{self._data.ist_symbols_label}"')
         lines.append(f'numhead_positive "{self._data.ist_numbers_label}"')
-        
+
+        # Fixed: delimiter value must be quoted in .ist syntax
         delimiter = '"\\\\dotfill"' if self._data.ist_use_dot_leaders else f'"{self._data.ist_page_delimiter}"'
         lines.append(f"delim_0 {delimiter}\ndelim_1 {delimiter}\ndelim_2 {delimiter}")
         lines.append(f'delim_n "{self._data.ist_page_delimiter}"\ndelim_r "{self._data.ist_range_delimiter}"')
         lines.append("line_max 72\nindent_space \"\\\\t\\\\t\"")
         return "\n".join(lines)
-
-    def write_stylesheet_to_disk(self, target_directory: str) -> str:
-        if not os.path.exists(target_directory):
-            os.makedirs(target_directory, exist_ok=True)
-        file_path = os.path.join(target_directory, self._data.makeindex_stylesheet)
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(self.generate_ist_content())
-        return file_path
+    
+    # generate_ist_content is retained for a future explicit export action.

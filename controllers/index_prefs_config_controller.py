@@ -1,48 +1,44 @@
-import sys
-import os
-
-# 1. IMMEDIATE LOCAL RUNTIME ENVIRONMENT RESOLUTION
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
-from PySide6.QtWidgets import QApplication
-from views.index_prefs_config_dialog import IndexPrefsConfigDialog
+from views.app_style_configuration import AppStyleConfiguration
 from models.index_prefs_config_model import IndexPrefsConfigModel
+from models.preferences_persistence import PreferencesPersistence
+from views.index_prefs_config_dialog import IndexPrefsConfigDialog
+
 
 class IndexPrefsConfigController:
-    def __init__(self, model: IndexPrefsConfigModel, parent_window=None) -> None:
+    def __init__(
+        self,
+        model: IndexPrefsConfigModel,
+        prefs_persistence: PreferencesPersistence,
+        parent_window=None
+    ) -> None:
         self._model = model
+        self._prefs = prefs_persistence
         self._parent_window = parent_window
+        self._active_project_name: str | None = None
+
+    def set_active_project(self, project_name: str | None) -> None:
+        """Called by AppPipelineController when a project loads or closes."""
+        self._active_project_name = project_name
 
     def execute_configuration_flow(self) -> None:
-        """Pipes discrete dictionary contracts between decoupled architectural boundaries."""
+        """Loads scoped prefs, opens dialog, saves on acceptance."""
+        # Load with project overlay if a project is active
+        current_data = self._prefs.load_index_prefs(self._active_project_name)
+        self._model.load_from_dict(current_data)
+
         dialog = IndexPrefsConfigDialog(self._parent_window)
-        
-        # Load serial representation without looking up runtime properties via attributes
-        current_data = self._model.serialize_to_dict()
-        dialog.populate_fields(current_data)
-        
+        dialog.populate_fields(self._model.serialize_to_dict())
+
+        # Apply current theme before showing — broker query matches EditorTab pattern
+        is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
+        dialog.apply_theme_configuration(is_dark)
+
+        # Connection is per-invocation; dialog goes out of scope after exec(),
+        # so Qt cleans up the connection automatically — intentional.
         dialog.sig_config_accepted.connect(self._handle_model_update)
         dialog.exec()
 
     def _handle_model_update(self, updated_payload: dict) -> None:
-        """Saves current state properties down to disk without layout leaks."""
+        """Writes to the appropriate scope. Global defaults are never touched by a project save."""
         self._model.update_data(updated_payload)
-        
-        output_directory = os.path.join(PROJECT_ROOT, "output_resources")
-        saved_file = self._model.write_stylesheet_to_disk(output_directory)
-        
-        print(f"\n[Controller] Intercepted View Signal Payload. Custom file generation triggered:")
-        print(f" => Output Script target path: {saved_file}")
-
-
-# Autonomous Standalone Driver Execution
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    mock_model = IndexPrefsConfigModel()
-    
-    print("[Driver] Launching vertical layout configuration matrix...")
-    controller = IndexPrefsConfigController(model=mock_model)
-    controller.execute_configuration_flow()
+        self._prefs.save_index_prefs(updated_payload, self._active_project_name)

@@ -13,6 +13,7 @@ class MainMenuBar(QMenuBar):
     toggle_edit_list_requested = Signal()
     toggle_dark_mode_requested = Signal()
     toggle_entry_window_requested = Signal()
+    preferences_requested = Signal()
 
     def __init__(self, parent_window=None):
         super().__init__(parent_window)
@@ -41,6 +42,10 @@ class MainMenuBar(QMenuBar):
         
         adv_search_action = edit_menu.addAction("Advanced Search...", QKeySequence("Ctrl+Shift+F"))
         adv_search_action.triggered.connect(lambda: self.advanced_search_requested.emit())
+
+        edit_menu.addSeparator()
+        prefs_action = edit_menu.addAction("&Preferences...", QKeySequence("Ctrl+,"))
+        prefs_action.triggered.connect(lambda: self.preferences_requested.emit())        
         
         # --- View Menu Dropdowns ---
         view_menu = self.addMenu("&View")

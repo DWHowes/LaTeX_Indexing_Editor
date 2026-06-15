@@ -86,3 +86,42 @@ class PreferencesPersistence(QObject):
         # Pull cached data, falling back natively to the user's home directory path
         raw_path = self.settings.value("last_project_path", QDir.homePath())
         return os.path.normpath(str(raw_path))
+
+    def save_index_prefs(self, data: dict, project_name: str | None = None) -> None:
+        """
+        Persists index preferences under a scoped key group.
+        If project_name is provided, saves under project scope.
+        Global defaults are never modified by a project-scoped save.
+        """
+        scope_key = f"IndexPrefs/{project_name}" if project_name else "IndexPrefs/global"
+        self.settings.beginGroup(scope_key)
+        for key, value in data.items():
+            self.settings.setValue(key, value)
+        self.settings.endGroup()
+
+    def load_index_prefs(self, project_name: str | None = None) -> dict:
+        """
+        Loads index preferences with project scope taking priority over global.
+        Falls back to global, then to IndexPrefsData dataclass defaults.
+        """
+        from models.index_prefs_config_model import IndexPrefsData
+        from dataclasses import asdict
+        defaults = asdict(IndexPrefsData())
+
+        # Always load global layer first as the base
+        self.settings.beginGroup("IndexPrefs/global")
+        global_data = {key: self.settings.value(key, defaults[key]) for key in defaults}
+        self.settings.endGroup()
+
+        if not project_name:
+            return global_data
+
+        # Overlay project-scoped values on top of globals where they exist
+        self.settings.beginGroup(f"IndexPrefs/{project_name}")
+        project_keys = self.settings.childKeys()
+        for key in project_keys:
+            if key in global_data:
+                global_data[key] = self.settings.value(key)
+        self.settings.endGroup()
+
+        return global_data

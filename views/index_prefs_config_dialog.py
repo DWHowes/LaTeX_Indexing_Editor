@@ -118,9 +118,9 @@ class IndexPrefsConfigDialog(QDialog):
         # PRIMARY VERTICAL TAB 2: THEMES (STUB PLACEHOLDER FOR COLOR ENGINE)
         self.vtab_themes = QWidget()
         vthemes_layout = QVBoxLayout(self.vtab_themes)
-        stub_label = QLabel("Theme Configuration System Stub\n\n(Future component workspace to control application layout styling and dark/light system variables).")
-        stub_label.setStyleSheet("color: #777777; font-size: 13px;")
-        vthemes_layout.addWidget(stub_label)
+        self._stub_label = QLabel("Theme Configuration System Stub\n\n(Future component workspace to control application layout styling and dark/light system variables).")
+        self._stub_label.setStyleSheet("color: #777777; font-size: 13px;")
+        vthemes_layout.addWidget(self._stub_label)
         vthemes_layout.addStretch()
 
         # Mount Primary West View Elements to Root Frame
@@ -218,3 +218,26 @@ class IndexPrefsConfigDialog(QDialog):
         }
         self.sig_config_accepted.emit(payload)
         self.accept()
+
+    def apply_theme_configuration(self, is_dark: bool) -> None:
+        """Matches the EditorTab pattern — called by controller before exec()."""
+        if is_dark:
+            self.setStyleSheet("""
+                QDialog { background-color: #2b2b2b; color: #f0f0f0; }
+                QTabWidget::pane { border: 1px solid #555; }
+                QTabBar::tab { background: #3c3c3c; color: #f0f0f0; padding: 6px 10px; }
+                QTabBar::tab:selected { background: #505050; }
+                QGroupBox { color: #f0f0f0; border: 1px solid #555; margin-top: 6px; }
+                QGroupBox::title { subcontrol-origin: margin; left: 8px; }
+                QLineEdit, QSpinBox, QComboBox {
+                    background-color: #3c3c3c; color: #f0f0f0; border: 1px solid #666;
+                }
+                QCheckBox { color: #f0f0f0; }
+                QDialogButtonBox QPushButton {
+                    background-color: #3c3c3c; color: #f0f0f0; border: 1px solid #666; padding: 4px 12px;
+                }
+            """)
+            self._stub_label.setStyleSheet("color: #999999; font-size: 13px;")
+        else:
+            self.setStyleSheet("")
+            self._stub_label.setStyleSheet("color: #777777; font-size: 13px;")
