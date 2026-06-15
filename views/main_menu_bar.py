@@ -18,10 +18,6 @@ class MainMenuBar(QMenuBar):
         super().__init__(parent_window)
         self.window = parent_window
         
-        # Bind autonomously to the class-anchored style configuration system
-        from views.app_style_configuration import AppStyleConfiguration
-        AppStyleConfiguration.event_broker().theme_mutated.connect(self.on_theme_changed)
-        
         self._init_menu_tree()
 
     def _init_menu_tree(self):
@@ -76,28 +72,6 @@ class MainMenuBar(QMenuBar):
         self.dark_mode_action.triggered.connect(lambda: self.toggle_dark_mode_requested.emit())
         self.addAction(self.dark_mode_action)
 
-    @Slot(bool)
-    def on_theme_changed(self, is_dark_mode: bool):
-        """Autonomously updates internal stylesheet configurations."""
-        # Clean isolation: updates its own visual state when notified by the broker
-        from views.app_style_configuration import AppStyleConfiguration
-        # self.setStyleSheet(AppStyleConfiguration.get_menu_bar_stylesheet(is_dark_mode))
-        self.update()
-
-    def execute_index_entry_window_toggle(self):
-        """Action target for Ctrl+\. Toggles index frame dock layouts autonomously."""
-        if not self.window or not hasattr(self.window, "latex_index_window"): 
-            return
-        index_window = self.window.latex_index_window
-        if not index_window: 
-            return
-
-        if hasattr(self.window, "tabs") and self.window.tabs.count() > 0:
-            index_window.hide() if index_window.isVisible() else index_window.show()
-        else:
-            index_window.hide()
-
     def update_menu_item_state(self, is_enabled: bool):
         """Allows external workspace controllers to toggle menu items on tab count changes."""
-        if hasattr(self, "index_entry_action") and self.index_entry_action:
-            self.index_entry_action.setEnabled(is_enabled)
+        self.index_entry_action.setEnabled(is_enabled)

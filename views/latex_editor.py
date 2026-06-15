@@ -13,7 +13,6 @@ class LatexEditor(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("LaTeX Indexing Editor")
-        self.backup_manager = None
         
         self.init_ui_layout()
         self._assemble_visual_furniture()
@@ -44,6 +43,7 @@ class LatexEditor(QMainWindow):
         self.right_splitter = QSplitter(Qt.Orientation.Vertical)
         self.right_splitter.addWidget(self.tabs)
         
+        # Initializing latex_index_window here instead of the controller as a layout convenience.
         self.latex_index_window = LatexIndexWindow("LaTeX Index", self, self.tabs)
         self.right_splitter.addWidget(self.latex_index_window)
         self.latex_index_window.hide()
@@ -89,16 +89,6 @@ class LatexEditor(QMainWindow):
             text=default_suggestion
         )
         return project_name.strip() if (ok and project_name.strip()) else None
-
-    # def get_all_open_tab_buffers(self) -> list[dict]:
-    #     buffers = []
-    #     for index in range(self.tabs.count()):
-    #         editor_tab = self.tabs.widget(index)
-    #         buffers.append({
-    #             "file_path": self.tabs.tabToolTip(index),
-    #             "content": editor_tab.toPlainText()
-    #         })
-    #     return buffers
 
     def synchronize_window_title(self, updated_project_name: str) -> None:
         self.setWindowTitle(f"LaTeX Indexing Editor — [{updated_project_name}]")    
