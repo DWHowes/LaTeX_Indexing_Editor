@@ -17,6 +17,8 @@ class ProjectSidebarView(QTabWidget):
         self.setTabPosition(QTabWidget.TabPosition.West) 
         self.setDocumentMode(True)
         self.setMovable(False)
+
+        self.tree_index = None  # Placeholder for the dynamic IndexTreeView instance
         
         self.init_sub_components()
 
