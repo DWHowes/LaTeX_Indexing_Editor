@@ -17,14 +17,13 @@ from controllers.external_file_watcher_engine import ExternalFileWatcherEngine
 from models.file_tree_persistence import FileTreePersistence
 from controllers.project_scope_controller import ProjectScopeController
 from models.index_tree_model_engine import IndexTreeModelEngine
-from controllers.index_tree_controller import IndexTreeController
 
-"""
-* Set up session logging
-* Initialize the core models, controllers, and views
-* Start the application
-"""
 if __name__ == "__main__":
+    """
+    * Set up session logging
+    * Initialize the core models, controllers, and views
+    * Start the application
+    """
     logger = SessionLogger()
     
     try:
@@ -42,14 +41,13 @@ if __name__ == "__main__":
         broker = AppStyleConfiguration.event_broker()
         broker.set_property("font_family", preferences_payload.get("font_family", "Arial"))
         broker.set_property("font_size", int(preferences_payload.get("font_size", 12)))
-        broker.set_property("is_dark_mode", preferences_payload.get("dark_mode") == True)
+        broker.set_property("is_dark_mode", bool(preferences_payload.get("dark_mode")))
 
         text_sanitizer = TextSanitizer()
         backup_manager = SessionBackupManager()
 
         # Initialize the main visual window shell
         editor_window = LatexEditor()
-        editor_window.global_session_logger = logger
 
         editor_window.show()
         
@@ -91,9 +89,7 @@ if __name__ == "__main__":
 
         # Link the parent relationship back safely after construction
         index_controller.parent = pipeline_controller
-
-        editor_window.backup_manager = backup_manager
-        
+       
         geometry = preferences_payload.get("geometry")
         state = preferences_payload.get("state")
         splitter_state = preferences_payload.get("splitter_state")
