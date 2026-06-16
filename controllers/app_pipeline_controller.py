@@ -21,6 +21,7 @@ from models.macro_id_generator import MacroIDGenerator
 from models.project_load_worker import SafeProjectLoadThread 
 from models.index_prefs_config_model import IndexPrefsConfigModel
 from controllers.index_prefs_config_controller import IndexPrefsConfigController
+from views.head_note_dialog import HeadNoteDialog
 
 class AppPipelineController(QObject):
     def __init__(self, window, prefs_model, backup_manager, doc_controller,  
@@ -128,7 +129,9 @@ class AppPipelineController(QObject):
         self.window.menu_bar.close_project_requested.connect(self._execute_project_close_workflow)        
         self.window.menu_bar.find_action_triggered.connect(self.lc_ctrl.route_find_to_active_tab)
         self.window.menu_bar.advanced_search_requested.connect(self._spawn_advanced_search_view)
-        self.window.menu_bar.preferences_requested.connect(self._spawn_preferences_dialog)        
+        self.window.menu_bar.preferences_requested.connect(self._spawn_preferences_dialog)   
+
+        self.window.menu_bar.add_head_note_requested.connect(self._handle_add_head_note_dialog)     
 
         # Structural Layout Hotkey Configurations
         self.window.menu_bar.toggle_file_sidebar_requested.connect(lambda: self._orchestrate_sidebar_focus(0))
@@ -170,6 +173,24 @@ class AppPipelineController(QObject):
         is_dark = bool(broker.get_property("is_dark_mode"))
         AppStyleConfiguration.configure_application_theme(is_dark)
         self.window.tool_bar.refresh_theme_presentation(is_dark)
+
+    @Slot()
+    def _handle_add_head_note_dialog(self):
+        """Spins up the modal instance and routes confirmed string metrics down to models."""
+      
+        # Parent dialog to main application window frame safely
+        dialog = HeadNoteDialog(self.window)
+        
+        # .exec() blocks interface access, running a dedicated local event stream
+        if dialog.exec() == HeadNoteDialog.DialogCode.Accepted:
+            raw_note = dialog.get_head_note_text()
+            
+            if not raw_note:
+                return  # Skip processing if empty string
+                
+            # MVC ROUTING: Pass raw text primitives down onto your model engine here
+            print(f"[CONTROLLER ENGINE] Sending fresh head note data to model layer: {raw_note}")
+            # self.entry_modifier_model.create_head_note_entry(raw_note)
 
     @Slot(int)
     def _rewire_undo_redo_signals(self, index: int) -> None:
