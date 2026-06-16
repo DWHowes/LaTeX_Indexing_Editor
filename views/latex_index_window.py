@@ -15,16 +15,15 @@ from PySide6.QtWidgets import (QDockWidget,
                                )
 from PySide6.QtCore import QEvent, Qt, Signal, QSize
 
-"""
-Custom title bar designed specifically to replace native QDockWidget header strips.
-Enables absolute layout control, allowing custom text placement and larger close buttons.
-"""
-# views/entry_window_title_bar.py
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import QSize, Qt, Slot
 from views.app_style_configuration import AppStyleConfiguration
 
 class EntryWindowTitleBar(QWidget):
+    """
+    Custom title bar designed specifically to replace native QDockWidget header strips.
+    Enables absolute layout control, allowing custom text placement and larger close buttons.
+    """
     def __init__(self, title_text: str, parent_dock: QWidget = None):
         super().__init__(parent_dock)
         self.parent_dock = parent_dock
@@ -52,9 +51,6 @@ class EntryWindowTitleBar(QWidget):
         if self.parent_dock:
             self.close_button.clicked.connect(self.parent_dock.close)
 
-        # ------------------------------------------------------------------
-        # MVC COMPLIANT THEME AUTO-SUBSCRIPTION
-        # ------------------------------------------------------------------
         broker = AppStyleConfiguration.event_broker()
         # Subscribe autonomously to the static styling event broker channel
         broker.theme_mutated.connect(self.refresh_theme_presentation)
@@ -122,9 +118,6 @@ class LatexIndexWindow(QDockWidget):
         self.setFeatures(QDockWidget.NoDockWidgetFeatures)
         self.setAllowedAreas(Qt.BottomDockWidgetArea)
 
-        # ======================================================================
-        # UPGRADE: INJECT THE HARDENED LARGE TITLE BAR WINDOW CONTROLLER
-        # ======================================================================
         # Replace the native operating system header row layout with our custom instance,
         # passing 'self' directly as the reference anchor so button clicks close the dock.
         self.custom_title_bar = EntryWindowTitleBar(title, parent_dock=self)
@@ -135,7 +128,6 @@ class LatexIndexWindow(QDockWidget):
 
         # Initialize the UI
         self._init_ui()
-
 
     def _init_ui(self):
         self.container = QWidget()
@@ -167,7 +159,7 @@ class LatexIndexWindow(QDockWidget):
         self.input_layout.addWidget(self.sub2_entry, 2, 1)
         
         # ======================================================================
-        # UPGRADE: CROSS-REFERENCE INPUT INTERFACE FIELDS
+        # CROSS-REFERENCE INPUT INTERFACE FIELDS
         # ======================================================================
         self.xref_layout = QHBoxLayout()
         self.xref_enable = QCheckBox("Cross-Reference (Xref)")
