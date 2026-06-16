@@ -16,7 +16,7 @@ class EntryModifierList(QWidget):
         layout.setSpacing(6)
 
         # Presentation Header
-        self.title_label = QLabel("Active Entry Records Editor", self)
+        self.title_label = QLabel("Index Entry Records Editor", self)
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title_label.setStyleSheet("font-weight: bold; color: #888888;")
         layout.addWidget(self.title_label)
