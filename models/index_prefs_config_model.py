@@ -35,14 +35,22 @@ class IndexPrefsConfigModel:
         self._data = IndexPrefsData()
 
     def update_data(self, updates: Dict[str, Any]) -> None:
-        valid_keys = asdict(self._data).keys()
-        field_types = {f.name: f.type for f in fields(self._data)}
-        coerce = {"bool": bool, "int": int, "str": str}
+        defaults = asdict(self._data.__class__())  # fresh default instance for type reference
         for key, value in updates.items():
-            if key not in valid_keys:
+            if key not in defaults:
                 continue
-            type_name = field_types.get(key, "str")
-            setattr(self._data, key, coerce.get(type_name, str)(value))
+            default_val = defaults[key]
+            try:
+                if isinstance(default_val, bool):
+                    # Must check bool before int — bool is a subclass of int
+                    coerced = bool(str(value).lower() == "true") if not isinstance(value, bool) else value
+                elif isinstance(default_val, int):
+                    coerced = int(value)
+                else:
+                    coerced = str(value)
+            except (ValueError, TypeError):
+                coerced = default_val
+            setattr(self._data, key, coerced)
 
     def serialize_to_dict(self) -> Dict[str, Any]:
         return asdict(self._data)

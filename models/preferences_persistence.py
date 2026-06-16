@@ -100,28 +100,38 @@ class PreferencesPersistence(QObject):
         self.settings.endGroup()
 
     def load_index_prefs(self, project_name: str | None = None) -> dict:
-        """
-        Loads index preferences with project scope taking priority over global.
-        Falls back to global, then to IndexPrefsData dataclass defaults.
-        """
         from models.index_prefs_config_model import IndexPrefsData
-        from dataclasses import asdict
-        defaults = asdict(IndexPrefsData())
+        from dataclasses import asdict, fields
+        import dataclasses
 
-        # Always load global layer first as the base
+        defaults = asdict(IndexPrefsData())
+        field_types = {f.name: f.type for f in fields(IndexPrefsData())}
+
+        def coerce(key, raw):
+            t = field_types.get(key, "str")
+            try:
+                if t == "bool":
+                    # QSettings serializes bools as 'true'/'false' strings on Windows
+                    return str(raw).lower() == "true"
+                elif t == "int":
+                    return int(raw)
+                else:
+                    return str(raw)
+            except (ValueError, TypeError):
+                return defaults[key]
+
         self.settings.beginGroup("IndexPrefs/global")
-        global_data = {key: self.settings.value(key, defaults[key]) for key in defaults}
+        global_data = {key: coerce(key, self.settings.value(key, defaults[key])) for key in defaults}
         self.settings.endGroup()
 
         if not project_name:
             return global_data
 
-        # Overlay project-scoped values on top of globals where they exist
         self.settings.beginGroup(f"IndexPrefs/{project_name}")
         project_keys = self.settings.childKeys()
         for key in project_keys:
             if key in global_data:
-                global_data[key] = self.settings.value(key)
+                global_data[key] = coerce(key, self.settings.value(key))
         self.settings.endGroup()
 
         return global_data
