@@ -24,7 +24,8 @@ from controllers.index_prefs_config_controller import IndexPrefsConfigController
 
 class AppPipelineController(QObject):
     def __init__(self, window, prefs_model, backup_manager, doc_controller,  
-                 lifecycle_controller, scope_controller, worker=None): 
+                 lifecycle_controller, scope_controller, session_logger,
+                 worker=None): 
         super().__init__()
         self.window = window
         self.prefs = prefs_model
@@ -32,7 +33,8 @@ class AppPipelineController(QObject):
         self.doc_io = doc_controller
         # self.idx_ctrl = index_controller
         self.lc_ctrl = lifecycle_controller
-        self.scope_ctrl = scope_controller 
+        self.scope_ctrl = scope_controller
+        self.session_logger = session_logger
         self.worker = worker  
         self._tree_modified = False
         self._load_thread = None
@@ -372,6 +374,7 @@ class AppPipelineController(QObject):
 
         # Realign session logging paths natively
         project_root_dir = os.path.dirname(os.path.normpath(db_path))
+        self.session_logger.realign_log_to_project_root(project_root_dir)
 
         # Synchronize presentation title text and status bars
         project_name = os.path.basename(project_root_dir)

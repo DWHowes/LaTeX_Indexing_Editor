@@ -78,7 +78,8 @@ if __name__ == "__main__":
             backup_manager=backup_manager,
             doc_controller=doc_controller,
             lifecycle_controller=lifecycle_controller,
-            scope_controller=scope_controller 
+            scope_controller=scope_controller,
+            session_logger=logger
         )
 
         geometry = preferences_payload.get("geometry")
