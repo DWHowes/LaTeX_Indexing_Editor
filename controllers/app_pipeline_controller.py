@@ -404,6 +404,9 @@ class AppPipelineController(QObject):
         self._index_prefs_ctrl.set_active_project(project_name)
         self.window.status_bar.showMessage(f"Project '{project_name}' loaded successfully.", 3000)
 
+        # Enable menu items that are gated behind an active project context
+        self.window.menu_bar.update_menu_item_state(is_enabled=True)
+
         # Force the finished tree hierarchy to expand fully
         self.index_tree_widget.expandAll()
 
@@ -438,6 +441,8 @@ class AppPipelineController(QObject):
         self._tree_modified = False
         self.window.synchronize_window_title(None)
         self.window.status_bar.showMessage("Project closed.", 2000)
+        # Disable menu items that require an active project context
+        self.window.menu_bar.update_menu_item_state(is_enabled=False)
         return True
         
     @Slot()

@@ -75,10 +75,14 @@ class MainMenuBar(QMenuBar):
             QKeySequence(Qt.Modifier.CTRL | Qt.Key.Key_Backslash)
         )
         self.index_entry_action.triggered.connect(lambda: self.toggle_entry_window_requested.emit())
+        # Disable it by default on application startup (since no project is open yet)
+        self.index_entry_action.setEnabled(False)
 
         tools_menu = self.addMenu("&Tools")
-        head_note_action = tools_menu.addAction("Add Head &Note", QKeySequence("Ctrl+Shift+H"))
-        head_note_action.triggered.connect(lambda: self.add_head_note_requested.emit())
+        self.head_note_action = tools_menu.addAction("Add Head &Note", QKeySequence("Ctrl+Shift+H"))
+        self.head_note_action.triggered.connect(lambda: self.add_head_note_requested.emit())
+        # Disable it by default on application startup (since no project is open yet)
+        self.head_note_action.setEnabled(False)
         
         # --- Global Action Container Tracking ---
         # Free-floating action container tracking the dark mode shortcut globally
@@ -88,5 +92,6 @@ class MainMenuBar(QMenuBar):
         self.addAction(self.dark_mode_action)
 
     def update_menu_item_state(self, is_enabled: bool):
-        """Allows external workspace controllers to toggle menu items on tab count changes."""
+        """Allows external workspace controllers to toggle menu items on project state changes."""
         self.index_entry_action.setEnabled(is_enabled)
+        self.head_note_action.setEnabled(is_enabled)        
