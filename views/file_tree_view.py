@@ -41,12 +41,10 @@ class FileTreeView(QTreeView):
         if self.selectionModel():
             self.selectionModel().clear()
 
-        self.base_model.beginResetModel()
         self.base_model.clear()
 
         self._rebuild_tree_nodes(tree_data, self.base_model.invisibleRootItem())
 
-        self.base_model.endResetModel()
         self.proxy_model.invalidateFilter()
 
         self.expandAll()
