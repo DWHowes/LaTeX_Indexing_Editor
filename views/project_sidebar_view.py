@@ -27,9 +27,6 @@ class ProjectSidebarView(QTabWidget):
         self.tree_files = FileTreeView(self)
         self.entry_modifier_panel = EntryModifierList(self)
 
-        # ──────────────────────────────────────────────────────────
-        # MVC LIFECYCLE ADJUSTMENT: Index Tree Setup
-        # ──────────────────────────────────────────────────────────
         # IndexTreeView requires an injected model engine contract at boot time.
         # We start with a blank container so tab numbers (0, 1, 2) stay locked.
         placeholder_widget = QWidget(self)
