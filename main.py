@@ -10,7 +10,6 @@ from models.session_backup_manager import SessionBackupManager
 # Import all core operational controllers
 from controllers.app_pipeline_controller import AppPipelineController
 from controllers.document_io_controller import DocumentIOController
-# from controllers.index_tree_controller import IndexTreeController
 from controllers.workspace_lifecycle_controller import WorkspaceLifecycleController
 from views.app_style_configuration import AppStyleConfiguration
 from controllers.external_file_watcher_engine import ExternalFileWatcherEngine
