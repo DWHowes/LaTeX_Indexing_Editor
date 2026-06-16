@@ -64,7 +64,6 @@ class CaseInsensitiveItem(QStandardItem):
         return self_key < other_key
 
 
-# views/index_tree_view.py (Part 1)
 from PySide6.QtCore import Qt, Signal, Slot, QModelIndex
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QFontMetrics, QCursor
 from PySide6.QtWidgets import QTreeView, QAbstractItemView, QStyle

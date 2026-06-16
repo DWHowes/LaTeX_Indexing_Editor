@@ -200,60 +200,6 @@ class FileTreePersistence:
             print(f"[DB CRITICAL FAILURE] Failed to execute deletion statement: {db_err}")
             return False
     
-    # def extract_project_manifest_tables(self, absolute_path: str) -> tuple[list[dict], list[dict]]:
-    #     """
-    #     Thread-safe relational extraction engine. Parses existing DB tables 
-    #     for structurally mapped index headers and references matching the path.
-    #     Strict MVC: Executes pure SQL operations with no UI synchronization.
-    #     """
-
-    #     headings = []
-    #     references = []
-        
-    #     # Ensure self.connection_string or self.db_path is defined on your model
-    #     if not self.db_path:
-    #         return headings, references
-
-    #     # Establish isolated connection to guarantee thread-safe reading out-of-band
-    #     conn = sqlite3.connect(self.db_path)
-    #     conn.row_factory = sqlite3.Row
-    #     cursor = conn.cursor()
-        
-    #     try:
-    #         # 1. Gather structural headings mapped to this file target
-    #         cursor.execute(
-    #             """
-    #             SELECT id, line_number, column_offset, heading_text, fallback_tag 
-    #             FROM project_headings 
-    #             WHERE file_path = ? 
-    #             ORDER BY line_number ASC
-    #             """,
-    #             (absolute_path,)
-    #         )
-    #         headings = [dict(row) for row in cursor.fetchall()]
-
-    #         # 2. Gather cross-references (see / seealso) mapped to this file target
-    #         cursor.execute(
-    #             """
-    #             SELECT id, line_number, column_offset, reference_source, reference_target, fallback_tag 
-    #             FROM project_references 
-    #             WHERE file_path = ? 
-    #             ORDER BY line_number ASC
-    #             """,
-    #             (absolute_path,)
-    #         )
-    #         references = [dict(row) for row in cursor.fetchall()]
-            
-    #     except sqlite3.Error as e:
-    #         print(f"sqlite3 error: {e}")
-    #         # Graceful fallback to prevent background worker crashes on schema mismatches
-    #         pass
-    #     finally:
-    #         cursor.close()
-    #         conn.close()
-
-    #     return headings, references
-
     def update_active_database_connection(self, new_db_path: str) -> None:
         """
         Updates the system state pointing to the underlying SQLite database partition.
@@ -482,3 +428,19 @@ class FileTreePersistence:
         except sqlite3.Error as e:
             print(f"[FileTreePersistence] fetch_index_manifest error: {e}")
         return headings, references
+    
+    def reset_to_default_state(self) -> None:
+        """
+        Public Model Contract.
+        Resets all active project properties, clears path variables, and restores 
+        baseline internal state indicators to prevent cross-contamination across sessions.
+        """
+        # Sever the active database pathway connection string completely
+        self.db_path = ""
+
+        # Revert internal state variables back to standard startup values
+        self._pending_project_name = "Untitled LaTeX Project"
+        
+        # Print a structural confirmation trace directly to the stream 
+        # This allows the decoupled SessionLogger to track database unlinking actions
+        print("[MODEL PERSISTENCE] Database connections severed. State reset to baseline defaults.")

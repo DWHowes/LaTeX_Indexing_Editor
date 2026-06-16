@@ -1,5 +1,5 @@
 import os
-
+from shiboken6 import isValid  # Official PySide6 C++ lifetime validator
 from collections import deque
 
 from PySide6.QtCore import QObject, Slot, QModelIndex, Qt
@@ -342,10 +342,20 @@ class AppPipelineController(QObject):
         self.window.centralWidget().setEnabled(False)
 
         # Teardown active background threads cleanly before spin up
-        if self._load_thread and self._load_thread.isRunning():
-            self._load_thread.worker.stop()
-            self._load_thread.quit()
-            self._load_thread.wait()
+        # Verify both the Python reference exists AND the C++ object is alive
+        if self._load_thread is not None and isValid(self._load_thread):
+            if self._load_thread.isRunning():
+                # 1. Thread is valid and running: stop it and wait for it to exit
+                self._load_thread.worker.stop()
+                self._load_thread.quit()
+                self._load_thread.wait()
+                self._load_thread = None
+            else:
+                # Thread is valid but stopped: clear the reference safely
+                self._load_thread = None
+        else:
+            # Thread reference is completely dead or None: scrub pointer directly
+            self._load_thread = None
 
         # Pass the verified database path into the background loading worker thread
         self._load_thread = SafeProjectLoadThread(
@@ -431,9 +441,12 @@ class AppPipelineController(QObject):
 
         if self.idx_ctrl:
             self.idx_ctrl.clear_staged_entries()
+            self.idx_ctrl.clear_active_manifests()
 
-        self.index_tree_widget.clear()
-        self.file_tree_widget.clear()
+        # self.index_tree_widget.clear()
+        # self.file_tree_widget.clear()
+        self.index_tree_widget.model().clear()
+        self.file_tree_widget.model().sourceModel().clear()
 
         self.scope_ctrl.close_active_project()
         self._index_prefs_ctrl.set_active_project(None)

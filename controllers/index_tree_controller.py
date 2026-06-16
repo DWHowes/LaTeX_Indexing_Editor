@@ -27,6 +27,14 @@ class IndexTreeController(QObject):
         """
         # Route directly to the pure model data structure layer
         self.model_engine.reset_transaction_arrays()
+
+    def clear_active_manifests(self) -> None:
+        """
+        Public routing contract called on project close.
+        Wipes the engine's loaded dataset cache so the next project's
+        ingest starts from a clean slate.
+        """
+        self.model_engine.clear_active_manifests()        
         
     @Slot(dict)
     def handle_add_subheading_slot(self, payload: dict):
