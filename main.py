@@ -73,9 +73,6 @@ if __name__ == "__main__":
         file_persistence = FileTreePersistence(db_path=initial_db_path)         
         scope_controller = ProjectScopeController(file_persistence)
 
-        # index_model_engine = IndexTreeModelEngine(file_persistence.get_active_model())
-        # index_controller = IndexTreeController(index_model_engine, None)
-
         # Bind all components together via the master application orchestrator
         pipeline_controller = AppPipelineController(
             window=editor_window,
@@ -86,9 +83,6 @@ if __name__ == "__main__":
             scope_controller=scope_controller 
         )
 
-        # Link the parent relationship back safely after construction
-        # index_controller.parent = pipeline_controller
-       
         geometry = preferences_payload.get("geometry")
         state = preferences_payload.get("state")
         splitter_state = preferences_payload.get("splitter_state")
