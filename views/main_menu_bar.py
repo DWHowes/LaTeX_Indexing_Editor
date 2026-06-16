@@ -15,6 +15,7 @@ class MainMenuBar(QMenuBar):
     toggle_dark_mode_requested = Signal()
     toggle_entry_window_requested = Signal()
     preferences_requested = Signal()
+    add_head_note_requested = Signal()
 
     def __init__(self, parent_window=None):
         super().__init__(parent_window)
@@ -57,15 +58,14 @@ class MainMenuBar(QMenuBar):
         view_menu = self.addMenu("&View")
         
         # 1. Left Sidebar Focus Controls
-        toggle_file_action = view_menu.addAction("Toggle &File Sidebar", QKeySequence("Ctrl+B"))
+        toggle_file_action = view_menu.addAction("Focus &File Pane", QKeySequence("Ctrl+B"))
         toggle_file_action.triggered.connect(lambda: self.toggle_file_sidebar_requested.emit())
         
-        toggle_idx_action = view_menu.addAction("Toggle &Index Sidebar", QKeySequence("Ctrl+Shift+I"))
+        toggle_idx_action = view_menu.addAction("Focus &Index Pane", QKeySequence("Ctrl+Shift+I"))
         toggle_idx_action.triggered.connect(lambda: self.toggle_index_sidebar_requested.emit())
         
-        # NEW: Dedicated action mapping Ctrl+E to pull the Edit Entries tab panel into the foreground
-        self.edit_list_tab_action = view_menu.addAction("Focus Edit &Entries List Panel", QKeySequence("Ctrl+E"))
-        self.edit_list_tab_action.triggered.connect(lambda: self.toggle_edit_list_requested.emit())
+        edit_list_tab_action = view_menu.addAction("Focus Edit &Entries Pane", QKeySequence("Ctrl+E"))
+        edit_list_tab_action.triggered.connect(lambda: self.toggle_edit_list_requested.emit())
         
         view_menu.addSeparator()
 
@@ -75,6 +75,10 @@ class MainMenuBar(QMenuBar):
             QKeySequence(Qt.Modifier.CTRL | Qt.Key.Key_Backslash)
         )
         self.index_entry_action.triggered.connect(lambda: self.toggle_entry_window_requested.emit())
+
+        tools_menu = self.addMenu("&Tools")
+        head_note_action = tools_menu.addAction("Add Head &Note", QKeySequence("Ctrl+Shift+H"))
+        head_note_action.triggered.connect(lambda: self.add_head_note_requested.emit())
         
         # --- Global Action Container Tracking ---
         # Free-floating action container tracking the dark mode shortcut globally
