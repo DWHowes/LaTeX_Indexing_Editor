@@ -81,7 +81,7 @@ class IndexPrefsConfigDialog(QDialog):
         form_binary.addRow("Target Stylesheet Name (.ist):", self.txt_makeindex_style)
         lay_makeindex.addWidget(grp_binary)
         
-        grp_ist = QGroupBox("Dynamic .ist Stylesheet File Rules")
+        grp_ist = QGroupBox("Index Formatting Rules")
         form_ist = QFormLayout(grp_ist)
         self.chk_ist_headings = QCheckBox("Enable Alphabetical Section Headers (A, B, C...)")
         self.chk_ist_bold = QCheckBox("Render Letter Headers Bold (\\textbf)")
