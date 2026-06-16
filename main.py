@@ -16,7 +16,6 @@ from views.app_style_configuration import AppStyleConfiguration
 from controllers.external_file_watcher_engine import ExternalFileWatcherEngine
 from models.file_tree_persistence import FileTreePersistence
 from controllers.project_scope_controller import ProjectScopeController
-# from models.index_tree_model_engine import IndexTreeModelEngine
 
 if __name__ == "__main__":
     """
