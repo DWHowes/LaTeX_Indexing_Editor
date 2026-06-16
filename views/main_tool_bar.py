@@ -21,6 +21,9 @@ class MainToolBar(QToolBar):
         super().__init__("Main", parent_window)
         self._parent_window = parent_window
         self.icon_size = 32
+
+        # Set a unique object name for styling purposes
+        self.setObjectName("MainToolBar")
         
         # Subscribe autonomously to the static styling event broker channel
         AppStyleConfiguration.event_broker().theme_mutated.connect(self.refresh_theme_presentation)
