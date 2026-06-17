@@ -8,7 +8,7 @@ from shiboken6 import isValid
 
 from views.app_style_configuration import AppStyleConfiguration
 from views.editor_tab import EditorTab
-from views.latex_index_window import ReferenceCarrier
+from models.latex_entry_model import ReferenceCarrier
 from views.index_tree_view import IndexTreeView
 from views.project_sidebar_view import ProjectSidebarView
 from views.advanced_search_window import AdvancedSearchWindow
