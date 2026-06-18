@@ -291,16 +291,20 @@ class FileTreePersistence:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
-            # Extract standard primitive fields safely
-            sanitized_batch = [
-                (str(record.get('file_path')), str(record.get('file_name')), 1)
-                for record in initial_records if 'file_path' in record
-            ]
-            
+            sanitized_batch = []
+            for record in initial_records:
+                # Accept common path keys: 'absolute_path', 'file_path', or 'path'
+                abs_path = record.get("absolute_path") or record.get("file_path") or record.get("path")
+                if not abs_path:
+                    continue
+                abs_path = os.path.normpath(str(abs_path))
+                file_name = record.get("file_name") or os.path.basename(abs_path)
+                sanitized_batch.append((abs_path, str(file_name), 1))
+
             if not sanitized_batch:
+                print("[DB TRACE] upsert_project_files: no valid records to insert")
                 return
 
-            # Pure upsert transaction execution matrix
             cursor.executemany(
                 """
                 INSERT INTO project_files (absolute_path, file_name, is_active)
@@ -313,7 +317,6 @@ class FileTreePersistence:
             )
             conn.commit()
         except sqlite3.Error as err:
-            # In production, pass low-level logs up to your SessionLogger instance
             print(f"[DATABASE ERROR] Upsert batch processing execution failed: {err}")
         finally:
             cursor.close()
