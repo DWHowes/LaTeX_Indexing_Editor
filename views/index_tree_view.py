@@ -244,7 +244,6 @@ class IndexTreeView(QTreeView):
         Receives backend data payloads and renders tree columns.
         Strict MVC: Renders GUI elements here while delegating string logic to the engine.
         """
-        print(f"POPULATE HIERARCHY TREE: headings = {len(headings)}, references = {len(references)}")
         self.base_model.blockSignals(True)
         self.setSortingEnabled(False)
         try:
