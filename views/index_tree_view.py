@@ -151,9 +151,11 @@ class IndexTreeView(QTreeView):
         target_dict = None
         if isinstance(raw_metadata, dict):
             target_dict = raw_metadata
-        elif isinstance(raw_metadata, list) and len(raw_metadata) > 0:
-            if isinstance(raw_metadata, dict):
-                target_dict = raw_metadata
+        elif isinstance(raw_metadata, list):
+            for item in raw_metadata:
+                if isinstance(item, dict):
+                    target_dict = item
+                    break
 
         # Fallback to child tree node structure if present
         if not target_dict and self.base_model.hasChildren(index):
@@ -162,12 +164,13 @@ class IndexTreeView(QTreeView):
                 child_data = child_idx.data(Qt.ItemDataRole.UserRole + 1)
                 if isinstance(child_data, dict):
                     target_dict = child_data
-                elif isinstance(child_data, list) and len(child_data) > 0:
-                    if isinstance(child_data, dict):
-                        target_dict = child_data
+                elif isinstance(child_data, list):
+                    for item in child_data:
+                        if isinstance(item, dict):
+                            target_dict = item
+                            break
 
         if target_dict:
-            # Route through the exact same internal translation mechanism
             self._unpack_delegate_payload(target_dict)
 
     def append_entry(self, parts_list: list, refs: list) -> None:
@@ -229,18 +232,26 @@ class IndexTreeView(QTreeView):
         """Re-inserts an entry that was removed by undo. Called by the redo stack."""
         self.append_entry(parts_list, refs)
 
+    def reset_tree_model(self):
+        self.base_model = QStandardItemModel(self)
+        self.base_model.setHorizontalHeaderLabels(["Index Terms", "References"])
+        self.setModel(self.base_model)
+        self.formatting_delegate.clear_cache()        
+
     @Slot(list, list)
     def populate_hierarchy_tree(self, headings: list, references: list):
         """
         Receives backend data payloads and renders tree columns.
         Strict MVC: Renders GUI elements here while delegating string logic to the engine.
         """
+        print(f"POPULATE HIERARCHY TREE: headings = {len(headings)}, references = {len(references)}")
         self.base_model.blockSignals(True)
         self.setSortingEnabled(False)
         try:
-            self.base_model.clear()
-            self.base_model.setHorizontalHeaderLabels(["Index Terms", "References"])
-            self.formatting_delegate.clear_cache()  # Clear cached segments to prevent stale data after full reload
+            self.reset_tree_model()
+            # self.base_model.clear()
+            # self.base_model.setHorizontalHeaderLabels(["Index Terms", "References"])
+            # self.formatting_delegate.clear_cache()  # Clear cached segments to prevent stale data after full reload
             if not headings: return
 
             id_to_refs = {}

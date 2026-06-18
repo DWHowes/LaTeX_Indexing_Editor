@@ -445,7 +445,8 @@ class AppPipelineController(QObject):
 
         # self.index_tree_widget.clear()
         # self.file_tree_widget.clear()
-        self.index_tree_widget.model().clear()
+        # self.index_tree_widget.model().clear()
+        self.index_tree_widget.reset_tree_model()
         self.file_tree_widget.model().sourceModel().clear()
 
         self.scope_ctrl.close_active_project()
