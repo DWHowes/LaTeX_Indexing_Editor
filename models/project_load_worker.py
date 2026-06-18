@@ -142,18 +142,17 @@ class ProjectLoadWorker(QObject):
                 file_target = uid_dict.get("file_path") or uid_dict.get("path") or norm_target
                 unique_id = uid_dict.get("id") or uid_dict.get("unique_id_number") or running_id_pool
                 abs_pos_coord = uid_dict.get("absolute_index") or uid_dict.get("absolute_position")
-                
-                see_array = uid_dict.get("see") or None
-                seealso_array = uid_dict.get("seealso") or None
-                has_ref_flag = bool(uid_dict.get("has_references") or see_array or seealso_array)
+                abs_end_coord = uid_dict.get("absolute_end")
 
                 references_payload.append({
                     "heading_id": assigned_heading_id, "heading_raw_text": full_heading_path, 
                     "uid": f"{file_target}:{line_coord}:{col_coord}", "unique_id_number": int(unique_id),
                     "file_path": str(file_target), "line_number": int(line_coord), "column_offset": int(col_coord), 
                     "absolute_position": int(abs_pos_coord) if abs_pos_coord is not None else None,
-                    "encap": uid_dict.get("encap", "standard"), "see_references": see_array,       
-                    "seealso_references": seealso_array, "has_references": has_ref_flag
+                    "absolute_index": int(abs_pos_coord) if abs_pos_coord is not None else None,
+                    "absolute_end": int(abs_end_coord) if abs_end_coord is not None else None,
+                    "encap": uid_dict.get("encap", "standard"), "see_references": uid_dict.get("see"),       
+                    "seealso_references": uid_dict.get("seealso"), "has_references": uid_dict.get("has_references")
                 })
                 
         self.status_updated.emit("Macro markers compiled successfully. Synchronizing project states...")

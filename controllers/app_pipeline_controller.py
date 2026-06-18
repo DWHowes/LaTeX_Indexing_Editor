@@ -1,6 +1,7 @@
 import os
 from shiboken6 import isValid  # Official PySide6 C++ lifetime validator
 from collections import deque
+from pathlib import Path
 
 from PySide6.QtCore import QObject, Slot, QModelIndex, Qt
 from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplication
@@ -387,6 +388,9 @@ class AppPipelineController(QObject):
         # flush them down into the model layer (FileTreePersistence).
         if headings or references:
             self.scope_ctrl.save_scraped_index_data(headings, references)
+
+        if file_tree_payload:
+            self.scope_ctrl.persist_project_file_records(file_tree_payload)
 
         self.window.db_path = db_path
 

@@ -297,6 +297,13 @@ class FileTreePersistence:
                 abs_path = record.get("absolute_path") or record.get("file_path") or record.get("path")
                 if not abs_path:
                     continue
+                # Safety check so only .tex files are added to the db table
+                # This is checked in the project scope controller so the input should
+                # be clean, but being safe.
+                path_obj = Path(str(abs_path))
+                if path_obj.suffix.lower() != ".tex":
+                    continue
+
                 abs_path = os.path.normpath(str(abs_path))
                 file_name = record.get("file_name") or os.path.basename(abs_path)
                 sanitized_batch.append((abs_path, str(file_name), 1))

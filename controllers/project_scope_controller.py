@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+
 from PySide6.QtCore import QObject, Signal, Slot, QModelIndex
 
 class ProjectScopeController(QObject):
@@ -84,6 +86,45 @@ class ProjectScopeController(QObject):
         """Routes out-of-band data arrays safely down into the persistence model layer."""
         self.model.serialize_scraped_index_manifest(headings, references)
         self.scope_mutated.emit()
+
+    def persist_project_file_records(self, file_tree_payload: list[dict]) -> None:
+        if not file_tree_payload or not self.model:
+            return
+
+        flat_records: list[dict] = []
+
+
+    def persist_project_file_records(self, file_tree_payload: list[dict]) -> None:
+        if not file_tree_payload or not self.model:
+            return
+
+        flat_records: list[dict] = []
+
+        def _walk_nodes(nodes: list[dict]) -> None:
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+
+                is_dir = node.get("is_dir")
+                node_path = node.get("path")
+
+                if is_dir is False and isinstance(node_path, str):
+                    path_obj = Path(os.path.normpath(node_path))
+                    if path_obj.suffix.lower() == ".tex":
+                        flat_records.append({
+                            "absolute_path": str(path_obj),
+                            "file_name": node.get("name") or path_obj.name,
+                        })
+
+                children = node.get("children")
+                if isinstance(children, list):
+                    _walk_nodes(children)
+
+        _walk_nodes(file_tree_payload)
+
+        if flat_records:
+            self.model.upsert_project_files(flat_records)
+            self.scope_mutated.emit()
 
     def get_persistence_model(self):
         """Public contract exposing the underlying persistence model."""
