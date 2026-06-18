@@ -280,6 +280,38 @@ class FileTreePersistence:
                     
         return None
 
+    def upsert_project_metadata(self, payload: dict) -> None:
+        """Upsert multiple metadata key/value pairs into project_metadata."""
+        if not self.db_path or not payload:
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            items = [(str(k), str(v)) for k, v in payload.items()]
+            cursor.executemany(
+                """
+                INSERT INTO project_metadata (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                items
+            )
+            conn.commit()
+        except sqlite3.Error as err:
+            print(f"[MODEL PERSISTENCE] upsert_project_metadata failed: {err}")
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     def upsert_project_files(self, initial_records: list[dict]) -> None:
         """
         Executes high-performance atomic database staging writes for discovered file systems.

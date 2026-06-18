@@ -59,6 +59,36 @@ class IndexPrefsConfigModel:
         """Hydrates model state from a persisted settings payload."""
         self.update_data(data)
 
+    def load_from_project(self, persistence_model) -> None:
+        """Load project-scoped prefs from a persistence model (DB)."""
+        if persistence_model is None:
+            raise ValueError("persistence_model is required")
+
+        loaded: dict = {}
+        for f in fields(self._data):
+            key = f.name
+            try:
+                val = persistence_model.get_metadata_value(key)
+            except AttributeError as e:
+                raise AttributeError("persistence_model must implement get_metadata_value(key)") from e
+            if val is not None:
+                loaded[key] = val
+
+        if loaded:
+            self.update_data(loaded)
+
+    def persist_to_project(self, persistence_model) -> None:
+        """Persist current prefs into the project's metadata table via persistence_model."""
+        if persistence_model is None:
+            raise ValueError("persistence_model is required")
+
+        payload = self.serialize_to_dict()
+        try:
+            # Expect a single-dict upsert API on the persistence model
+            persistence_model.upsert_project_metadata(payload)
+        except AttributeError as e:
+            raise AttributeError("persistence_model must implement upsert_project_metadata(payload)") from e
+
     def generate_ist_content(self) -> str:
         """Retained for future explicit .ist export workflow."""
         lines = [
