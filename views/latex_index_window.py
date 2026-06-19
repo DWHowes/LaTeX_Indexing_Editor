@@ -75,6 +75,34 @@ class EntryWindowTitleBar(QWidget):
             }}
         """)
 
+class CustomLineEdit(QLineEdit):
+    """A custom line edit that detects backspace when empty."""
+    def __init__(self, previous_field, place_holder_text=None, parent=None, associated_label=None):
+        super().__init__(parent, placeholderText=place_holder_text)
+        self.previous_field = previous_field
+        self.associated_label = associated_label
+
+    def keyPressEvent(self, event):
+        # Trigger when field is empty and backspace is pressed
+        if event.key() == Qt.Key.Key_Backspace and not self.text():
+            self.setVisible(False)
+            if self.associated_label:
+                self.associated_label.hide()
+            
+            # Force the layout engine to immediately recalculate the window size
+            if self.parentWidget() and self.parentWidget().layout():
+                self.parentWidget().layout().activate()
+
+            # Shift focus back to the previous input field
+            if self.previous_field:
+                self.previous_field.setFocus()
+                self.previous_field.setCursorPosition(len(self.previous_field.text()))
+                
+            event.accept()
+            return
+            
+        super().keyPressEvent(event)
+        
 class LatexIndexWindow(QDockWidget):
     insertRequested = Signal()
     formatRequested = Signal(str)
@@ -109,11 +137,17 @@ class LatexIndexWindow(QDockWidget):
         self.main_entry.returnPressed.connect(self.reveal_sub1)
 
         self.sub1_label = QLabel("Subhead 1:")
-        self.sub1_entry = QLineEdit(placeholderText="Subheading 1")
+        self.sub1_entry = CustomLineEdit(self.main_entry, 
+                                         place_holder_text="Subheading 1", 
+                                         parent=self.container, 
+                                         associated_label=self.sub1_label)
         self.sub1_entry.returnPressed.connect(self.reveal_sub2)
 
         self.sub2_label = QLabel("Subhead 2:")
-        self.sub2_entry = QLineEdit(placeholderText="Subheading 2")
+        self.sub2_entry = CustomLineEdit(self.sub1_entry, 
+                                         place_holder_text="Subheading 2", 
+                                         parent=self.container, 
+                                         associated_label=self.sub2_label)
 
         for w in [self.sub1_label, self.sub1_entry, self.sub2_label, self.sub2_entry]:
             w.hide()
