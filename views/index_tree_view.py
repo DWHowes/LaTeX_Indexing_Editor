@@ -6,7 +6,6 @@ from PySide6.QtCore import Qt, Signal, Slot, QModelIndex, QSortFilterProxyModel,
 
 from views.app_style_configuration import AppStyleConfiguration
 from views.index_text_formatter_delegate import IndexTextFormatterDelegate
-# from models.index_tree_persistence import IndexTreePersistence
 from views.index_link_delegate import IndexLinkDelegate
 
 class CaseInsensitiveItem(QStandardItem):
@@ -25,12 +24,12 @@ class CaseInsensitiveItem(QStandardItem):
         if not text: 
             return ""
         
-        # Rule 1: Cross-references (See also) use a leading null-byte style control character 
+        # Cross-references (See also) use a leading null-byte style control character 
         # to guarantee they float to index 0 beneath their parent category.
         if self.is_see_also:
             return "\x00" + text.strip().lower()
             
-        # Rule 2: Forced Sorting Upgrade (@ operator support)
+        # Forced Sorting Upgrade (@ operator support)
         # If the input contains a custom sort override (e.g. "alpha@\\alpha"), 
         # extract the leading descriptor as the definitive sorting key.
         if '@' in text:
@@ -45,7 +44,7 @@ class CaseInsensitiveItem(QStandardItem):
         if not isinstance(other, QStandardItem):
             return super().__lt__(other)
             
-        # FIX: Dynamically extract the sort key even if the other item is a standard QStandardItem
+        # Dynamically extract the sort key even if the other item is a standard QStandardItem
         # If it doesn't have a custom sort_key attribute, we generate its fallback key on the fly.
         self_key = self.sort_key
         
@@ -130,7 +129,9 @@ class IndexTreeView(QTreeView):
         
         # Safely convert to integers, using standard text coordinate bases
         line_num = int(record_payload.get("line_number") or 1)
-        column_num = int(record_payload.get("column_offset") or 1)
+        # column_num = int(record_payload.get("column_offset") or 1)
+        raw_col = record_payload.get("column_offset")
+        column_num = int(raw_col) if raw_col is not None else 0
         
         # Retain the identifier token string if available
         match_text = str(record_payload.get("fallback_label") or "")
@@ -248,9 +249,6 @@ class IndexTreeView(QTreeView):
         self.setSortingEnabled(False)
         try:
             self.reset_tree_model()
-            # self.base_model.clear()
-            # self.base_model.setHorizontalHeaderLabels(["Index Terms", "References"])
-            # self.formatting_delegate.clear_cache()  # Clear cached segments to prevent stale data after full reload
             if not headings: return
 
             id_to_refs = {}

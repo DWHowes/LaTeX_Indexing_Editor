@@ -97,7 +97,8 @@ class WorkspaceLifecycleController(QObject):
         total_blocks  = document.blockCount()
 
         if zero_line < total_blocks:
-            block = document.findBlockByLineNumber(zero_line)
+            # block = document.findBlockByLineNumber(zero_line)
+            block = document.findBlockByNumber(zero_line)
             if block.isValid():
                 # FIX: Pass is_index_jump=True to authorize macro text highlights
                 editor.jump_to_coordinates(

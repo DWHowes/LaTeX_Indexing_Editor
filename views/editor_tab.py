@@ -198,7 +198,8 @@ class EditorTab(QPlainTextEdit):
         else:
             target_line = (line - 1) if is_one_indexed else line
             target_line = max(0, min(target_line, doc.blockCount() - 1))
-            block = doc.findBlockByLineNumber(target_line)
+            # block = doc.findBlockByLineNumber(target_line)
+            block = doc.findBlockByNumber(target_line)
             if not block.isValid():
                 return
 
@@ -229,17 +230,17 @@ class EditorTab(QPlainTextEdit):
         doc = self.document()
         text = doc.toPlainText()
         length = len(text)
-
         if start_pos < 0 or start_pos >= length:
             return
 
-        if text[start_pos] != "\\":
-            # attempt to rewind to the nearest \index prefix on the same line
+        # If not on backslash, rewind to nearest \index on this line
+        if not text.startswith("\\index", start_pos):
             block = cursor.block()
             block_start = block.position()
             line_text = block.text()
-            rel_pos = cursor.position() - block_start
-            idx = line_text.rfind("\\index", 0, rel_pos)
+            rel_pos = start_pos - block_start
+            # Search the full line up to and including rel_pos
+            idx = line_text.rfind("\\index", 0, rel_pos + 7)  # +7 = len("\index{")
             if idx == -1:
                 return
             start_pos = block_start + idx
@@ -261,105 +262,6 @@ class EditorTab(QPlainTextEdit):
                         cursor.setPosition(end_pos + 1, QTextCursor.MoveMode.KeepAnchor)
                         return
             end_pos += 1
-
-    # def jump_to_coordinates(self, line: int, column: int, absolute_position: int = None, is_one_indexed: bool = True, is_index_jump: bool = False, absolute_end: int = None):
-    #     """
-    #     Moves the viewport text cursor precisely onto targets using native paragraph blocks.
-    #     Strict MVC Compliance: Completely free of coordinate drift, find loops, or string mutations.
-    #     """
-    #     self.setFocus()
-    #     doc = self.document()
-    #     if not doc or doc.blockCount() == 0:
-    #         return
-    #     # =====================================================================
-    #     # VIEW VIEWPORT TRACE LOG (INPUTS)
-    #     # =====================================================================
-    #     print(
-    #         f"[TRACE 3A: VIEWPORT NAVIGATION ATTEMPT]\n"
-    #         f"  -> Requested Target Coordinates: Line {line}, Col {column}\n"
-    #         f"  -> Total Document Block Count: {doc.blockCount()}\n"
-    #         f"  -> Is Index Jump Hook Active: {is_index_jump}"
-    #     )
-    #     # =====================================================================
-
-    #     # 1. FIXED: Explicitly clear any active selection highlights from previous clicks 
-    #     # to ensure the viewport tracking cursor is initialized in a pristine state.
-    #     active_view_cursor = self.textCursor()
-    #     if active_view_cursor.hasSelection():
-    #         active_view_cursor.clearSelection()
-    #         self.setTextCursor(active_view_cursor)
-
-    #     # 2. RESOLVE AND CLAMP TARGET LINE BOUNDARY VIA NATIVE PARAGRAPH BLOCKS
-    #     # This completely bypasses global character counts and line break formatting drift!
-    #     target_line = (line - 1) if is_one_indexed else line
-    #     target_line = max(0, min(target_line, doc.blockCount() - 1))
-        
-    #     # Extract the precise C++ text row block reference
-    #     block = doc.findBlockByLineNumber(target_line)
-    #     if not block.isValid():
-    #         return
-            
-    #     # 3. INITIALIZE CURSOR AT THE ABSOLUTE START OF THIS INDEPENDENT ROW BLOCK
-    #     cursor = QTextCursor(block)
-        
-    #     # Clamp character steps strictly within the physical text limits of this single line
-    #     line_text = block.text()
-    #     line_length = len(line_text)
-        
-    #     target_col = (column - 1) if is_one_indexed else column
-    #     safe_col = max(0, min(target_col, line_length))
-        
-    #     # Move the cursor horizontally to the correct character column offset
-    #     cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.MoveAnchor, safe_col)
-    #     # =====================================================================
-    #     # VIEW VIEWPORT TRACE LOG (PRE-SELECTION SNAPSHOT)
-    #     # =====================================================================
-    #     pos_in_block = cursor.positionInBlock()
-    #     remaining_text = line_text[pos_in_block:]
-    #     print(
-    #         f"[TRACE 3B: VIEWPORT ARRIVAL POSITION]\n"
-    #         f"  -> Actual Block Text Length: {line_length}\n"
-    #         f"  -> Cursor Position In Block: {pos_in_block}\n"
-    #         f"  -> Text Right Of Cursor (Caret View): '{remaining_text[:50]}'"
-    #     )
-    #     # =====================================================================
-
-    #     # 4. FIXED CONTEXT HIGHLIGHTING: Highlight exactly the index tag boundary 
-    #     # clicked without ever running secondary forward-searching lookup checks.
-    #     if is_index_jump:
-    #         pos_in_block = cursor.positionInBlock()
-    #         remaining_text = line_text[pos_in_block:]
-            
-    #         if remaining_text.strip().startswith("\\index"):
-    #             # Track the macro boundaries exactly within this line block context
-    #             closing_brace_idx = remaining_text.find("}")
-    #             highlight_length = (closing_brace_idx + 1) if closing_brace_idx != -1 else 7
-    #             cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, highlight_length)
-    #         else:
-    #             # Fallback highlight boundary marker
-    #             cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, min(10, len(remaining_text)))
-
-    #     # Commit layout adjustments back to the live editor widget canvas
-    #     self.setTextCursor(cursor)
-    #     self.ensureCursorVisible()
-    #     self.centerCursor()
-
-    # def inject_index_macro_direct(self, latex_chain_string: str) -> tuple[int, int]:
-    #     """Injects a raw LaTeX macro string at the active position via a brief write-tunnel."""
-    #     # self.setReadOnly(False)
-    #     cursor = self.textCursor()
-    #     cursor.beginEditBlock()
-    #     try:
-    #         latex_macro_tag = f"\\index{{{latex_chain_string}}}"
-    #         cursor.insertText(latex_macro_tag)
-    #         self.setTextCursor(cursor)
-            
-    #         line_num = cursor.blockNumber() + 1
-    #         col_offset = (cursor.position() - cursor.block().position()) + 1
-    #         return line_num, col_offset
-    #     finally:
-    #         cursor.endEditBlock()
-    #         # self.setReadOnly(True)
 
     def toggle_find_dialog(self):
         """Toggles the floating search panel layout visibility."""
