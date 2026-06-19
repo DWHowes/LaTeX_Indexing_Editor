@@ -16,6 +16,8 @@ class MainMenuBar(QMenuBar):
     toggle_entry_window_requested = Signal()
     preferences_requested = Signal()
     add_head_note_requested = Signal()
+    app_settings_action_requested = Signal()
+    project_settings_action_requested = Signal()
 
     def __init__(self, parent_window=None):
         super().__init__(parent_window)
@@ -57,7 +59,7 @@ class MainMenuBar(QMenuBar):
         # --- View Menu Dropdowns ---
         view_menu = self.addMenu("&View")
         
-        # 1. Left Sidebar Focus Controls
+        # Left Sidebar Focus Controls
         toggle_file_action = view_menu.addAction("Focus &File Pane", QKeySequence("Ctrl+B"))
         toggle_file_action.triggered.connect(lambda: self.toggle_file_sidebar_requested.emit())
         
@@ -69,7 +71,7 @@ class MainMenuBar(QMenuBar):
         
         view_menu.addSeparator()
 
-        # 2. Right Pane Index Creation Window Toggle Control (Ctrl+\ remain untouched)
+        # Right Pane Index Creation Window Toggle Control (Ctrl+\ remain untouched)
         self.index_entry_action = view_menu.addAction(
             "Toggle Index &Entry Window", 
             QKeySequence(Qt.Modifier.CTRL | Qt.Key.Key_Backslash)
@@ -83,6 +85,12 @@ class MainMenuBar(QMenuBar):
         self.head_note_action.triggered.connect(lambda: self.add_head_note_requested.emit())
         # Disable it by default on application startup (since no project is open yet)
         self.head_note_action.setEnabled(False)
+
+        self.app_settings_action = tools_menu.addAction("View &Application Settings")
+        self.app_settings_action.triggered.connect(lambda: self.app_settings_action_requested.emit())
+
+        self.project_settings_action = tools_menu.addAction("View &Project Settings")
+        self.project_settings_action.triggered.connect(lambda: self.project_settings_action_requested.emit())        
         
         # --- Global Action Container Tracking ---
         # Free-floating action container tracking the dark mode shortcut globally

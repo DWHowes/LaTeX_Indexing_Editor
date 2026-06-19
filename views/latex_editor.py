@@ -1,11 +1,14 @@
 from PySide6.QtWidgets import QMainWindow, QSplitter, QTabWidget, QSizePolicy, QInputDialog
-from PySide6.QtCore import Signal, QSize, Qt
+from PySide6.QtCore import Signal, QSize, Qt, Slot
 from PySide6.QtGui import QGuiApplication
 
 from views.main_menu_bar import MainMenuBar
 from views.main_tool_bar import MainToolBar
 from views.main_status_bar import MainStatusBar
 from views.latex_index_window import LatexIndexWindow
+from views.head_note_dialog import HeadNoteDialog
+from views.settings_inspector_dialogs import ApplicationSettingsDialog
+from views.settings_inspector_dialogs import ProjectSettingsDialog
 
 class LatexEditor(QMainWindow):
     """
@@ -18,7 +21,10 @@ class LatexEditor(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("LaTeX Indexing Editor")
-        
+
+        self.preferences_model = None
+        self.file_persistence = None
+
         self.init_ui_layout()
         self._assemble_visual_furniture()
         self._initialize_monitor_proportional_geometry()        
@@ -54,6 +60,12 @@ class LatexEditor(QMainWindow):
         # Index 0 is left intentionally blank for Controller allocation
         self.main_splitter.addWidget(self.right_splitter)
         self.setCentralWidget(self.main_splitter)
+
+    def set_preferences_model(self, preferences_model):
+        self.preferences_model = preferences_model
+
+    def set_file_persistence(self, file_persistence):
+        self.file_persistence = file_persistence        
 
     @property
     def layout_splitter(self) -> QSplitter:
@@ -119,3 +131,37 @@ class LatexEditor(QMainWindow):
             self.restoreGeometry(geometry)
         if state:
             self.restoreState(state)        
+
+    @Slot()
+    def handle_add_head_note_dialog(self):
+        """Spins up the modal instance and routes confirmed string metrics down to models."""
+      
+        # Parent dialog to main application window frame safely
+        dialog = HeadNoteDialog(self.window)
+        
+        # .exec() blocks interface access, running a dedicated local event stream
+        if dialog.exec() == HeadNoteDialog.DialogCode.Accepted:
+            raw_note = dialog.get_head_note_text()
+            
+            if not raw_note:
+                return  # Skip processing if empty string
+                
+            # MVC ROUTING: Pass raw text primitives down onto your model engine here
+            print(f"[CONTROLLER ENGINE] Sending fresh head note data to model layer: {raw_note}")
+            # self.entry_modifier_model.create_head_note_entry(raw_note)
+
+    @Slot()
+    def show_project_settings_dialog(self):
+        if self.preferences_model:
+            dialog = ProjectSettingsDialog(self.file_persistence, self)
+            dialog.exec()
+        else:
+            print("Dialog Error: LatexEditor preferences model is not set")
+
+    @Slot()
+    def show_app_settings_dialog(self):
+        if self.file_persistence:
+            dialog = ApplicationSettingsDialog(self.preferences_model, self)
+            dialog.exec()
+        else:
+            print("Dialog Error: LatexEditor file persistence model is not set")

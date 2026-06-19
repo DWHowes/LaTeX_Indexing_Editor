@@ -46,6 +46,7 @@ if __name__ == "__main__":
 
         # Initialize the main visual window shell
         editor_window = LatexEditor()
+        editor_window.set_preferences_model(preferences_model)
 
         editor_window.show()
         
@@ -70,6 +71,8 @@ if __name__ == "__main__":
         initial_db_path = FileTreePersistence.resolve_workspace_database_path(default_home)
         file_persistence = FileTreePersistence(db_path=initial_db_path)         
         scope_controller = ProjectScopeController(file_persistence)
+
+        editor_window.set_file_persistence(file_persistence)
 
         # Bind all components together via the master application orchestrator
         pipeline_controller = AppPipelineController(

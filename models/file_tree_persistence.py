@@ -226,6 +226,19 @@ class FileTreePersistence:
             cursor.close()
             conn.close()
 
+    def get_all_project_metadata(self) -> dict:
+        """Return all project metadata as a dict[key -> value]."""
+        if not self.db_path:
+            return {}
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("SELECT key, value FROM project_metadata")
+                return {row[0]: row[1] for row in cursor.fetchall()}
+        except sqlite3.Error as e:
+            print(f"[MODEL PERSISTENCE] get_all_project_metadata failed: {e}")
+            return {}            
+
     def set_metadata_value(self, key: str, value: str) -> None:
         """Atomic upsert transaction to modify project state flags."""
         if not self.db_path:
