@@ -15,7 +15,6 @@ class ProjectLoadWorker(QObject):
     error_occurred = Signal(str)
 
     def __init__(self, db_persistence, project_root: str):
-        # Explicitly removed repository parameters to prevent thread cross-talk
         super().__init__()
         self.db_persist = db_persistence
         self.project_root_str = str(project_root)
@@ -45,7 +44,7 @@ class ProjectLoadWorker(QObject):
                         actual_db_to_load = file_item
                         break
 
-            # 1. FIX: Read database metrics ONLY if it houses populated project structures
+            # Read database metrics ONLY if it houses populated project structures
             if actual_db_to_load:
                 self.status_updated.emit("Database file localized. Validating data manifest records...")
                 
@@ -60,7 +59,7 @@ class ProjectLoadWorker(QObject):
                 # If the tables exist but are empty, log the fallback transition clearly
                 print("[WORKER INFRASTRUCTURE LOG] Blank database localized. Proceeding to fallback text scraping.")
 
-            # 2. RESOLVED FALLBACK TRACE: Trigger regex file-scraping if tables are empty
+            # Trigger regex file-scraping if tables are empty
             self._execute_regex_fallback_extraction(file_tree_payload, str(db_path))
                 
         except Exception as e:
@@ -78,7 +77,7 @@ class ProjectLoadWorker(QObject):
                 if entry.name == ".session_backups" or entry.name.lower().endswith(".db") or entry.name.startswith('.'):
                     continue
                     
-                # FIX: Enforce standard path shapes matching LatexIndexParser expectations
+                # Enforce standard path shapes matching LatexIndexParser expectations
                 resolved_posix_path = Path(entry.path).resolve().as_posix()
                 
                 node_data = {
