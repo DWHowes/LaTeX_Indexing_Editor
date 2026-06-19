@@ -93,13 +93,6 @@ class ProjectScopeController(QObject):
 
         flat_records: list[dict] = []
 
-
-    def persist_project_file_records(self, file_tree_payload: list[dict]) -> None:
-        if not file_tree_payload or not self.model:
-            return
-
-        flat_records: list[dict] = []
-
         def _walk_nodes(nodes: list[dict]) -> None:
             for node in nodes:
                 if not isinstance(node, dict):
