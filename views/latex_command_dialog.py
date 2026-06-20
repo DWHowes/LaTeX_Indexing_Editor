@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from views.app_style_configuration import AppStyleConfiguration
+
 class CreateCommandDialog(QDialog):
     save_requested = Signal(str, str)
     wizard_requested = Signal()
@@ -21,6 +23,7 @@ class CreateCommandDialog(QDialog):
         self.setWindowTitle("Create LaTeX Command")
         self.setModal(True)
         self._build_ui()
+        self.apply_theme_configuration(bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode")))
 
     def _build_ui(self):
         name_label = QLabel("Command name:")
@@ -92,3 +95,15 @@ class CreateCommandDialog(QDialog):
 
     def set_command_body(self, text: str):
         self.body_editor.setPlainText(text)
+
+    def apply_theme_configuration(self, is_dark: bool) -> None:
+        if is_dark:
+            self.setStyleSheet("""
+                QDialog { background-color: #2b2b2b; color: #f0f0f0; }
+                QLabel { color: #f0f0f0; }
+                QLineEdit, QTextEdit { background-color: #3c3c3c; color: #f0f0f0; border: 1px solid #666; }
+                QPushButton { background-color: #3c3c3c; color: #f0f0f0; border: 1px solid #666; padding: 5px 12px; }
+                QPushButton:hover { background-color: #505050; }
+            """)
+        else:
+            self.setStyleSheet("")

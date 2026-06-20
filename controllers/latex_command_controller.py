@@ -4,6 +4,7 @@ from PySide6.QtGui import QAction
 from models.latex_command_registry_model import LatexCommandRegistryModel
 from views.latex_command_dialog import CreateCommandDialog
 from views.latex_command_wizard_dialog import CreateCommandWizardView
+from views.app_style_configuration import AppStyleConfiguration
 
 class CreateCommandController(QObject):
     def __init__(self, window, command_registry: LatexCommandRegistryModel):
@@ -11,6 +12,8 @@ class CreateCommandController(QObject):
         self.window = window
         self.registry = command_registry
         self.dialog = None
+
+        AppStyleConfiguration.event_broker().theme_mutated.connect(self._on_theme_changed)
 
     def build_menu_action(self) -> QAction:
         action = QAction("Create LaTeX Command...", self.window)
@@ -24,6 +27,7 @@ class CreateCommandController(QObject):
             self.dialog.save_requested.connect(self._on_save_requested)
             self.dialog.wizard_requested.connect(self._on_wizard_requested)
 
+        self.dialog.apply_theme_configuration(bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode")))
         self.dialog.show()
         self.dialog.raise_()
         self.dialog.activateWindow()
@@ -53,3 +57,8 @@ class CreateCommandController(QObject):
         status_bar = getattr(self.window, "statusBar", None)
         if callable(status_bar):
             status_bar().showMessage(f"Saved command {normalized_name}", 3000)
+
+    @Slot(bool)
+    def _on_theme_changed(self, is_dark_mode: bool) -> None:
+        if self.dialog:
+            self.dialog.apply_theme_configuration(is_dark_mode)
