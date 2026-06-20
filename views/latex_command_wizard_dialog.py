@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QFrame,
 )
-from PySide6.QtGui import QPalette, QColor
+
 from views.app_style_configuration import AppStyleConfiguration
 
 

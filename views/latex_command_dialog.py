@@ -36,7 +36,7 @@ class CreateCommandDialog(QDialog):
         self.body_editor.setPlaceholderText(r"Type the full \newcommand or \def text here.")
         self.body_editor.textChanged.connect(self._update_save_button_state)
 
-        wizard_button = QPushButton("Wizard")
+        wizard_button = QPushButton("Wizard...")
         wizard_button.clicked.connect(lambda: self.wizard_requested.emit())
 
         self.save_button = QPushButton("Save")

@@ -40,6 +40,8 @@ if __name__ == "__main__":
         broker.set_property("font_family", preferences_payload.get("font_family", "Arial"))
         broker.set_property("font_size", int(preferences_payload.get("font_size", 12)))
         broker.set_property("is_dark_mode", bool(preferences_payload.get("dark_mode")))
+        # Set the application theme
+        AppStyleConfiguration.configure_application_theme(bool(preferences_payload.get("dark_mode")))
 
         text_sanitizer = TextSanitizer()
         backup_manager = SessionBackupManager()

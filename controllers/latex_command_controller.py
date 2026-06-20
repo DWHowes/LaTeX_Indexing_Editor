@@ -3,7 +3,7 @@ from PySide6.QtGui import QAction
 
 from models.latex_command_registry_model import LatexCommandRegistryModel
 from views.latex_command_dialog import CreateCommandDialog
-from views.latex_command_wizard_dialog import CreateCommandWizardView
+from views.latex_command_wizard_dialog import LatexCommandWizardDialog
 from views.app_style_configuration import AppStyleConfiguration
 
 class CreateCommandController(QObject):
@@ -34,10 +34,10 @@ class CreateCommandController(QObject):
 
     @Slot()
     def _on_wizard_requested(self):
-        wizard = CreateCommandWizardView(self.window)
+        wizard = LatexCommandWizardDialog(self.window)
         wizard.command_created.connect(self._on_wizard_completed)
         wizard.exec()
-
+        
     @Slot(str)
     def _on_wizard_completed(self, completed_command: str):
         if self.dialog:
@@ -54,9 +54,6 @@ class CreateCommandController(QObject):
             normalized_name = "\\" + normalized_name
 
         self.registry.save_command(normalized_name, normalized_body)
-        status_bar = getattr(self.window, "statusBar", None)
-        if callable(status_bar):
-            status_bar().showMessage(f"Saved command {normalized_name}", 3000)
 
     @Slot(bool)
     def _on_theme_changed(self, is_dark_mode: bool) -> None:
