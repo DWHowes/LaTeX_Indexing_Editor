@@ -38,10 +38,13 @@ class CreateCommandController(QObject):
         wizard.command_created.connect(self._on_wizard_completed)
         wizard.exec()
         
-    @Slot(str)
-    def _on_wizard_completed(self, completed_command: str):
+    @Slot(dict)
+    def _on_wizard_completed(self, completed_command: dict):
         if self.dialog:
-            self.dialog.set_command_body(completed_command)
+            name = completed_command.get("display_name", "")
+            command = completed_command.get("command_text", "")
+            self.dialog.set_command_name(name)
+            self.dialog.set_command_body(command)
 
     @Slot(str, str)
     def _on_save_requested(self, name: str, body: str):

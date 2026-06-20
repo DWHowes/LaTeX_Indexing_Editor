@@ -96,6 +96,9 @@ class CreateCommandDialog(QDialog):
     def set_command_body(self, text: str):
         self.body_editor.setPlainText(text)
 
+    def set_command_name(self, text:str) -> None:
+        self.name_input.setText(text)
+
     def apply_theme_configuration(self, is_dark: bool) -> None:
         if is_dark:
             self.setStyleSheet("""

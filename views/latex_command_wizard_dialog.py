@@ -54,7 +54,7 @@ class LatexCommandWizardDialog(QDialog):
     ``#wizard_separator``) to avoid leaking styles into unintended children.
     """
     
-    command_created = Signal(str)
+    command_created = Signal(dict)
 
     # ------------------------------------------------------------------ #
     # Construction                                                       #
@@ -211,9 +211,17 @@ class LatexCommandWizardDialog(QDialog):
     def _finish(self):
         if not self._current_page_complete():
             return
+        
+        disp_name = self.command_name_input.text().strip()
         command_text = self._build_command_text()
+
         if command_text:
-            self.command_created.emit(command_text)
+            # Emit a dictionary instead of a string
+            self.command_created.emit({
+                "display_name": disp_name,
+                "command_text": command_text
+            })
+            
         self.accept()
 
     def _update_nav_state(self):
@@ -242,6 +250,7 @@ class LatexCommandWizardDialog(QDialog):
 
     def _build_command_text(self) -> str:
         command_name = self.command_name_input.text().strip()
+        
         if not command_name.startswith("\\"):
             command_name = "\\" + command_name
 
