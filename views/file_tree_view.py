@@ -1,7 +1,7 @@
 import os
 
 from PySide6.QtWidgets import QStyle, QTreeView, QApplication
-from PySide6.QtGui import QStandardItem, QStandardItemModel, QPalette, QBrush
+from PySide6.QtGui import QStandardItem, QStandardItemModel, QPalette, QBrush, QColor
 from PySide6.QtCore import Signal, Qt, QModelIndex
 
 from views.latex_folder_filter_proxy import LatexFolderFilterProxy
@@ -119,9 +119,12 @@ class FileTreeView(QTreeView):
         if file_path and not is_dir and self.root_file_path and os.path.normcase(file_path) == os.path.normcase(self.root_file_path):
             font.setBold(True)
             item.setFont(font)
-            app_palette = QApplication.instance().palette()
-            # use a palette role that is meaningful across themes (Link or Highlight)
-            color = app_palette.color(QPalette.ColorRole.Link)
+            # Use a theme-aware explicit turquoise in dark mode, fall back to palette link in light mode
+            is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
+            if is_dark:
+                color = QColor(64, 224, 208)  # lighter turquoise for dark theme
+            else:
+                color = QApplication.instance().palette().color(QPalette.ColorRole.Link)
             item.setForeground(QBrush(color))
         else:
             font.setBold(False)
