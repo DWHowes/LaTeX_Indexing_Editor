@@ -20,6 +20,8 @@ class CaseInsensitiveItem(QStandardItem):
         super().__init__(text)
         self.sort_key = self._compute_clean_sort_key(text)
 
+        self._suppress_transaction_compilation = False
+
     def _compute_clean_sort_key(self, text: str) -> str:
         if not text: 
             return ""
@@ -245,6 +247,7 @@ class IndexTreeView(QTreeView):
         Receives backend data payloads and renders tree columns.
         Strict MVC: Renders GUI elements here while delegating string logic to the engine.
         """
+        self._suppress_transaction_compilation = True
         self.base_model.blockSignals(True)
         self.setSortingEnabled(False)
         try:
@@ -281,6 +284,7 @@ class IndexTreeView(QTreeView):
             self.setSortingEnabled(True)
             self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
             self.expandAll()
+            self._suppress_transaction_compilation = False
 
     def _insert_visual_node(self, parent_item, remaining_parts: list, refs: list):
         """Appends nodes recursively, pulling string parsing rules from the engine model."""
@@ -342,8 +346,8 @@ class IndexTreeView(QTreeView):
                 r_uid = r.get("uid") or f"{r.get('file_path')}:{r.get('line_number')}"
                 
                 if r_uid not in [ex.get("uid") for ex in new_records if ex]:
-                    # FIX: Safely parse either "id" or "unique_id_number" to guarantee alignment
-                    stable_id = r.get("id") or r.get("unique_id_number") or 0
+                    # Safely parse either "unique_id_number" or "id" to guarantee alignment
+                    stable_id = int(r.get("unique_id_number") or r.get("id") or 0)
                     
                     new_records.append({
                         "uid": r_uid, 
@@ -362,9 +366,10 @@ class IndexTreeView(QTreeView):
                         trace = trace.parent()
 
                     # Push transaction staging records straight into the model engine layer
-                    self.engine.compile_transaction_record(
-                        keys, r, r.get("encap", "standard"), int(stable_id)
-                    )
+                    if not self._suppress_transaction_compilation:
+                        self.engine.compile_transaction_record(
+                            keys, r, r.get("encap", "standard"), int(stable_id)
+                        )
            
             sibling_ref_item.setData(new_records, role_uid)
             if new_records:

@@ -98,9 +98,10 @@ class FileTreePersistence:
             """)
 
             # Partition 4: Relational Multi-References (Completely normalized to worker keys)
+            # Removed AUTOINCREMENT from id
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS project_references (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARY KEY,
                     heading_id INTEGER NOT NULL,
                     heading_raw_text TEXT NOT NULL,
                     uid TEXT UNIQUE NOT NULL,
