@@ -213,19 +213,20 @@ class FileTreePersistence:
         self.initialize_database_schema()
 
     def get_metadata_value(self, key: str) -> str | None:
-        """Isolated query contract to extract unique project parameters."""
         if not self.db_path:
             return None
 
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
         try:
-            cursor.execute("SELECT value FROM project_metadata WHERE key = ?", (key,))
-            row = cursor.fetchone()
-            return row[0] if row else None
-        finally:
-            cursor.close()
-            conn.close()
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "SELECT value FROM project_metadata WHERE key = ?",
+                    (key,)
+                )
+                row = cursor.fetchone()
+                return row["value"] if row else None
+        except sqlite3.Error as e:
+            print(f"[DB ERROR] Failed to read metadata for key '{key}': {e}")
+            return None
 
     def get_all_project_metadata(self) -> dict:
         """Return all project metadata as a dict[key -> value]."""
@@ -234,32 +235,35 @@ class FileTreePersistence:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
                 cursor = conn.execute("SELECT key, value FROM project_metadata")
-                return {row[0]: row[1] for row in cursor.fetchall()}
+                return {row["key"]: row["value"] for row in cursor.fetchall()}
         except sqlite3.Error as e:
-            print(f"[MODEL PERSISTENCE] get_all_project_metadata failed: {e}")
-            return {}            
+            print(f"[DB ERROR] Failed to read project metadata: {e}")
+            return {}
 
     def set_metadata_value(self, key: str, value: str) -> None:
         """Atomic upsert transaction to modify project state flags."""
         if not self.db_path:
             return
 
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
         try:
-            cursor.execute(
-                """
-                INSERT INTO project_metadata (key, value) VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-                """,
-                (key, str(value))
-            )
-            conn.commit()
-        finally:
-            cursor.close()
-            conn.close()
-
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO project_metadata (key, value, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (key, value)
+                )
+                conn.commit()
+        except sqlite3.Error as e:
+            print(f"[DB ERROR] Failed to set metadata value for key '%s': %s" % (key, e))
+            
     def discover_existing_project_name(self, target_directory: str) -> str | None:
         """
         Scans the target directory for an existing database matching the naming schema.

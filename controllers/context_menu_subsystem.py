@@ -1,3 +1,5 @@
+import os
+
 from PySide6.QtCore import QObject, Qt, Signal, Slot, QModelIndex, QPoint
 from PySide6.QtWidgets import QMenu, QTreeView
 from PySide6.QtGui import QAction
@@ -104,19 +106,46 @@ class FileTreeContextMenuManager(BaseContextMenuManager):
     Pure Interface: Emits raw indices to the controller for file validation checks.
     """
     prune_file_triggered = Signal(QModelIndex)
+    set_root_file_triggered = Signal(QModelIndex)
 
     def populate_menu_actions(self, menu_container: QMenu, proxy_index: QModelIndex):
         if proxy_index.column() != 0:
             proxy_index = proxy_index.siblingAtColumn(0)
 
-        # Read only what the user physically sees on their monitor screen
         display_name = str(proxy_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        file_path = str(proxy_index.data(Qt.ItemDataRole.UserRole + 1) or "").strip()
 
-        prune_action = QAction(f"Prune '{display_name}' (Contains No Index Text)", menu_container)
-        prune_action.setData(proxy_index)
-        prune_action.triggered.connect(self._on_prune_clicked)
-        
-        menu_container.addAction(prune_action)
+        set_root_action = QAction(f"Set '{display_name}' as root file", menu_container)
+        set_root_action.setData(proxy_index)
+        set_root_action.triggered.connect(self._on_set_root_file_clicked)
+        menu_container.addAction(set_root_action)
+
+        try:
+            root_file_path = str(self.tree_view.root_file_path or "").strip()
+        except AttributeError:
+            root_file_path = ""
+
+        is_current_root_file = (
+            bool(file_path)
+            and bool(root_file_path)
+            and os.path.normpath(file_path) == os.path.normpath(root_file_path)
+        )
+
+        if not is_current_root_file:
+            prune_action = QAction(f"Prune '{display_name}' (Contains No Index Text)", menu_container)
+            prune_action.setData(proxy_index)
+            prune_action.triggered.connect(self._on_prune_clicked)
+
+            menu_container.addSeparator()
+            menu_container.addAction(prune_action)
+
+    @Slot()
+    def _on_set_root_file_clicked(self):
+        action = self.sender()
+        if action and isinstance(action, QAction):
+            target_index = action.data()
+            if isinstance(target_index, QModelIndex) and target_index.isValid():
+                self.set_root_file_triggered.emit(target_index)
 
     @Slot()
     def _on_prune_clicked(self):

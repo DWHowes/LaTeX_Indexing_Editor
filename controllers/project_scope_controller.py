@@ -68,7 +68,7 @@ class ProjectScopeController(QObject):
 
         return final_db_path      
 
-    def get_current_project_metadata(self, key: str) -> str | None:
+    def get_current_project_metadata_value(self, key: str) -> str | None:
         """Helper contract to read configuration records out-of-band."""
         return self.model.get_metadata_value(key)        
 

@@ -114,6 +114,9 @@ class AppPipelineController(QObject):
         
         # Map direct file double-clicks to a dedicated single-argument slot contract
         self.file_tree_widget.file_requested.connect(self.handle_file_activation_request)
+        # File tree context menu connections
+        self.file_tree_widget.set_root_requested.connect(self._handle_file_set_as_root)
+        self.file_tree_widget.file_prune_requested.connect(self._handle_file_prune_requested)
 
         # Connect the direct tree view update to the indexInserted signal
         self.window.latex_index_window.indexInserted.connect(self._handle_manual_index_insertion)
@@ -176,25 +179,6 @@ class AppPipelineController(QObject):
         AppStyleConfiguration.configure_application_theme(is_dark)
         self.window.tool_bar.refresh_theme_presentation(is_dark)
 
-    # THIS METHOD SHOULD BE MOVED TO THE LatexEditor CLASS
-    # @Slot()
-    # def _handle_add_head_note_dialog(self):
-    #     """Spins up the modal instance and routes confirmed string metrics down to models."""
-      
-    #     # Parent dialog to main application window frame safely
-    #     dialog = HeadNoteDialog(self.window)
-        
-    #     # .exec() blocks interface access, running a dedicated local event stream
-    #     if dialog.exec() == HeadNoteDialog.DialogCode.Accepted:
-    #         raw_note = dialog.get_head_note_text()
-            
-    #         if not raw_note:
-    #             return  # Skip processing if empty string
-                
-    #         # MVC ROUTING: Pass raw text primitives down onto your model engine here
-    #         print(f"[CONTROLLER ENGINE] Sending fresh head note data to model layer: {raw_note}")
-    #         # self.entry_modifier_model.create_head_note_entry(raw_note)
-
     @Slot(int)
     def _rewire_undo_redo_signals(self, index: int) -> None:
         for i in range(self.window.tabs.count()):
@@ -251,6 +235,30 @@ class AppPipelineController(QObject):
             col=0,
             fallback=fallback_name
         )
+
+    @Slot(str)
+    def _handle_file_set_as_root(self, file_path: str):
+        if not file_path:
+            return
+
+        persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+        if persistence:
+            persistence.set_metadata_value("root_tex_file", os.path.normpath(file_path))
+            self.window.status_bar.showMessage("Root file set successfully.", 3000)
+        else:
+            print("PERSISTENCE ERROR: No file database persistence model has been set.")
+
+    @Slot(str)
+    def _handle_file_prune_requested(self, absolute_path: str):
+        if not absolute_path or not self.scope_ctrl:
+            return
+        # Optional: route to an existing project file pruning interface
+        try:
+            self.scope_ctrl.prune_project_file(absolute_path)
+            self.window.status_bar.showMessage("File removed from workspace.", 3000)
+        except AttributeError as e:
+            print(f"File Prune error: {e}. Prune attempt ignored")
+            pass
 
     @Slot(object, object)
     def _handle_workspace_sync_request(self, editor_tab: EditorTab, path_carrier: ReferenceCarrier):
@@ -407,7 +415,9 @@ class AppPipelineController(QObject):
             self.idx_ctrl.clear_staged_entries()
 
         # Render the workspace file tree structure rows
-        self.file_tree_widget.populate_file_hierarchy(file_tree_payload)
+        self.file_tree_widget.populate_file_hierarchy(file_tree_payload, 
+                                                      self.scope_ctrl.get_current_project_metadata_value("root_tex_file")
+                                                      )
 
         # Realign session logging paths natively
         project_root_dir = os.path.dirname(os.path.normpath(db_path))
