@@ -7,21 +7,25 @@ from PySide6.QtCore import QObject, Slot, QModelIndex, Qt
 from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplication
 from shiboken6 import isValid
 
-from views.app_style_configuration import AppStyleConfiguration
-from views.editor_tab import EditorTab
 from models.latex_entry_model import ReferenceCarrier
-from views.index_tree_view import IndexTreeView
-from views.project_sidebar_view import ProjectSidebarView
-from views.advanced_search_window import AdvancedSearchWindow
-from controllers.index_tree_controller import IndexTreeController
-from controllers.macro_editing_controller import MacroEditingController
-from controllers.context_menu_subsystem import FileTreeContextMenuManager
-from controllers.context_menu_subsystem import IndexTreeContextMenuManager
 from models.index_tree_model_engine import IndexTreeModelEngine
 from models.macro_id_generator import MacroIDGenerator
 from models.project_load_worker import SafeProjectLoadThread 
 from models.index_prefs_config_model import IndexPrefsConfigModel
+from models.latex_command_registry_model import LatexCommandRegistryModel
+
+from controllers.index_tree_controller import IndexTreeController
+from controllers.macro_editing_controller import MacroEditingController
+from controllers.context_menu_subsystem import FileTreeContextMenuManager
+from controllers.context_menu_subsystem import IndexTreeContextMenuManager
 from controllers.index_prefs_config_controller import IndexPrefsConfigController
+from controllers.latex_command_controller import CreateCommandController
+
+from views.app_style_configuration import AppStyleConfiguration
+from views.editor_tab import EditorTab
+from views.index_tree_view import IndexTreeView
+from views.project_sidebar_view import ProjectSidebarView
+from views.advanced_search_window import AdvancedSearchWindow
 
 class AppPipelineController(QObject):
     def __init__(self, window, prefs_model, backup_manager, doc_controller,  
@@ -81,6 +85,11 @@ class AppPipelineController(QObject):
         self._file_context_manager = FileTreeContextMenuManager(self.file_tree_widget)
         self._index_context_manager = IndexTreeContextMenuManager(self.index_tree_widget)
 
+        self.command_registry = LatexCommandRegistryModel()
+        self.create_command_controller = CreateCommandController(window=self.window, 
+                                                                 command_registry=self.command_registry
+                                                                 )
+
         self._initialize_advanced_search_subsystem()
         
         # Wire layout signals after all instances are completely finalized
@@ -135,6 +144,7 @@ class AppPipelineController(QObject):
         self.window.menu_bar.preferences_requested.connect(self._spawn_preferences_dialog)   
 
         self.window.menu_bar.add_head_note_requested.connect(self.window.handle_add_head_note_dialog)  
+        self.window.menu_bar.create_latex_command_requested.connect(self.create_command_controller.show_create_command_dialog)
         self.window.menu_bar.app_settings_action_requested.connect(self.window.show_app_settings_dialog)
         self.window.menu_bar.project_settings_action_requested.connect(self.window.show_project_settings_dialog)
 

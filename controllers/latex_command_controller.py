@@ -1,0 +1,55 @@
+from PySide6.QtCore import QObject, Slot
+from PySide6.QtGui import QAction
+
+from models.latex_command_registry_model import LatexCommandRegistryModel
+from views.latex_command_dialog import CreateCommandDialog
+from views.latex_command_wizard_dialog import CreateCommandWizardView
+
+class CreateCommandController(QObject):
+    def __init__(self, window, command_registry: LatexCommandRegistryModel):
+        super().__init__(window)
+        self.window = window
+        self.registry = command_registry
+        self.dialog = None
+
+    def build_menu_action(self) -> QAction:
+        action = QAction("Create LaTeX Command...", self.window)
+        action.triggered.connect(self.show_create_command_dialog)
+        return action
+
+    @Slot()
+    def show_create_command_dialog(self):
+        if self.dialog is None:
+            self.dialog = CreateCommandDialog(self.window)
+            self.dialog.save_requested.connect(self._on_save_requested)
+            self.dialog.wizard_requested.connect(self._on_wizard_requested)
+
+        self.dialog.show()
+        self.dialog.raise_()
+        self.dialog.activateWindow()
+
+    @Slot()
+    def _on_wizard_requested(self):
+        wizard = CreateCommandWizardView(self.window)
+        wizard.command_created.connect(self._on_wizard_completed)
+        wizard.exec()
+
+    @Slot(str)
+    def _on_wizard_completed(self, completed_command: str):
+        if self.dialog:
+            self.dialog.set_command_body(completed_command)
+
+    @Slot(str, str)
+    def _on_save_requested(self, name: str, body: str):
+        normalized_name = name.strip()
+        normalized_body = body.strip()
+        if not normalized_name or not normalized_body:
+            return
+
+        if not normalized_name.startswith("\\"):
+            normalized_name = "\\" + normalized_name
+
+        self.registry.save_command(normalized_name, normalized_body)
+        status_bar = getattr(self.window, "statusBar", None)
+        if callable(status_bar):
+            status_bar().showMessage(f"Saved command {normalized_name}", 3000)
