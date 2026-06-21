@@ -437,7 +437,7 @@ class AppPipelineController(QObject):
         project_name = os.path.basename(project_root_dir)
         self.prefs.update_project_context(project_root_dir, project_name)
         self.window.synchronize_window_title(project_name)
-        self._index_prefs_ctrl.set_active_project(project_name)
+        self._index_prefs_ctrl.set_active_project(project_name, self.scope_ctrl.get_persistence_model())
         self.window.status_bar.showMessage(f"Project '{project_name}' loaded successfully.", 3000)
 
         # Enable menu items that are gated behind an active project context
@@ -476,7 +476,7 @@ class AppPipelineController(QObject):
         self.file_tree_widget.model().sourceModel().clear()
 
         self.scope_ctrl.close_active_project()
-        self._index_prefs_ctrl.set_active_project(None)
+        self._index_prefs_ctrl.set_active_project(None, None)
 
         self._tree_modified = False
         self.window.synchronize_window_title(None)

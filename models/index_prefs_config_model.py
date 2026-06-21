@@ -1,4 +1,3 @@
-import os
 from dataclasses import dataclass, fields, asdict
 from typing import Dict, Any
 
@@ -29,20 +28,21 @@ class IndexPrefsData:
     printindex_command: str = "printindex"
     printindex_use_multicols: bool = False
 
+# A single private constant so the prefix is defined exactly once.
+_PREF_PREFIX = "pref_"
 
 class IndexPrefsConfigModel:
     def __init__(self) -> None:
         self._data = IndexPrefsData()
 
     def update_data(self, updates: Dict[str, Any]) -> None:
-        defaults = asdict(self._data.__class__())  # fresh default instance for type reference
+        defaults = asdict(self._data.__class__())
         for key, value in updates.items():
             if key not in defaults:
                 continue
             default_val = defaults[key]
             try:
                 if isinstance(default_val, bool):
-                    # Must check bool before int — bool is a subclass of int
                     coerced = bool(str(value).lower() == "true") if not isinstance(value, bool) else value
                 elif isinstance(default_val, int):
                     coerced = int(value)
@@ -56,41 +56,55 @@ class IndexPrefsConfigModel:
         return asdict(self._data)
 
     def load_from_dict(self, data: dict) -> None:
-        """Hydrates model state from a persisted settings payload."""
         self.update_data(data)
 
-    def load_from_project(self, persistence_model) -> None:
-        """Load project-scoped prefs from a persistence model (DB)."""
-        if persistence_model is None:
-            raise ValueError("persistence_model is required")
+    def seed_project_from_globals(
+        self,
+        global_data: Dict[str, Any],
+        file_persistence,
+    ) -> None:
+        """
+        Copies global prefs into project_metadata for any key not already present.
+        Keys are stored with the pref_ prefix to keep them visually distinct from
+        structural metadata (project_name, compiler_executable, etc.).
+        """
+        known_keys = set(asdict(IndexPrefsData()).keys())
+        existing = file_persistence.get_all_project_metadata()  # keys already have pref_ if seeded
 
-        loaded: dict = {}
-        for f in fields(self._data):
-            key = f.name
-            try:
-                val = persistence_model.get_metadata_value(key)
-            except AttributeError as e:
-                raise AttributeError("persistence_model must implement get_metadata_value(key)") from e
-            if val is not None:
-                loaded[key] = val
+        missing = {
+            f"{_PREF_PREFIX}{k}": str(v)
+            for k, v in global_data.items()
+            if k in known_keys and f"{_PREF_PREFIX}{k}" not in existing
+        }
+        if missing:
+            file_persistence.upsert_project_metadata(missing)
+            print(f"[IndexPrefsConfigModel] Seeded {len(missing)} prefs key(s) into project_metadata.")
 
-        if loaded:
-            self.update_data(loaded)
+    def load_from_project(self, file_persistence) -> None:
+        """
+        Reads pref_* keys from project_metadata and hydrates the model,
+        stripping the prefix before passing to update_data().
+        """
+        known_keys = set(asdict(IndexPrefsData()).keys())
+        all_meta = file_persistence.get_all_project_metadata()
 
-    def persist_to_project(self, persistence_model) -> None:
-        """Persist current prefs into the project's metadata table via persistence_model."""
-        if persistence_model is None:
-            raise ValueError("persistence_model is required")
+        prefs_data = {
+            k[len(_PREF_PREFIX):]: v
+            for k, v in all_meta.items()
+            if k.startswith(_PREF_PREFIX) and k[len(_PREF_PREFIX):] in known_keys
+        }
+        if prefs_data:
+            self.update_data(prefs_data)
 
-        payload = self.serialize_to_dict()
-        try:
-            # Expect a single-dict upsert API on the persistence model
-            persistence_model.upsert_project_metadata(payload)
-        except AttributeError as e:
-            raise AttributeError("persistence_model must implement upsert_project_metadata(payload)") from e
+    def _prefixed_payload(self) -> Dict[str, str]:
+        """Serializes current state with pref_ keys for DB storage."""
+        return {f"{_PREF_PREFIX}{k}": str(v) for k, v in self.serialize_to_dict().items()}
+
+    def persist_to_project(self, file_persistence) -> None:
+        """Writes current model state to project_metadata using pref_ keys."""
+        file_persistence.upsert_project_metadata(self._prefixed_payload())
 
     def generate_ist_content(self) -> str:
-        """Retained for future explicit .ist export workflow."""
         lines = [
             "% ====================================================================",
             "% Generated LaTeX MakeIndex Custom Style File via Editor Config Engine",
@@ -107,11 +121,8 @@ class IndexPrefsConfigModel:
         lines.append(f'symhead_positive "{self._data.ist_symbols_label}"')
         lines.append(f'numhead_positive "{self._data.ist_numbers_label}"')
 
-        # Fixed: delimiter value must be quoted in .ist syntax
         delimiter = '"\\\\dotfill"' if self._data.ist_use_dot_leaders else f'"{self._data.ist_page_delimiter}"'
         lines.append(f"delim_0 {delimiter}\ndelim_1 {delimiter}\ndelim_2 {delimiter}")
         lines.append(f'delim_n "{self._data.ist_page_delimiter}"\ndelim_r "{self._data.ist_range_delimiter}"')
         lines.append("line_max 72\nindent_space \"\\\\t\\\\t\"")
         return "\n".join(lines)
-    
-    # generate_ist_content is retained for a future explicit export action.

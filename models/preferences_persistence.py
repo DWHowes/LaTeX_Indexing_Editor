@@ -1,22 +1,18 @@
 import os
 from PySide6.QtCore import QObject, QSettings, QDir, QByteArray
 
+
 class PreferencesPersistence(QObject):
     """
     Model Layer: Application State Serialization.
-    Completely isolates persistent file system storage layers (QSettings) 
-    from the view presentation windows, exposing unified data primitives.
+    Manages QSettings for application-level (global) preferences only.
+    Project-scoped index preferences are now handled via FileTreePersistence / project_metadata.
     """
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Structural workspace scopes
         self.settings = QSettings("DH Indexing", "LatexEditor")
 
     def load_application_preferences(self) -> dict:
-        """
-        Unpacks serialized parameters out of native platform storage.
-        Transforms registry configurations into a type-safe Python payload dictionary.
-        """
         try:
             font_size = int(self.settings.value("font_size", 12))
         except (ValueError, TypeError):
@@ -26,15 +22,14 @@ class PreferencesPersistence(QObject):
         raw_state = self.settings.value("window_state")
         raw_splitter = self.settings.value("splitter_state")
 
-        # QSettings may return str instead of QByteArray on some platforms
         if isinstance(raw_geometry, str):
             raw_geometry = QByteArray.fromHex(raw_geometry.encode())
         if isinstance(raw_state, str):
             raw_state = QByteArray.fromHex(raw_state.encode())
         if isinstance(raw_splitter, str):
             raw_splitter = QByteArray.fromHex(raw_splitter.encode())
-            
-        payload = {
+
+        return {
             "last_project_root": self.settings.value("last_project_root", ""),
             "last_project_name": self.settings.value("last_project_name", ""),
             "font_family": self.settings.value("font_family", "Arial"),
@@ -43,17 +38,10 @@ class PreferencesPersistence(QObject):
             "last_project_path": self.settings.value("last_project_path", QDir.homePath()),
             "geometry": raw_geometry,
             "state": raw_state,
-            "splitter_state": raw_splitter
+            "splitter_state": raw_splitter,
         }
-        
-        return payload
 
     def serialize_layout_state(self, closure_payload: dict):
-        """
-        Saves native application frame layout metrics back to disk.
-        Invoked automatically via controller signal pipelines during window shutdowns.
-        """
-        # Save geometry and state byte arrays passed from the window closing payload
         if "geometry" in closure_payload:
             geom = closure_payload["geometry"]
             self.settings.setValue("window_geometry", geom.toHex().data().decode() if isinstance(geom, QByteArray) else geom)
@@ -65,44 +53,40 @@ class PreferencesPersistence(QObject):
             self.settings.setValue("splitter_state", splitter.toHex().data().decode() if isinstance(splitter, QByteArray) else splitter)
 
     def update_project_context(self, root_path: str, project_name: str):
-        """Maintains environmental records tracking the last active project state."""
         self.settings.setValue("last_project_root", os.path.normpath(root_path))
         self.settings.setValue("last_project_name", project_name)
 
     def update_visual_preferences(self, font_family: str, font_size: int, dark_mode: bool):
-        """Updates persistent settings configuration values."""
         self.settings.setValue("font_family", font_family)
         self.settings.setValue("font_size", font_size)
         self.settings.setValue("dark_mode", "true" if dark_mode else "false")
 
     def update_fallback_directory(self, folder_path: str):
-        """Saves last looked up folder directory path constraints to smooth over file dialog boots."""
         self.settings.setValue("last_project_path", os.path.normpath(folder_path))
 
     def get_last_project_path(self) -> str:
-        """
-        Retrieves the last navigated folder path constraint.
-        """
-        # Pull cached data, falling back natively to the user's home directory path
         raw_path = self.settings.value("last_project_path", QDir.homePath())
         return os.path.normpath(str(raw_path))
 
     def save_index_prefs(self, data: dict, project_name: str | None = None) -> None:
         """
-        Persists index preferences under a scoped key group.
-        If project_name is provided, saves under project scope.
-        Global defaults are never modified by a project-scoped save.
+        Persists global index preferences to QSettings.
+        project_name is accepted but ignored — project-scoped saves now go through
+        FileTreePersistence.upsert_project_metadata() via IndexPrefsConfigController.
         """
-        scope_key = f"IndexPrefs/{project_name}" if project_name else "IndexPrefs/global"
-        self.settings.beginGroup(scope_key)
+        self.settings.beginGroup("IndexPrefs/global")
         for key, value in data.items():
             self.settings.setValue(key, value)
         self.settings.endGroup()
 
     def load_index_prefs(self, project_name: str | None = None) -> dict:
+        """
+        Returns global index prefs from QSettings.
+        project_name is accepted but ignored — project overlay is now handled by the
+        controller via FileTreePersistence, not here.
+        """
         from models.index_prefs_config_model import IndexPrefsData
         from dataclasses import asdict, fields
-        import dataclasses
 
         defaults = asdict(IndexPrefsData())
         field_types = {f.name: f.type for f in fields(IndexPrefsData())}
@@ -111,7 +95,6 @@ class PreferencesPersistence(QObject):
             t = field_types.get(key, "str")
             try:
                 if t == "bool":
-                    # QSettings serializes bools as 'true'/'false' strings on Windows
                     return str(raw).lower() == "true"
                 elif t == "int":
                     return int(raw)
@@ -121,17 +104,9 @@ class PreferencesPersistence(QObject):
                 return defaults[key]
 
         self.settings.beginGroup("IndexPrefs/global")
-        global_data = {key: coerce(key, self.settings.value(key, defaults[key])) for key in defaults}
+        global_data = {
+            key: coerce(key, self.settings.value(key, defaults[key]))
+            for key in defaults
+        }
         self.settings.endGroup()
-
-        if not project_name:
-            return global_data
-
-        self.settings.beginGroup(f"IndexPrefs/{project_name}")
-        project_keys = self.settings.childKeys()
-        for key in project_keys:
-            if key in global_data:
-                global_data[key] = coerce(key, self.settings.value(key))
-        self.settings.endGroup()
-
         return global_data
