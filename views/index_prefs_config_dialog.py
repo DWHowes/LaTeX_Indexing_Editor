@@ -1,12 +1,14 @@
 from PySide6.QtWidgets import (
     QDialog, QTabWidget, QWidget, QVBoxLayout, QFormLayout, 
-    QCheckBox, QLineEdit, QDialogButtonBox, QSpinBox, QComboBox, QGroupBox, QLabel
+    QCheckBox, QLineEdit, QDialogButtonBox, QSpinBox, QComboBox, QGroupBox, QLabel, QPushButton,
 )
 from PySide6.QtCore import Signal
 
-class IndexPrefsConfigDialog(QDialog):
-    sig_config_accepted = Signal(dict)
+from views.theme_config_dialog import _ThemeTab
 
+class IndexPrefsConfigDialog(QDialog):
+    sig_config_accepted = Signal(dict, dict, dict)  # prefs, dark_colours, light_colours
+    
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Application Engine Preferences")
@@ -16,7 +18,7 @@ class IndexPrefsConfigDialog(QDialog):
     def _init_ui(self) -> None:
         main_layout = QVBoxLayout(self)
         
-        # 1. CORE VERTICAL TAB WINDOW (Positioned West)
+        # CORE VERTICAL TAB WINDOW (Positioned West)
         self.vertical_tabs = QTabWidget(self)
         self.vertical_tabs.setTabPosition(QTabWidget.TabPosition.West)
         
@@ -115,13 +117,24 @@ class IndexPrefsConfigDialog(QDialog):
         self.horizontal_latex_tabs.addTab(self.tab_printindex, "cmd: printindex")
         vlatex_layout.addWidget(self.horizontal_latex_tabs)
 
-        # PRIMARY VERTICAL TAB 2: THEMES (STUB PLACEHOLDER FOR COLOR ENGINE)
+        # PRIMARY VERTICAL TAB 2: THEMES COLOUR CONFIGURATION
         self.vtab_themes = QWidget()
         vthemes_layout = QVBoxLayout(self.vtab_themes)
-        self._stub_label = QLabel("Theme Configuration System Stub\n\n(Future component workspace to control application layout styling and dark/light system variables).")
-        self._stub_label.setStyleSheet("color: #777777; font-size: 13px;")
-        vthemes_layout.addWidget(self._stub_label)
-        vthemes_layout.addStretch()
+        vthemes_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Nested horizontal tabs — one per theme variant
+        self.horizontal_theme_tabs = QTabWidget(self.vtab_themes)
+
+        # These are populated externally via populate_theme_fields()
+        # so we initialise with defaults here as a safe fallback
+        from models.theme_config_model import DarkThemeColours, LightThemeColours
+        from dataclasses import asdict
+        self._dark_tab  = _ThemeTab(asdict(DarkThemeColours()),  is_dark=True)
+        self._light_tab = _ThemeTab(asdict(LightThemeColours()), is_dark=False)
+
+        self.horizontal_theme_tabs.addTab(self._dark_tab,  "Dark Theme")
+        self.horizontal_theme_tabs.addTab(self._light_tab, "Light Theme")
+        vthemes_layout.addWidget(self.horizontal_theme_tabs)
 
         # Mount Primary West View Elements to Root Frame
         self.vertical_tabs.addTab(self.vtab_latex, "LaTeX Settings")
@@ -189,6 +202,24 @@ class IndexPrefsConfigDialog(QDialog):
         self.txt_printindex_cmd.setText(data.get("printindex_command", "printindex"))
         self.chk_printindex_multi.setChecked(data.get("printindex_use_multicols", False))
 
+    def populate_theme_fields(self, dark_colours: dict, light_colours: dict) -> None:
+        """Called by controller before exec() — mirrors populate_fields() pattern."""
+        for field, row in self._dark_tab._rows.items():
+            if field in dark_colours:
+                row.set_colour(dark_colours[field])
+        self._dark_tab._colours = dict(dark_colours)
+        self._dark_tab._refresh_preview()
+
+        for field, row in self._light_tab._rows.items():
+            if field in light_colours:
+                row.set_colour(light_colours[field])
+        self._light_tab._colours = dict(light_colours)
+        self._light_tab._refresh_preview()
+
+    def current_theme_colours(self) -> tuple[dict, dict]:
+        """Read by controller in _on_accepted — returns working colour state."""
+        return self._dark_tab.current_colours(), self._light_tab.current_colours()        
+
     def _on_accepted(self) -> None:
         payload = {
             "use_imakeidx": self.chk_imakeidx.isChecked(),
@@ -216,8 +247,12 @@ class IndexPrefsConfigDialog(QDialog):
             "printindex_command": self.txt_printindex_cmd.text().strip(),
             "printindex_use_multicols": self.chk_printindex_multi.isChecked(),
         }
-        self.sig_config_accepted.emit(payload)
-        self.accept()
+
+        dark_colours, light_colours = self.current_theme_colours()
+
+        self.sig_config_accepted.emit(payload, dark_colours, light_colours)
+        
+        self.accept()        
 
     def apply_theme_configuration(self, is_dark: bool) -> None:
         """Matches the EditorTab pattern — called by controller before exec()."""
@@ -237,7 +272,5 @@ class IndexPrefsConfigDialog(QDialog):
                     background-color: #3c3c3c; color: #f0f0f0; border: 1px solid #666; padding: 4px 12px;
                 }
             """)
-            self._stub_label.setStyleSheet("color: #999999; font-size: 13px;")
         else:
             self.setStyleSheet("")
-            self._stub_label.setStyleSheet("color: #777777; font-size: 13px;")

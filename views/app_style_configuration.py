@@ -3,6 +3,8 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtGui import QPalette, QColor
 
+from models.theme_config_model import DarkThemeColours, LightThemeColours
+
 class ThemeChangedSignals(QObject):
     """Anonymous Event Channel Matrix: Broadcasts style shifts globally."""
     # Signature: emits bool (True if dark mode, False if light mode)
@@ -59,59 +61,66 @@ class AppStyleConfiguration:
         """
 
     @staticmethod
-    def get_tree_view_stylesheet(is_dark_mode: bool) -> str:
-        if is_dark_mode:
-            return "QTreeView { background-color: #191919; color: white; } QHeaderView::section { background-color: #353535; color: white; border: 1px solid #444; }"
-        # In light mode, we rely on the default palette colors, so we return an empty stylesheet.
-        # In future iterations, we could add specific light mode customizations here if desired.
-        return ""
+    def get_tree_view_stylesheet(colours) -> str:
+        """
+        colours: a DarkThemeColours or LightThemeColours instance.
+        Callers that previously passed is_dark_mode: bool should migrate to
+        passing the colours object; the bool overload is retained for safety.
+        """
+        if isinstance(colours, bool):
+            # Legacy call path — build a temporary default colours object
+            colours = DarkThemeColours() if colours else LightThemeColours()
+
+        return (
+            f"QTreeView {{ background-color: {colours.tree_background}; color: {colours.window_text}; }} "
+            f"QHeaderView::section {{ background-color: {colours.tree_header_bg}; "
+            f"color: {colours.window_text}; border: 1px solid {colours.tree_header_border}; }}"
+        )
 
     @staticmethod
-    def get_tab_pane_stylesheet(is_dark_mode: bool) -> str:
-        if is_dark_mode:
-            return "QTabWidget::pane { border: 1px solid #444; background: #252525; }"
-        # In light mode, we rely on the default palette colors, so we return an empty stylesheet.
-        # In future iterations, we could add specific light mode customizations here if desired.
-        return ""
+    def get_tab_pane_stylesheet(colours) -> str:
+        """colours: a DarkThemeColours or LightThemeColours instance (or legacy bool)."""
+        if isinstance(colours, bool):
+            # Legacy call path — build a temporary default colours object
+            colours = DarkThemeColours() if colours else LightThemeColours()
+
+        return (
+            f"QTabWidget::pane {{ border: 1px solid {colours.tab_pane_border}; "
+            f"background: {colours.tab_pane_bg}; }}"
+        )
 
     @staticmethod
-    def configure_application_theme(is_dark_mode: bool):
+    def configure_application_theme(is_dark_mode: bool, colours=None):
+        """
+        colours: optional DarkThemeColours / LightThemeColours instance.
+        When None, falls back to the hardcoded defaults (existing behaviour).
+        """
+
         app = QApplication.instance()
-        if not app: 
-            print("Theme Error: No QApplication instance found. Theme configuration requires an active QApplication.")
+        if not app:
+            print("Theme Error: No QApplication instance found.")
             return
 
-        # Synchronize parameters cache data state records right inside the broker instance
         AppStyleConfiguration.event_broker().set_property("is_dark_mode", is_dark_mode)
+
+        if colours is None:
+            colours = DarkThemeColours() if is_dark_mode else LightThemeColours()
 
         app.setStyle("Fusion")
         palette = QPalette()
 
-        if is_dark_mode:
-            # FIXED: Synchronized the background colors to eliminate the dark void artifact.
-            # Setting 'Base' to match the 'Window' gray color (53, 53, 53) forces all tree views,
-            # file list boxes, and side panes to paint in a perfectly seamless, uniform gray.
-            uniform_grey = QColor(53, 53, 53)
-            
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Window, uniform_grey)
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.WindowText, Qt.GlobalColor.white)
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Base, uniform_grey)
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.AlternateBase, uniform_grey)
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Text, Qt.GlobalColor.white)
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Button, uniform_grey)
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.ButtonText, Qt.GlobalColor.white)
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Highlight, QColor(42, 130, 218))
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.HighlightedText, Qt.GlobalColor.black)
-        else:
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Window, QColor(240, 240, 240))
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.WindowText, Qt.GlobalColor.black)
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Base, Qt.GlobalColor.white)              
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.AlternateBase, QColor(233, 233, 233))
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Text, Qt.GlobalColor.black)              
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Button, QColor(240, 240, 240))
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.ButtonText, Qt.GlobalColor.black)
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Highlight, QColor(0, 120, 215))
-            palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.HighlightedText, Qt.GlobalColor.white)
+        def qc(hex_str: str) -> QColor:
+            return QColor(hex_str)
+
+        palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Window,          qc(colours.window))
+        palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.WindowText,      qc(colours.window_text))
+        palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Base,            qc(colours.base))
+        palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.AlternateBase,   qc(colours.alternate_base))
+        palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Text,            qc(colours.text))
+        palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Button,          qc(colours.button))
+        palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.ButtonText,      qc(colours.button_text))
+        palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Highlight,       qc(colours.highlight))
+        palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.HighlightedText, qc(colours.highlight_text))
 
         app.setPalette(palette)
         AppStyleConfiguration.event_broker().theme_mutated.emit(is_dark_mode)

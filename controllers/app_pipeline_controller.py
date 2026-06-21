@@ -13,6 +13,7 @@ from models.macro_id_generator import MacroIDGenerator
 from models.project_load_worker import SafeProjectLoadThread 
 from models.index_prefs_config_model import IndexPrefsConfigModel
 from models.latex_command_registry_model import LatexCommandRegistryModel
+from models.theme_config_model import ThemeConfigModel
 
 from controllers.index_tree_controller import IndexTreeController
 from controllers.macro_editing_controller import MacroEditingController
@@ -20,6 +21,7 @@ from controllers.context_menu_subsystem import FileTreeContextMenuManager
 from controllers.context_menu_subsystem import IndexTreeContextMenuManager
 from controllers.index_prefs_config_controller import IndexPrefsConfigController
 from controllers.latex_command_controller import CreateCommandController
+from controllers.theme_config_controller import ThemeConfigController
 
 from views.app_style_configuration import AppStyleConfiguration
 from views.editor_tab import EditorTab
@@ -74,12 +76,18 @@ class AppPipelineController(QObject):
             parent=self
         )
 
+        self._theme_model = ThemeConfigModel()
+        self._theme_controller = ThemeConfigController(model=self._theme_model, 
+                                                       prefs_persistence=self.prefs, 
+                                                       parent_window=self.window
+                                                       )        
+
         self._index_prefs_model = IndexPrefsConfigModel()
-        self._index_prefs_ctrl = IndexPrefsConfigController(
-            model=self._index_prefs_model,
-            prefs_persistence=self.prefs,
-            parent_window=self.window
-        )        
+        self._index_prefs_ctrl = IndexPrefsConfigController(model=self._index_prefs_model, 
+                                                            prefs_persistence=self.prefs, 
+                                                            theme_controller=self._theme_controller,
+                                                            parent_window=self.window
+                                                            )        
 
         # Map context menu structures straight to the newly instantiated widgets
         self._file_context_manager = FileTreeContextMenuManager(self.file_tree_widget)
@@ -184,9 +192,8 @@ class AppPipelineController(QObject):
 
     def _synchronize_initial_workspace_theme(self):
         """Pushes initial theme choices down to the view layout tree."""
-        broker = AppStyleConfiguration.event_broker()
-        is_dark = bool(broker.get_property("is_dark_mode"))
-        AppStyleConfiguration.configure_application_theme(is_dark)
+        self._theme_controller.apply_startup_theme()
+        is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
         self.window.tool_bar.refresh_theme_presentation(is_dark)
 
     @Slot(int)
@@ -437,7 +444,12 @@ class AppPipelineController(QObject):
         project_name = os.path.basename(project_root_dir)
         self.prefs.update_project_context(project_root_dir, project_name)
         self.window.synchronize_window_title(project_name)
-        self._index_prefs_ctrl.set_active_project(project_name, self.scope_ctrl.get_persistence_model())
+        self._index_prefs_ctrl.set_active_project(project_name=project_name, 
+                                                  file_persistence=self.scope_ctrl.get_persistence_model()
+                                                  )
+        self._theme_controller.set_active_project(project_name=project_name, 
+                                                  file_persistence=self.scope_ctrl.get_persistence_model()
+                                                  )
         self.window.status_bar.showMessage(f"Project '{project_name}' loaded successfully.", 3000)
 
         # Enable menu items that are gated behind an active project context
@@ -477,6 +489,7 @@ class AppPipelineController(QObject):
 
         self.scope_ctrl.close_active_project()
         self._index_prefs_ctrl.set_active_project(None, None)
+        self._theme_controller.set_active_project(None, None)
 
         self._tree_modified = False
         self.window.synchronize_window_title(None)

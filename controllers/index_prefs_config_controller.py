@@ -1,6 +1,9 @@
-from views.app_style_configuration import AppStyleConfiguration
 from models.index_prefs_config_model import IndexPrefsConfigModel
 from models.preferences_persistence import PreferencesPersistence
+
+from controllers.theme_config_controller import ThemeConfigController
+
+from views.app_style_configuration import AppStyleConfiguration
 from views.index_prefs_config_dialog import IndexPrefsConfigDialog
 
 
@@ -9,10 +12,12 @@ class IndexPrefsConfigController:
         self,
         model: IndexPrefsConfigModel,
         prefs_persistence: PreferencesPersistence,
+        theme_controller: ThemeConfigController,
         parent_window=None
     ) -> None:
         self._model = model
         self._prefs = prefs_persistence
+        self._theme_controller = theme_controller
         self._parent_window = parent_window
         self._active_project_name: str | None = None
         # Held during an open project; cleared on project close.
@@ -48,34 +53,36 @@ class IndexPrefsConfigController:
             self._model.load_from_project(file_persistence)
 
     def execute_configuration_flow(self) -> None:
-        """Loads scoped prefs, opens dialog, saves on acceptance."""
         if self._active_project_name is not None and self._file_persistence is not None:
-            # Project open: read from DB
             self._model.load_from_project(self._file_persistence)
         else:
-            # No project: read from QSettings globals
             global_data = self._prefs.load_index_prefs(project_name=None)
             self._model.load_from_dict(global_data)
 
+        # Load theme colours into the theme model via its own scoped read
+        self._theme_controller.execute_load_only()  # new method — see below
+
         dialog = IndexPrefsConfigDialog(self._parent_window)
         dialog.populate_fields(self._model.serialize_to_dict())
+        dialog.populate_theme_fields(
+            self._theme_controller.model.serialize_dark(),
+            self._theme_controller.model.serialize_light(),
+        )
 
         is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
         dialog.apply_theme_configuration(is_dark)
 
         dialog.sig_config_accepted.connect(self._handle_model_update)
+
         dialog.exec()
 
-    def _handle_model_update(self, updated_payload: dict) -> None:
-        """
-        Routes the accepted payload to the correct persistence layer.
-        Global QSettings are only written when no project is open.
-        """
+    def _handle_model_update(self, updated_payload: dict, dark_colours: dict, light_colours: dict) -> None:
+        # Prefs — unchanged routing
         self._model.update_data(updated_payload)
-
         if self._active_project_name is not None and self._file_persistence is not None:
-            # Project open: write to DB only
             self._model.persist_to_project(self._file_persistence)
         else:
-            # No project: write to QSettings global scope
             self._prefs.save_index_prefs(updated_payload, project_name=None)
+
+        # Theme — delegate entirely to theme controller
+        self._theme_controller.handle_accepted(dark_colours, light_colours)
