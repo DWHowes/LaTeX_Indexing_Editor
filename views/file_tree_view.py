@@ -45,10 +45,8 @@ class FileTreeView(QTreeView):
         self.context_menu_manager.set_root_file_triggered.connect(self._on_set_root_file)
         self.context_menu_manager.prune_file_triggered.connect(self._on_prune_file_requested)
 
-        # Theme updates: apply initial stylesheet
+        # Connect event broker for theme mutation
         AppStyleConfiguration.event_broker().theme_mutated.connect(self._on_theme_mutated)
-        initial_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
-        self.setStyleSheet(AppStyleConfiguration.get_tree_view_stylesheet(initial_dark))
 
         # Connect primary presentation mouse double-click action hooks
         self.doubleClicked.connect(self._on_double_click)
@@ -167,9 +165,25 @@ class FileTreeView(QTreeView):
         if file_path:
             self.file_prune_requested.emit(file_path)
 
+    def _apply_tree_view_theme(self, is_dark: bool):
+        tree_view_stylesheet = AppStyleConfiguration.get_tree_view_stylesheet(is_dark)
+        self.setStyleSheet(tree_view_stylesheet)
+        self.viewport().setStyleSheet(tree_view_stylesheet)
+        self.viewport().setAutoFillBackground(True)
+
+        app = QApplication.instance()
+        base_color = (
+            app.palette().color(QPalette.ColorRole.Window)
+            if app is not None
+            else QColor("#2b2b2b" if is_dark else "#ffffff")
+        )
+
+        palette = self.viewport().palette()
+        palette.setColor(QPalette.ColorRole.Base, base_color)
+        self.viewport().setPalette(palette)
+        
     def _on_theme_mutated(self, is_dark_mode: bool):
-        """Slot: apply new stylesheet and refresh root-file indicators to pick up palette changes."""
-        self.setStyleSheet(AppStyleConfiguration.get_tree_view_stylesheet(bool(is_dark_mode)))
-        # re-evaluate root-file visuals against the updated palette
+        self._apply_tree_view_theme(bool(is_dark_mode))
         self._refresh_root_indicators(self.base_model.invisibleRootItem())
         self.viewport().update()
+        
