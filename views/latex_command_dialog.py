@@ -106,7 +106,14 @@ class CreateCommandDialog(QDialog):
                 QLabel { color: #f0f0f0; }
                 QLineEdit, QTextEdit { background-color: #3c3c3c; color: #f0f0f0; border: 1px solid #666; }
                 QPushButton { background-color: #3c3c3c; color: #f0f0f0; border: 1px solid #666; padding: 5px 12px; }
-                QPushButton:hover { background-color: #505050; }
+                QPushButton:hover:enabled { background-color: #505050; }
+                QPushButton:disabled { background-color: #2b2b2b; color: #777777; border: 1px solid #444; }
             """)
         else:
-            self.setStyleSheet("")
+            self.setStyleSheet("""
+                QPushButton:disabled {
+                    background-color: #f0f0f0;
+                    color: #999999;
+                    border: 1px solid #cccccc;
+                }
+            """)
