@@ -124,3 +124,61 @@ class AppStyleConfiguration:
 
         app.setPalette(palette)
         AppStyleConfiguration.event_broker().theme_mutated.emit(is_dark_mode)
+
+    @staticmethod
+    def get_dialog_stylesheet(colours) -> str:
+        """
+        Generates a QDialog stylesheet from a theme colours instance.
+        Accepts DarkThemeColours, LightThemeColours, or any object with the
+        same field names. Returns an empty string for light mode where the
+        default palette is sufficient, matching the existing pattern.
+        """
+        from models.theme_config_model import LightThemeColours
+        if isinstance(colours, LightThemeColours):
+            return ""
+
+        # Derive a slightly lighter input field tone from base for nested controls
+        return f"""
+            QDialog {{
+                background-color: {colours.window};
+                color: {colours.window_text};
+            }}
+            QTabWidget::pane {{
+                border: 1px solid {colours.tab_pane_border};
+                background: {colours.tab_pane_bg};
+            }}
+            QTabBar::tab {{
+                background: {colours.base};
+                color: {colours.window_text};
+                padding: 6px 10px;
+            }}
+            QTabBar::tab:selected {{
+                background: {colours.button};
+            }}
+            QGroupBox {{
+                color: {colours.window_text};
+                border: 1px solid {colours.tab_pane_border};
+                margin-top: 6px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 8px;
+            }}
+            QLineEdit, QSpinBox, QComboBox {{
+                background-color: {colours.base};
+                color: {colours.text};
+                border: 1px solid {colours.tree_header_border};
+            }}
+            QCheckBox {{
+                color: {colours.window_text};
+            }}
+            QDialogButtonBox QPushButton {{
+                background-color: {colours.button};
+                color: {colours.button_text};
+                border: 1px solid {colours.tree_header_border};
+                padding: 4px 12px;
+            }}
+            QLabel {{
+                color: {colours.window_text};
+            }}
+        """
