@@ -7,8 +7,6 @@ from views.main_tool_bar import MainToolBar
 from views.main_status_bar import MainStatusBar
 from views.latex_index_window import LatexIndexWindow
 from views.head_note_dialog import HeadNoteDialog
-from views.settings_inspector_dialogs import ApplicationSettingsDialog
-from views.settings_inspector_dialogs import ProjectSettingsDialog
 
 class LatexEditor(QMainWindow):
     """
@@ -149,19 +147,3 @@ class LatexEditor(QMainWindow):
             # MVC ROUTING: Pass raw text primitives down onto your model engine here
             print(f"[CONTROLLER ENGINE] Sending fresh head note data to model layer: {raw_note}")
             # self.entry_modifier_model.create_head_note_entry(raw_note)
-
-    @Slot()
-    def show_project_settings_dialog(self):
-        if self.preferences_model:
-            dialog = ProjectSettingsDialog(self.file_persistence, self)
-            dialog.exec()
-        else:
-            print("Dialog Error: LatexEditor preferences model is not set")
-
-    @Slot()
-    def show_app_settings_dialog(self):
-        if self.file_persistence:
-            dialog = ApplicationSettingsDialog(self.preferences_model, self)
-            dialog.exec()
-        else:
-            print("Dialog Error: LatexEditor file persistence model is not set")

@@ -16,8 +16,6 @@ class MainMenuBar(QMenuBar):
     toggle_entry_window_requested = Signal()
     preferences_requested = Signal()
     add_head_note_requested = Signal()
-    app_settings_action_requested = Signal()
-    project_settings_action_requested = Signal()
     create_latex_command_requested = Signal()
 
     def __init__(self, parent_window=None):
@@ -83,22 +81,14 @@ class MainMenuBar(QMenuBar):
 
         # Tools menu dropdowns
         tools_menu = self.addMenu("&Tools")
-        self.head_note_action = tools_menu.addAction("Add Head &Note", QKeySequence("Ctrl+Shift+H"))
+        self.head_note_action = tools_menu.addAction("Create Head &Note...", QKeySequence("Ctrl+Shift+H"))
         self.head_note_action.triggered.connect(lambda: self.add_head_note_requested.emit())
         # Disable it by default on application startup (since no project is open yet)
         self.head_note_action.setEnabled(False)
 
         self.create_latex_command_action = tools_menu.addAction("Create &LaTeX Command...", QKeySequence("Ctrl+Alt+C"))
         self.create_latex_command_action.triggered.connect(lambda: self.create_latex_command_requested.emit())
-
-        tools_menu.addSeparator()
-
-        self.app_settings_action = tools_menu.addAction("View &Application Settings")
-        self.app_settings_action.triggered.connect(lambda: self.app_settings_action_requested.emit())
-
-        self.project_settings_action = tools_menu.addAction("View &Project Settings")
-        self.project_settings_action.triggered.connect(lambda: self.project_settings_action_requested.emit())        
-        
+       
         # --- Global Action Container Tracking ---
         # Free-floating action container tracking the dark mode shortcut globally
         self.dark_mode_action = QAction(self)

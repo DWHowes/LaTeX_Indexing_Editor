@@ -153,8 +153,6 @@ class AppPipelineController(QObject):
 
         self.window.menu_bar.add_head_note_requested.connect(self.window.handle_add_head_note_dialog)  
         self.window.menu_bar.create_latex_command_requested.connect(self.create_command_controller.show_create_command_dialog)
-        self.window.menu_bar.app_settings_action_requested.connect(self.window.show_app_settings_dialog)
-        self.window.menu_bar.project_settings_action_requested.connect(self.window.show_project_settings_dialog)
 
         # Structural Layout Hotkey Configurations
         self.window.menu_bar.toggle_file_sidebar_requested.connect(lambda: self._orchestrate_sidebar_focus(0))
