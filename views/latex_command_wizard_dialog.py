@@ -17,8 +17,8 @@ from PySide6.QtWidgets import (
     QFrame,
 )
 
+from models.theme_config_model import DarkThemeColours, LightThemeColours
 from views.app_style_configuration import AppStyleConfiguration
-
 
 class LatexCommandWizardDialog(QDialog):
     r"""
@@ -273,46 +273,50 @@ class LatexCommandWizardDialog(QDialog):
     # ------------------------------------------------------------------ #
 
     def apply_theme_configuration(self, is_dark: bool) -> None:
-        if is_dark:
-            stylesheet = """
-                QDialog, QFrame#wizard_page, QFrame#wizard_btn_bar {
-                    background-color: #2b2b2b;
-                }
-                QFrame#wizard_separator {
-                    color: #555;
-                }
-                QLabel, QRadioButton {
-                    color: #f0f0f0;
-                    background-color: transparent;
-                }
-                QGroupBox {
-                    color: #f0f0f0;
-                    border: 1px solid #666;
-                    margin-top: 6px;
-                }
-                QGroupBox::title {
-                    color: #f0f0f0;
-                    subcontrol-origin: margin;
-                    left: 8px;
-                }
-                QLineEdit, QTextEdit, QSpinBox {
-                    background-color: #3c3c3c;
-                    color: #f0f0f0;
-                    border: 1px solid #666;
-                }
-                QPushButton {
-                    background-color: #3c3c3c;
-                    color: #f0f0f0;
-                    border: 1px solid #666;
-                    padding: 4px 14px;
-                    border-radius: 3px;
-                }
-                QPushButton:hover    { background-color: #505050; }
-                QPushButton:pressed  { background-color: #404040; }
-                QPushButton:disabled { color: #777; border-color: #555; }
-            """
-        else:
-            stylesheet = ""
+        colours = DarkThemeColours() if is_dark else LightThemeColours()
+        self.setStyleSheet(AppStyleConfiguration.get_dialog_stylesheet(colours))
+        
+    # def apply_theme_configuration(self, is_dark: bool) -> None:
+    #     if is_dark:
+    #         stylesheet = """
+    #             QDialog, QFrame#wizard_page, QFrame#wizard_btn_bar {
+    #                 background-color: #2b2b2b;
+    #             }
+    #             QFrame#wizard_separator {
+    #                 color: #555;
+    #             }
+    #             QLabel, QRadioButton {
+    #                 color: #f0f0f0;
+    #                 background-color: transparent;
+    #             }
+    #             QGroupBox {
+    #                 color: #f0f0f0;
+    #                 border: 1px solid #666;
+    #                 margin-top: 6px;
+    #             }
+    #             QGroupBox::title {
+    #                 color: #f0f0f0;
+    #                 subcontrol-origin: margin;
+    #                 left: 8px;
+    #             }
+    #             QLineEdit, QTextEdit, QSpinBox {
+    #                 background-color: #3c3c3c;
+    #                 color: #f0f0f0;
+    #                 border: 1px solid #666;
+    #             }
+    #             QPushButton {
+    #                 background-color: #3c3c3c;
+    #                 color: #f0f0f0;
+    #                 border: 1px solid #666;
+    #                 padding: 4px 14px;
+    #                 border-radius: 3px;
+    #             }
+    #             QPushButton:hover    { background-color: #505050; }
+    #             QPushButton:pressed  { background-color: #404040; }
+    #             QPushButton:disabled { color: #777; border-color: #555; }
+    #         """
+    #     else:
+    #         stylesheet = ""
 
         self.setStyleSheet(stylesheet)
 

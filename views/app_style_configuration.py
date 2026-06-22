@@ -1,4 +1,3 @@
-# views/app_style_configuration.py - Pure Decoupled Event Broadcasting Subsystem
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtGui import QPalette, QColor
@@ -47,6 +46,7 @@ class AppStyleConfiguration:
             _GlobalThemeChannel = ThemeChangedSignals()
             
         return _GlobalThemeChannel
+    
     @staticmethod
     def get_unified_menu_stylesheet() -> str:
         return """
