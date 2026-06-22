@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from models.theme_config_model import DarkThemeColours, LightThemeColours
 
-from views.app_style_configuration import AppStyleConfiguration
+from controllers.app_style_configuration import AppStyleConfiguration
 
 class CreateCommandDialog(QDialog):
     save_requested = Signal(str, str)
