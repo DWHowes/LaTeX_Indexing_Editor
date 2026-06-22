@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QTreeView, QAbstractItemView
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QCursor, QFontMetrics
 from PySide6.QtCore import Qt, Signal, Slot, QModelIndex, QSortFilterProxyModel, QItemSelectionModel
 
-from views.app_style_configuration import AppStyleConfiguration
+from controllers.app_style_configuration import AppStyleConfiguration
 from views.index_text_formatter_delegate import IndexTextFormatterDelegate
 from views.index_link_delegate import IndexLinkDelegate
 

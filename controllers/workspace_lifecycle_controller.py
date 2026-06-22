@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Slot, Signal
 
-from views.app_style_configuration import AppStyleConfiguration
+from controllers.app_style_configuration import AppStyleConfiguration
 from views.editor_tab import EditorTab
 
 class WorkspaceLifecycleController(QObject):

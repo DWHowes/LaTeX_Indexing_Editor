@@ -3,7 +3,7 @@ from PySide6.QtCore import QPointF, Qt, QEvent, QPoint, Signal
 from PySide6.QtGui import QColor, QFont, QTextLayout, QTextOption
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle
 
-from views.app_style_configuration import AppStyleConfiguration
+from controllers.app_style_configuration import AppStyleConfiguration
 
 class IndexLinkDelegate(QStyledItemDelegate):
     # Matches individual token patterns like [1], [12], or [48]

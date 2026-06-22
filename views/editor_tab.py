@@ -4,7 +4,7 @@ from PySide6.QtGui import QPalette, QTextDocument, QTextCursor, QColor, QFont
 from PySide6.QtCore import QEvent, QTimer, Qt, Signal
 
 from models.latex_highlighter import LatexHighlighter
-from views.app_style_configuration import AppStyleConfiguration
+from controllers.app_style_configuration import AppStyleConfiguration
 from views.tab_find_dialog import TabFindDialog
 
 class EditorTab(QPlainTextEdit):

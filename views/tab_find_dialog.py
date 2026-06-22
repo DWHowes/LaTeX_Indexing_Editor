@@ -39,7 +39,7 @@ class CustomVectorButton(QPushButton):
                 painter.drawLine(cx - 5, cy - 3, cx, cy + 2)
                 painter.drawLine(cx, cy + 2, cx + 5, cy - 3)
 
-from views.app_style_configuration import AppStyleConfiguration
+from controllers.app_style_configuration import AppStyleConfiguration
 
 class TabFindDialog(QDialog):
     """

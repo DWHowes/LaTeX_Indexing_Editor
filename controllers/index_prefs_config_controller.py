@@ -3,7 +3,7 @@ from models.preferences_persistence import PreferencesPersistence
 
 from controllers.theme_config_controller import ThemeConfigController
 
-from views.app_style_configuration import AppStyleConfiguration
+from controllers.app_style_configuration import AppStyleConfiguration
 from views.index_prefs_config_dialog import IndexPrefsConfigDialog
 
 

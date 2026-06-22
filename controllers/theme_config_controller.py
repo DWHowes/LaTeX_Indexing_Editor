@@ -2,6 +2,7 @@ from models.theme_config_model import ThemeConfigModel, DarkThemeColours, LightT
 from models.preferences_persistence import PreferencesPersistence
 from dataclasses import asdict
 
+from controllers.app_style_configuration import AppStyleConfiguration
 
 class ThemeConfigController:
     """
@@ -91,7 +92,6 @@ class ThemeConfigController:
         self._reapply_active_theme()
 
     def _reapply_active_theme(self) -> None:
-        from views.app_style_configuration import AppStyleConfiguration
         is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
         colours = self._model.get_dark() if is_dark else self._model.get_light()
         AppStyleConfiguration.configure_application_theme(is_dark, colours)

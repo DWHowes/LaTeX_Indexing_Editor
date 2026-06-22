@@ -4,7 +4,7 @@ from PySide6.QtCore import QObject, Qt, Signal, Slot, QModelIndex, QPoint
 from PySide6.QtWidgets import QMenu, QTreeView
 from PySide6.QtGui import QAction
 
-from views.app_style_configuration import AppStyleConfiguration
+from controllers.app_style_configuration import AppStyleConfiguration
 
 class BaseContextMenuManager(QObject):
     """

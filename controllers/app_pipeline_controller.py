@@ -23,7 +23,7 @@ from controllers.index_prefs_config_controller import IndexPrefsConfigController
 from controllers.latex_command_controller import CreateCommandController
 from controllers.theme_config_controller import ThemeConfigController
 
-from views.app_style_configuration import AppStyleConfiguration
+from controllers.app_style_configuration import AppStyleConfiguration
 from views.editor_tab import EditorTab
 from views.index_tree_view import IndexTreeView
 from views.project_sidebar_view import ProjectSidebarView

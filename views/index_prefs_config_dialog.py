@@ -6,7 +6,7 @@ from PySide6.QtCore import Signal
 
 from models.theme_config_model import DarkThemeColours, LightThemeColours
 
-from views.app_style_configuration import AppStyleConfiguration
+from controllers.app_style_configuration import AppStyleConfiguration
 from views.theme_config_dialog import _ThemeTab
 
 class IndexPrefsConfigDialog(QDialog):

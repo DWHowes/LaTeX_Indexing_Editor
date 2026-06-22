@@ -5,7 +5,7 @@ from PySide6.QtGui import QStandardItem, QStandardItemModel, QPalette, QBrush, Q
 from PySide6.QtCore import Signal, Qt, QModelIndex
 
 from views.latex_folder_filter_proxy import LatexFolderFilterProxy
-from views.app_style_configuration import AppStyleConfiguration
+from controllers.app_style_configuration import AppStyleConfiguration
 from controllers.context_menu_subsystem import FileTreeContextMenuManager
 
 class FileTreeView(QTreeView):

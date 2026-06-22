@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QToolBar, QPushButton, QLabel, QFontComboBox, QSpi
 from PySide6.QtCore import QSize, Qt, Signal, Slot
 from PySide6.QtGui import QFont, QIcon
 
-from views.app_style_configuration import AppStyleConfiguration
+from controllers.app_style_configuration import AppStyleConfiguration
 
 class MainToolBar(QToolBar):
     """

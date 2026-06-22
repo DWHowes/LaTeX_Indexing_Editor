@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from models.theme_config_model import DarkThemeColours, LightThemeColours
-from views.app_style_configuration import AppStyleConfiguration
+from controllers.app_style_configuration import AppStyleConfiguration
 
 class LatexCommandWizardDialog(QDialog):
     r"""
@@ -317,8 +317,8 @@ class LatexCommandWizardDialog(QDialog):
     #         """
     #     else:
     #         stylesheet = ""
-
-        self.setStyleSheet(stylesheet)
+# 
+        # self.setStyleSheet(stylesheet)
 
     # ------------------------------------------------------------------ #
     # Lifecycle                                                          #
