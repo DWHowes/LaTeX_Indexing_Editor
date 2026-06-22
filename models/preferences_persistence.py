@@ -13,33 +13,94 @@ class PreferencesPersistence(QObject):
         self.settings = QSettings("DH Indexing", "LatexEditor")
 
     def load_application_preferences(self) -> dict:
+        # Build a baseline of common defaults (keeps backward compatibility)
         try:
-            font_size = int(self.settings.value("font_size", 12))
+            default_font_size = int(self.settings.value("font_size", 12))
         except (ValueError, TypeError):
-            font_size = 12
+            default_font_size = 12
 
-        raw_geometry = self.settings.value("window_geometry")
-        raw_state = self.settings.value("window_state")
-        raw_splitter = self.settings.value("splitter_state")
-
-        if isinstance(raw_geometry, str):
-            raw_geometry = QByteArray.fromHex(raw_geometry.encode())
-        if isinstance(raw_state, str):
-            raw_state = QByteArray.fromHex(raw_state.encode())
-        if isinstance(raw_splitter, str):
-            raw_splitter = QByteArray.fromHex(raw_splitter.encode())
-
-        return {
+        defaults = {
             "last_project_root": self.settings.value("last_project_root", ""),
             "last_project_name": self.settings.value("last_project_name", ""),
             "font_family": self.settings.value("font_family", "Arial"),
-            "font_size": font_size,
+            "font_size": default_font_size,
             "dark_mode": str(self.settings.value("dark_mode", "false")).lower() == "true",
-            "last_project_path": self.settings.value("last_project_path", QDir.homePath()),
-            "geometry": raw_geometry,
-            "state": raw_state,
-            "splitter_state": raw_splitter,
+            "last_project_path": os.path.normpath(str(self.settings.value("last_project_path", QDir.homePath()))),
+            "geometry": None,
+            "state": None,
+            "splitter_state": None,
         }
+
+        # Load every key present in the registry and coerce where sensible.
+        for raw_key in self.settings.allKeys():
+            try:
+                raw_val = self.settings.value(raw_key)
+            except Exception:
+                continue
+
+            # Normalize known layout keys to the legacy names used elsewhere.
+            key = raw_key
+            if raw_key in ("window_geometry", "geometry"):
+                key = "geometry"
+            elif raw_key in ("window_state", "state"):
+                key = "state"
+            elif raw_key == "splitter_state":
+                key = "splitter_state"
+
+            # Convert hex-encoded QByteArray strings back to QByteArray for layout data.
+            if isinstance(raw_val, str) and key in ("geometry", "state", "splitter_state"):
+                try:
+                    val = QByteArray.fromHex(raw_val.encode())
+                except Exception:
+                    val = raw_val
+            else:
+                val = raw_val
+
+            # Normalize common path-like entries
+            if isinstance(val, str) and key.lower().endswith("path"):
+                val = os.path.normpath(val)
+
+            # Coerce a few well-known types
+            if key == "font_size":
+                try:
+                    val = int(val)
+                except (ValueError, TypeError):
+                    val = defaults["font_size"]
+            if key == "dark_mode":
+                val = str(val).lower() == "true"
+
+            defaults[key] = val
+
+        return defaults
+
+    # def load_application_preferences(self) -> dict:
+    #     try:
+    #         font_size = int(self.settings.value("font_size", 12))
+    #     except (ValueError, TypeError):
+    #         font_size = 12
+
+    #     raw_geometry = self.settings.value("window_geometry")
+    #     raw_state = self.settings.value("window_state")
+    #     raw_splitter = self.settings.value("splitter_state")
+
+    #     if isinstance(raw_geometry, str):
+    #         raw_geometry = QByteArray.fromHex(raw_geometry.encode())
+    #     if isinstance(raw_state, str):
+    #         raw_state = QByteArray.fromHex(raw_state.encode())
+    #     if isinstance(raw_splitter, str):
+    #         raw_splitter = QByteArray.fromHex(raw_splitter.encode())
+
+    #     return {
+    #         "last_project_root": self.settings.value("last_project_root", ""),
+    #         "last_project_name": self.settings.value("last_project_name", ""),
+    #         "font_family": self.settings.value("font_family", "Arial"),
+    #         "font_size": font_size,
+    #         "dark_mode": str(self.settings.value("dark_mode", "false")).lower() == "true",
+    #         "last_project_path": self.settings.value("last_project_path", QDir.homePath()),
+    #         "geometry": raw_geometry,
+    #         "state": raw_state,
+    #         "splitter_state": raw_splitter,
+    #     }
 
     def serialize_layout_state(self, closure_payload: dict):
         if "geometry" in closure_payload:
