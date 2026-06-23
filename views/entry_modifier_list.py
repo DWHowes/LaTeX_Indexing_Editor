@@ -8,8 +8,8 @@ class EntryModifierList(QWidget):
     Renders user data, enables inline cell editing, and supports column sorting via a proxy.
     """
     # UI Interaction Events mapped cleanly out for Controller interceptor tracking
-    entry_modifier_edit_committed = Signal(int, str, str)  # entry_id, column_name, new_value
-
+    entry_modifier_edit_committed = Signal(int, str)  # entry_id, canonical_heading (main!sub1!sub2)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -58,30 +58,47 @@ class EntryModifierList(QWidget):
         # Connect interface notifications directly to the base data model
         self.base_model.dataChanged.connect(self._on_cell_data_changed)
 
-    def update_entry_modifier_display(self, records: list):
+    def populate_entry_modifier_display(self, references: list[dict]):
         """Populates layout grids completely decoupled from model implementation rules."""
-        # Temporarily disconnect listener to block update loops during repopulation passes
         self.base_model.dataChanged.disconnect(self._on_cell_data_changed)
-        
-        # Disable proxy dynamic sorting temporarily so items don't jump around while building rows
         self.proxy_model.setDynamicSortFilter(False)
-        
+
         self.base_model.clear()
         self.base_model.setHorizontalHeaderLabels(self.headers)
+        
+        # Reset hidden coordinate metadata store
+        self._location_map: dict[int, dict] = {}
 
-        for entry_id, main, sub1, sub2 in records:
+        for ref in references:
+            unique_id = ref["unique_id_number"]
+            parts = ref.get("heading_raw_text", "").split("!")
+            main  = parts[0] if len(parts) > 0 else ""
+            sub1  = parts[1] if len(parts) > 1 else ""
+            sub2  = parts[2] if len(parts) > 2 else ""
+
             id_item = QStandardItem()
-            # Set data as an actual Integer so that the ID column sorts numerically (1, 2, 10) instead of alphabetically (1, 10, 2)
-            id_item.setData(entry_id, Qt.ItemDataRole.DisplayRole)
-            id_item.setFlags(id_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Freeze ID primary keys
-            
+            id_item.setData(unique_id, Qt.ItemDataRole.DisplayRole)
+            id_item.setFlags(id_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+
             main_item = QStandardItem(main)
             sub1_item = QStandardItem(sub1)
             sub2_item = QStandardItem(sub2)
-            
+
             self.base_model.appendRow([id_item, main_item, sub1_item, sub2_item])
 
-        # Re-enable interactive layout sorting logic configurations
+            # Stash coordinate and encap metadata, keyed by unique_id for controller lookup
+            self._location_map[unique_id] = {
+                "file_path":         ref.get("file_path"),
+                "line_number":       ref.get("line_number"),
+                "column_offset":     ref.get("column_offset"),
+                "absolute_position": ref.get("absolute_position"),
+                "absolute_end":      ref.get("absolute_end"),
+                "encap":             ref.get("encap", "standard"),
+                "heading_id":        ref.get("heading_id"),
+                "see_references":    ref.get("see_references"),
+                "seealso_references":ref.get("seealso_references"),
+            }
+
         self.proxy_model.setDynamicSortFilter(True)
         self.base_model.dataChanged.connect(self._on_cell_data_changed)
 
@@ -93,15 +110,24 @@ class EntryModifierList(QWidget):
 
         row = top_left.row()
         column = top_left.column()
-        
-        # Safely pull the ID mapping key directly out of column 0 of the base data structure
+        if column == 0:
+            return
+
         id_item = self.base_model.item(row, 0)
         if not id_item:
             return
-            
-        entry_id = int(id_item.text())
-        column_name = self.headers[column]
-        new_value = top_left.data(Qt.ItemDataRole.DisplayRole)
 
-        # Forward structural edit outward to Controller using updated signal signature
-        self.entry_modifier_edit_committed.emit(entry_id, column_name, new_value)
+        entry_id = id_item.data(Qt.ItemDataRole.DisplayRole)
+
+        # Reconstruct canonical heading path from all three visible text columns
+        main = self.base_model.item(row, 1).text()
+        sub1 = self.base_model.item(row, 2).text()
+        sub2 = self.base_model.item(row, 3).text()
+        canonical_heading = "!".join(part for part in (main, sub1, sub2) if part)
+
+        self.entry_modifier_edit_committed.emit(entry_id, canonical_heading)
+
+    def get_location_metadata(self, entry_id: int) -> dict | None:
+        """Returns hidden coordinate and encap metadata for the given entry ID."""
+        return self._location_map.get(entry_id)
+        

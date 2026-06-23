@@ -504,3 +504,52 @@ class FileTreePersistence:
         # Print a structural confirmation trace directly to the stream 
         # This allows the decoupled SessionLogger to track database unlinking actions
         print("[MODEL PERSISTENCE] Database connections severed. State reset to baseline defaults.")
+
+    def update_reference_field(self, entry_id: int, record: dict) -> bool:
+        """
+        Persists a single reference record update keyed by unique_id_number.
+        Updates heading_raw_text from the canonical 'main!sub1!sub2' string,
+        plus any coordinate or encap fields present in the record dict.
+        Returns True on success, False on failure.
+        """
+        if not self.db_path:
+            return False
+
+        # MUTABLE_COLUMNS acts as an explicit allowlist — the f-string SET clause is built only from keys present in both the 
+        # record dict and that set, so no arbitrary key from the model cache can ever reach the SQL. uid and unique_id_number 
+        # are deliberately excluded since they're identity fields that should never drift after initial write.
+        MUTABLE_COLUMNS = {
+            "heading_raw_text", "heading_id",
+            "file_path", "line_number", "column_offset",
+            "absolute_position", "encap",
+            "see_references", "seealso_references", "has_references"
+        }
+
+        fields_to_write = {k: v for k, v in record.items() if k in MUTABLE_COLUMNS}
+        if not fields_to_write:
+            print(f"[DB TRACE] update_reference_field: no mutable fields in payload for ID {entry_id}")
+            return False
+
+        set_clause = ", ".join(f"{col} = ?" for col in fields_to_write)
+        values = list(fields_to_write.values())
+        values.append(entry_id)  # WHERE clause bind value
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"UPDATE project_references SET {set_clause} WHERE unique_id_number = ?;",
+                    values
+                )
+                # The rowcount == 0 check catches the case where the in-memory cache and the database have diverged 
+                # (e.g. a close/reopen race), which would otherwise silently succeed.        
+                if cursor.rowcount == 0:
+                    print(f"[DB TRACE] update_reference_field: no row matched unique_id_number={entry_id}")
+                    return False
+                conn.commit()
+                print(f"[DB TRACE] update_reference_field: committed {len(fields_to_write)} field(s) for ID {entry_id}")
+                return True
+        except sqlite3.Error as err:
+            print(f"[DB ERROR] update_reference_field failed for ID {entry_id}: {err}")
+            return False
+        

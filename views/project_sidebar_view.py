@@ -71,3 +71,9 @@ class ProjectSidebarView(QTabWidget):
                 
             # 3. Force the parent view matrix to recalculate geometries instantly
             self.update()
+
+    def get_file_tree_view(self)->FileTreeView:
+        return self.tree_files
+    
+    def get_entry_table_view(self)->EntryModifierList:
+        return self.entry_modifier_panel

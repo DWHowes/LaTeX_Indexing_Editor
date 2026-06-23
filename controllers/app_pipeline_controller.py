@@ -14,6 +14,7 @@ from models.project_load_worker import SafeProjectLoadThread
 from models.index_prefs_config_model import IndexPrefsConfigModel
 from models.latex_command_registry_model import LatexCommandRegistryModel
 from models.theme_config_model import ThemeConfigModel
+from models.entry_modifier_model import EntryModifierModel
 
 from controllers.index_tree_controller import IndexTreeController
 from controllers.macro_editing_controller import MacroEditingController
@@ -22,6 +23,7 @@ from controllers.context_menu_subsystem import IndexTreeContextMenuManager
 from controllers.index_prefs_config_controller import IndexPrefsConfigController
 from controllers.latex_command_controller import CreateCommandController
 from controllers.theme_config_controller import ThemeConfigController
+from controllers.entry_modifier_controller import EntryModifierController
 
 from controllers.app_style_configuration import AppStyleConfiguration
 from views.editor_tab import EditorTab
@@ -61,8 +63,13 @@ class AppPipelineController(QObject):
         self.window.refresh_right_pane_proportions()
         
         # Capture the static child tree view cleanly
-        self.file_tree_widget = self.sidebar_view_panel.tree_files
-
+        self.file_tree_widget = self.sidebar_view_panel.get_file_tree_view()
+        self.entry_table_widget = self.sidebar_view_panel.get_entry_table_view()
+        self.entry_modifier_model = EntryModifierModel(persistence=None)  # persistence injected after project load
+        self.entry_modifier_ctrl = EntryModifierController(
+            view_instance=self.entry_table_widget,
+            model_instance=self.entry_modifier_model
+        )
         # Initialize the index layout engines and swap out internal views 
         # before binding core structural infrastructure signal maps
         self.initialize_index_subsystem()
@@ -429,11 +436,15 @@ class AppPipelineController(QObject):
             )
             self.idx_ctrl.clear_staged_entries()
 
-        # Render the workspace file tree structure rows
+        # Populate the workspace file tree view
         self.file_tree_widget.populate_file_hierarchy(file_tree_payload, 
                                                       self.scope_ctrl.get_current_project_metadata_value("root_tex_file")
                                                       )
-
+        # Populate the workspace reference editor view
+        self.entry_modifier_model.set_persistence(self.scope_ctrl.get_persistence_model())
+        self.entry_modifier_model.load_records(references)
+        self.entry_table_widget.populate_entry_modifier_display(references)
+        
         # Realign session logging paths natively
         project_root_dir = os.path.dirname(os.path.normpath(db_path))
         self.session_logger.realign_log_to_project_root(project_root_dir)
