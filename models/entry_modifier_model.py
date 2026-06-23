@@ -21,6 +21,10 @@ class EntryModifierModel(QObject):
         self._persistence = persistence  # ProjectScopeController or FileTreePersistence ref
         self._records: dict[int, dict] = {}  # In-memory cache keyed by unique_id_number
 
+    def get_heading_text(self, entry_id: int) -> str:
+        record = self._records.get(entry_id)
+        return record.get("heading_raw_text", "") if record else ""
+
     # ------------------------------------------------------------------
     # Cache management
     # ------------------------------------------------------------------

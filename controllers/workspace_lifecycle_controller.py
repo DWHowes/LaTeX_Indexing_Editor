@@ -3,6 +3,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Slot, Signal
 
 from controllers.app_style_configuration import AppStyleConfiguration
+from controllers.index_navigation_helper import IndexNavigationHelper
 from views.editor_tab import EditorTab
 
 class WorkspaceLifecycleController(QObject):
@@ -18,6 +19,14 @@ class WorkspaceLifecycleController(QObject):
         self.text_sanitizer = text_sanitizer
         self.file_watcher = file_watcher
         self.tabs = tabs_widget
+
+        self.index_navigation = IndexNavigationHelper(
+            tabs=self.tabs,
+            text_sanitizer=self.text_sanitizer,
+            file_watcher=self.file_watcher,
+            open_file_callable=self.open_file_by_path,
+            parent=self
+        )
 
         # Enable closing UI decorators and wire the routing loop directly
         if self.tabs:
@@ -54,91 +63,98 @@ class WorkspaceLifecycleController(QObject):
 
     @Slot(str, int, int, str)
     def navigate_to_embedded_index_coordinate(self, path: str, line: int, col: int, fallback: str):
-        """
-        Public Navigation Entry Point Contract.
-        Strict MVC: Focuses or instantiates the target view component via public 
-        contracts, then schedules an out-of-band deferred text position jump.
-        """
-        if not path:
-            return
+        self.index_navigation.navigate(path, line, col, fallback)
 
-        active_tab = self.open_file_by_path(path)
-        if not active_tab:
-            return
+    def get_index_navigator(self) -> IndexNavigationHelper:
+        return self.index_navigation
 
-        QTimer.singleShot(0, lambda: self._execute_deferred_text_jump(
-            editor=active_tab, 
-            line_num=line, 
-            col_offset=col, 
-            fallback_search_tag=fallback
-        ))
+    # @Slot(str, int, int, str)
+    # def navigate_to_embedded_index_coordinate(self, path: str, line: int, col: int, fallback: str):
+    #     """
+    #     Public Navigation Entry Point Contract.
+    #     Strict MVC: Focuses or instantiates the target view component via public 
+    #     contracts, then schedules an out-of-band deferred text position jump.
+    #     """
+    #     if not path:
+    #         return
 
-    def _execute_deferred_text_jump(
-        self,
-        editor: EditorTab,
-        line_num: int,
-        col_offset: int,
-        fallback_search_tag: str,
-    ) -> None:
-        """
-        Resolves the best available text coordinate and delegates layout alignment
-        and visualization entirely to the view layer to prevent cursor drift.
-        """
-        if not isinstance(editor, EditorTab):
-            return
+    #     active_tab = self.open_file_by_path(path)
+    #     if not active_tab:
+    #         return
 
-        document = editor.document()
-        if not document or document.blockCount() == 0:
-            return
+    #     QTimer.singleShot(0, lambda: self._execute_deferred_text_jump(
+    #         editor=active_tab, 
+    #         line_num=line, 
+    #         col_offset=col, 
+    #         fallback_search_tag=fallback
+    #     ))
 
-        resolved_line = max(1, int(line_num))
-        resolved_col  = max(1, int(col_offset))
-        zero_line     = resolved_line - 1
-        total_blocks  = document.blockCount()
+    # def _execute_deferred_text_jump(
+    #     self,
+    #     editor: EditorTab,
+    #     line_num: int,
+    #     col_offset: int,
+    #     fallback_search_tag: str,
+    # ) -> None:
+    #     """
+    #     Resolves the best available text coordinate and delegates layout alignment
+    #     and visualization entirely to the view layer to prevent cursor drift.
+    #     """
+    #     if not isinstance(editor, EditorTab):
+    #         return
 
-        if zero_line < total_blocks:
-            # block = document.findBlockByLineNumber(zero_line)
-            block = document.findBlockByNumber(zero_line)
-            if block.isValid():
-                # FIX: Pass is_index_jump=True to authorize macro text highlights
-                editor.jump_to_coordinates(
-                    line=resolved_line, 
-                    column=resolved_col, 
-                    absolute_position=None, 
-                    is_one_indexed=True,
-                    is_index_jump=True
-                )
-                return
+    #     document = editor.document()
+    #     if not document or document.blockCount() == 0:
+    #         return
 
-        if not fallback_search_tag:
-            return
+    #     resolved_line = max(1, int(line_num))
+    #     resolved_col  = max(1, int(col_offset))
+    #     zero_line     = resolved_line - 1
+    #     total_blocks  = document.blockCount()
 
-        full_text = document.toPlainText()
-        matches   = list(re.finditer(re.escape(fallback_search_tag), full_text))
-        if not matches:
-            return
+    #     if zero_line < total_blocks:
+    #         # block = document.findBlockByLineNumber(zero_line)
+    #         block = document.findBlockByNumber(zero_line)
+    #         if block.isValid():
+    #             # FIX: Pass is_index_jump=True to authorize macro text highlights
+    #             editor.jump_to_coordinates(
+    #                 line=resolved_line, 
+    #                 column=resolved_col, 
+    #                 absolute_position=None, 
+    #                 is_one_indexed=True,
+    #                 is_index_jump=True
+    #             )
+    #             return
 
-        anchor_block  = document.findBlockByLineNumber(
-            max(0, min(zero_line, total_blocks - 1))
-        )
-        anchor_offset = anchor_block.position() if anchor_block.isValid() else 0
-        best_match    = min(matches, key=lambda m: abs(m.start() - anchor_offset))
+    #     if not fallback_search_tag:
+    #         return
 
-        match_block = document.findBlock(best_match.start())
-        if not match_block.isValid():
-            return
+    #     full_text = document.toPlainText()
+    #     matches   = list(re.finditer(re.escape(fallback_search_tag), full_text))
+    #     if not matches:
+    #         return
 
-        fallback_line = match_block.blockNumber() + 1
-        fallback_col  = (best_match.start() - match_block.position()) + 1
+    #     anchor_block  = document.findBlockByLineNumber(
+    #         max(0, min(zero_line, total_blocks - 1))
+    #     )
+    #     anchor_offset = anchor_block.position() if anchor_block.isValid() else 0
+    #     best_match    = min(matches, key=lambda m: abs(m.start() - anchor_offset))
+
+    #     match_block = document.findBlock(best_match.start())
+    #     if not match_block.isValid():
+    #         return
+
+    #     fallback_line = match_block.blockNumber() + 1
+    #     fallback_col  = (best_match.start() - match_block.position()) + 1
         
-        # Pass is_index_jump=True for the fallback text match block path as well
-        editor.jump_to_coordinates(
-            line=fallback_line, 
-            column=fallback_col, 
-            absolute_position=None, 
-            is_one_indexed=True,
-            is_index_jump=True
-        )
+    #     # Pass is_index_jump=True for the fallback text match block path as well
+    #     editor.jump_to_coordinates(
+    #         line=fallback_line, 
+    #         column=fallback_col, 
+    #         absolute_position=None, 
+    #         is_one_indexed=True,
+    #         is_index_jump=True
+    #     )
 
     def route_find_to_active_tab(self):
         """Inspects active tab states and toggles find panels via view boundaries."""

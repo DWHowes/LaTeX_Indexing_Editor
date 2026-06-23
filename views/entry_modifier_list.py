@@ -9,7 +9,8 @@ class EntryModifierList(QWidget):
     """
     # UI Interaction Events mapped cleanly out for Controller interceptor tracking
     entry_modifier_edit_committed = Signal(int, str)  # entry_id, canonical_heading (main!sub1!sub2)
-    
+    entry_row_selected = Signal(int)  # entry_id
+
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -44,6 +45,8 @@ class EntryModifierList(QWidget):
         
         # Explicitly apply the proxy stack to the visual grid view layout
         self.entries_table_view.setModel(self.proxy_model)
+
+        self.entries_table_view.clicked.connect(self._on_row_clicked)
         
         layout.addWidget(self.entries_table_view)
         
@@ -101,6 +104,13 @@ class EntryModifierList(QWidget):
 
         self.proxy_model.setDynamicSortFilter(True)
         self.base_model.dataChanged.connect(self._on_cell_data_changed)
+
+    @Slot(QModelIndex)
+    def _on_row_clicked(self, proxy_index: QModelIndex):
+        source_index = self.proxy_model.mapToSource(proxy_index)
+        id_item = self.base_model.item(source_index.row(), 0)
+        if id_item:
+            self.entry_row_selected.emit(id_item.data(Qt.ItemDataRole.DisplayRole))
 
     @Slot(QModelIndex, QModelIndex, list)
     def _on_cell_data_changed(self, top_left: QModelIndex, bottom_right: QModelIndex, roles: list):

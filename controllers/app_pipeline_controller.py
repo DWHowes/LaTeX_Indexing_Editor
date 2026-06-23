@@ -68,7 +68,9 @@ class AppPipelineController(QObject):
         self.entry_modifier_model = EntryModifierModel(persistence=None)  # persistence injected after project load
         self.entry_modifier_ctrl = EntryModifierController(
             view_instance=self.entry_table_widget,
-            model_instance=self.entry_modifier_model
+            model_instance=self.entry_modifier_model,
+            navigation_helper=self.lc_ctrl.get_index_navigator(),
+            parent=self
         )
         # Initialize the index layout engines and swap out internal views 
         # before binding core structural infrastructure signal maps
