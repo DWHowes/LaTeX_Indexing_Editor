@@ -1,3 +1,4 @@
+import os
 import sys
 from PySide6.QtWidgets import QApplication
 
@@ -6,6 +7,7 @@ from models.session_logger import SessionLogger
 from models.preferences_persistence import PreferencesPersistence
 from models.text_sanitizer import TextSanitizer
 from models.session_backup_manager import SessionBackupManager
+from models.name_inverter import NameInverter
 
 # Import all core operational controllers
 from controllers.app_pipeline_controller import AppPipelineController
@@ -46,6 +48,9 @@ if __name__ == "__main__":
         text_sanitizer = TextSanitizer()
         backup_manager = SessionBackupManager()
 
+        viaf_cache = os.path.join(os.path.dirname(__file__), "data", "viaf_cache.db")
+        name_inverter = NameInverter(viaf_cache_path=viaf_cache, viaf_enabled=True)
+
         # Initialize the main visual window shell
         editor_window = LatexEditor()
         editor_window.set_preferences_model(preferences_model)
@@ -84,7 +89,8 @@ if __name__ == "__main__":
             doc_controller=doc_controller,
             lifecycle_controller=lifecycle_controller,
             scope_controller=scope_controller,
-            session_logger=logger
+            session_logger=logger,
+            name_inverter=name_inverter
         )
 
         geometry = preferences_payload.get("geometry")
@@ -97,11 +103,21 @@ if __name__ == "__main__":
             editor_window.layout_splitter.restoreState(splitter_state)
 
         exit_code = app.exec()
-        
+
+        # clean up name inverter cache handles
+        try:
+            name_inverter.close()
+        except Exception:
+            pass
+
         logger.stop_intercept()
         sys.exit(exit_code)
         
     except Exception as e:
         print(f"CRITICAL SYSTEM FAILURE: {str(e)}")
+        try:
+            name_inverter.close()
+        except Exception:
+            pass        
         logger.stop_intercept()
         sys.exit(1)

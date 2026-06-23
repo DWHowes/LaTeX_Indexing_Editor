@@ -70,7 +70,7 @@ class IndexTreeContextMenuManager(BaseContextMenuManager):
         display_text = str(proxy_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
 
         add_subhead_action = QAction(f"Add Subheading to '{display_text}'", menu_container)
-        delete_action = QAction(f"Delete Term '{display_text}' & Clear Tags", menu_container)
+        delete_action = QAction(f"Delete Term '{display_text}'", menu_container)
 
         # Store the target index directly inside the QAction metadata block
         add_subhead_action.setData(proxy_index)

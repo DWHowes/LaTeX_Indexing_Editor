@@ -1,7 +1,9 @@
 import os
-from shiboken6 import isValid  # Official PySide6 C++ lifetime validator
+from shiboken6 import isValid  # PySide6 C++ lifetime validator
 from collections import deque
 from pathlib import Path
+from typing import Optional, Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QObject, Slot, QModelIndex, Qt
 from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplication
@@ -15,6 +17,7 @@ from models.index_prefs_config_model import IndexPrefsConfigModel
 from models.latex_command_registry_model import LatexCommandRegistryModel
 from models.theme_config_model import ThemeConfigModel
 from models.entry_modifier_model import EntryModifierModel
+from models.name_inverter import NameInverter
 
 from controllers.index_tree_controller import IndexTreeController
 from controllers.macro_editing_controller import MacroEditingController
@@ -34,17 +37,22 @@ from views.advanced_search_window import AdvancedSearchWindow
 class AppPipelineController(QObject):
     def __init__(self, window, prefs_model, backup_manager, doc_controller,  
                  lifecycle_controller, scope_controller, session_logger,
-                 worker=None): 
+                 name_inverter: Optional[NameInverter] = None, worker=None): 
         super().__init__()
         self.window = window
         self.prefs = prefs_model
         self.backup_manager = backup_manager
         self.doc_io = doc_controller
-        # self.idx_ctrl = index_controller
         self.lc_ctrl = lifecycle_controller
         self.scope_ctrl = scope_controller
         self.session_logger = session_logger
+        # Name inversion subsystem (may be None)
+        self.name_inverter = name_inverter
         self.worker = worker  
+
+        # Executor for background VIAF lookups
+        self._executor = ThreadPoolExecutor(max_workers=2)
+
         self._tree_modified = False
         self._load_thread = None
         self._search_window = None
@@ -597,6 +605,32 @@ class AppPipelineController(QObject):
             print(f"SHUTDOWN CRITICAL FAILURE: {shutdown_err}. Executing hard exit bypass.")
             self._force_application_exit()
 
+    def invert_name(self, name: str, locale: Optional[str] = None, prefer_authority: bool = True) -> str:
+        """Synchronous wrapper — safe for non-UI background work or unit tests."""
+        if self.name_inverter:
+            return self.name_inverter.invert(name, locale=locale, prefer_authority=prefer_authority)
+        # conservative fallback (no VIAF)
+        from models.name_inverter import NameInverter as _NI
+        return _NI(viaf_enabled=False).invert(name, locale=locale, prefer_authority=False)
+
+    def invert_name_async(self, name: str, callback: Callable[[str], None],
+                          locale: Optional[str] = None, prefer_authority: bool = True) -> None:
+        """
+        Run inversion (including VIAF) off the UI thread.
+        `callback` will be invoked with the inverted string; ensure it updates UI on the main thread.
+        """
+        if not self.name_inverter:
+            callback(self.invert_name(name, locale=locale, prefer_authority=False))
+            return
+
+        future = self._executor.submit(self.name_inverter.invert, name, locale, prefer_authority)
+        def _done(fut):
+            try:
+                callback(fut.result())
+            except Exception:
+                callback(name)
+        future.add_done_callback(_done)
+
     def safely_terminate_application_lifecycle(self) -> None:
         """Ensures background worker threads are fully closed out before shutdown."""
         if self._load_thread and isValid(self._load_thread):
@@ -626,6 +660,18 @@ class AppPipelineController(QObject):
             self.window.window_close_requested.disconnect(self.coordinate_application_shutdown)
         except Exception:
             pass
+
+        try:
+            if self.name_inverter:
+                self.name_inverter.close()
+        except Exception:
+            pass
+
+        try:
+            self._executor.shutdown(wait=False)
+        except Exception:
+            pass 
+
         self.window.close()
         QApplication.quit()  # ensures the event loop actually exits
 
