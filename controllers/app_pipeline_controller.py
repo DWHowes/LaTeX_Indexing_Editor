@@ -33,13 +33,15 @@ from views.editor_tab import EditorTab
 from views.index_tree_view import IndexTreeView
 from views.project_sidebar_view import ProjectSidebarView
 from views.advanced_search_window import AdvancedSearchWindow
+from views.name_inversion_dialog import NameInversionDialog
 
 class AppPipelineController(QObject):
     name_inversion_completed = Signal(QModelIndex, str)
     
     def __init__(self, window, prefs_model, backup_manager, doc_controller,  
                  lifecycle_controller, scope_controller, session_logger,
-                 name_inverter: Optional[NameInverter] = None, worker=None): 
+                 name_inverter = None, name_suggestion_engine = None, 
+                 worker=None): 
         super().__init__()
         self.window = window
         self.prefs = prefs_model
@@ -48,8 +50,8 @@ class AppPipelineController(QObject):
         self.lc_ctrl = lifecycle_controller
         self.scope_ctrl = scope_controller
         self.session_logger = session_logger
-        # Name inversion subsystem (may be None)
         self.name_inverter = name_inverter
+        self.name_suggestion_engine = name_suggestion_engine
         self.worker = worker  
 
         # Executor for background VIAF lookups
@@ -221,28 +223,44 @@ class AppPipelineController(QObject):
         if not target_index or not target_index.isValid():
             return
 
-        display_text = str(target_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
-        if not display_text:
+        source_name = str(target_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        if not source_name:
             return
 
-        self.invert_name_async(
-            display_text,
-            lambda inverted: self.name_inversion_completed.emit(target_index, inverted),
-            locale=None,
-            prefer_authority=True
-        )
+        inversion_result = self.name_inverter.invert(source_name, locale=None, prefer_authority=True)
 
-    @Slot(QModelIndex, str)
-    def _apply_inverted_name(self, target_index: QModelIndex, inverted_value: str):
-        if not target_index or not target_index.isValid():
+        dialog = NameInversionDialog(
+            original_name=source_name,
+            authority_value=inversion_result.authority_term or "",
+            rule_value=inversion_result.rule_suggestion or inversion_result.display_value,
+            parent=self.window
+        )
+        self._active_dialog = dialog
+
+        def on_accepted():
+            self._apply_inverted_name(target_index, dialog.result_value())
+
+        dialog.accepted.connect(on_accepted)
+        dialog.rejected.connect(lambda: setattr(self, "_active_dialog", None))
+        dialog.show()
+
+        if self.name_suggestion_engine:
+            future = self._executor.submit(self.name_suggestion_engine.suggest, source_name, None)
+            future.add_done_callback(
+                lambda fut: dialog.model_suggestion_ready.emit(fut.result() or "")
+            )
+
+    def _apply_inverted_name(self, target_index: QModelIndex, inverted_text: str):
+        if not target_index.isValid() or not inverted_text:
             return
 
         model = target_index.model()
         if model:
-            model.setData(target_index, inverted_value, Qt.ItemDataRole.EditRole)
-            self.window.status_bar.showMessage("Name inversion applied.", 2000)
+            model.setData(target_index, inverted_text, Qt.ItemDataRole.EditRole)
+            self.window.status_bar.showMessage("Name inversion applied.", 2500)
             self._tree_modified = True
-            
+            self._active_dialog = None
+
     @Slot(int)
     def _rewire_undo_redo_signals(self, index: int) -> None:
         for i in range(self.window.tabs.count()):
