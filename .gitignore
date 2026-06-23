@@ -3,6 +3,7 @@
 .session_logs
 .session_backups
 __pycache__
+data
 documentation
 tests
 *.txt
