@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional, Callable
 from concurrent.futures import ThreadPoolExecutor
 
-from PySide6.QtCore import QObject, Slot, QModelIndex, Qt
+from PySide6.QtCore import QObject, Slot, QModelIndex, Qt, Signal
 from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplication
 from shiboken6 import isValid
 
@@ -35,6 +35,8 @@ from views.project_sidebar_view import ProjectSidebarView
 from views.advanced_search_window import AdvancedSearchWindow
 
 class AppPipelineController(QObject):
+    name_inversion_completed = Signal(QModelIndex, str)
+    
     def __init__(self, window, prefs_model, backup_manager, doc_controller,  
                  lifecycle_controller, scope_controller, session_logger,
                  name_inverter: Optional[NameInverter] = None, worker=None): 
@@ -52,6 +54,8 @@ class AppPipelineController(QObject):
 
         # Executor for background VIAF lookups
         self._executor = ThreadPoolExecutor(max_workers=2)
+
+        self.name_inversion_completed.connect(self._apply_inverted_name, Qt.ConnectionType.QueuedConnection)
 
         self._tree_modified = False
         self._load_thread = None
@@ -194,6 +198,7 @@ class AppPipelineController(QObject):
         if self.idx_ctrl:
             self._index_context_manager.add_subheading_triggered.connect(self.idx_ctrl.handle_add_subheading_slot)
             self._index_context_manager.delete_term_triggered.connect(self._handle_index_deletion_request)
+            self._index_context_manager.invert_name_triggered.connect(self._handle_index_name_inversion_request)            
             self.idx_ctrl.tree_population_requested.connect(self.index_tree_widget.populate_hierarchy_tree)
 
         self.macro_editing_ctrl.state_dirty_flag_raised.connect(self._handle_macro_workspace_mutation)
@@ -211,6 +216,33 @@ class AppPipelineController(QObject):
         is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
         self.window.tool_bar.refresh_theme_presentation(is_dark)
 
+    @Slot(QModelIndex)
+    def _handle_index_name_inversion_request(self, target_index: QModelIndex):
+        if not target_index or not target_index.isValid():
+            return
+
+        display_text = str(target_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        if not display_text:
+            return
+
+        self.invert_name_async(
+            display_text,
+            lambda inverted: self.name_inversion_completed.emit(target_index, inverted),
+            locale=None,
+            prefer_authority=True
+        )
+
+    @Slot(QModelIndex, str)
+    def _apply_inverted_name(self, target_index: QModelIndex, inverted_value: str):
+        if not target_index or not target_index.isValid():
+            return
+
+        model = target_index.model()
+        if model:
+            model.setData(target_index, inverted_value, Qt.ItemDataRole.EditRole)
+            self.window.status_bar.showMessage("Name inversion applied.", 2000)
+            self._tree_modified = True
+            
     @Slot(int)
     def _rewire_undo_redo_signals(self, index: int) -> None:
         for i in range(self.window.tabs.count()):

@@ -53,7 +53,6 @@ class BaseContextMenuManager(QObject):
     def populate_menu_actions(self, menu_container: QMenu, proxy_index: QModelIndex):
         raise NotImplementedError("Subclasses must implement populate_menu_actions.")
 
-
 class IndexTreeContextMenuManager(BaseContextMenuManager):
     """
     Subclass: Index Term Visual Context Actions.
@@ -61,28 +60,38 @@ class IndexTreeContextMenuManager(BaseContextMenuManager):
     """
     add_subheading_triggered = Signal(QModelIndex)
     delete_term_triggered = Signal(QModelIndex)
+    invert_name_triggered = Signal(QModelIndex)
 
     def populate_menu_actions(self, menu_container: QMenu, proxy_index: QModelIndex):
         if proxy_index.column() != 0:
             proxy_index = proxy_index.siblingAtColumn(0)
 
-        # Safely pull the visual-only name string from standard DisplayRole
         display_text = str(proxy_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
 
         add_subhead_action = QAction(f"Add Subheading to '{display_text}'", menu_container)
+        invert_name_action = QAction(f"Invert Name for '{display_text}'", menu_container)
         delete_action = QAction(f"Delete Term '{display_text}'", menu_container)
 
-        # Store the target index directly inside the QAction metadata block
         add_subhead_action.setData(proxy_index)
+        invert_name_action.setData(proxy_index)
         delete_action.setData(proxy_index)
 
         add_subhead_action.triggered.connect(self._on_add_subheading_clicked)
+        invert_name_action.triggered.connect(self._on_invert_name_clicked)
         delete_action.triggered.connect(self._on_delete_clicked)
 
         menu_container.addAction(add_subhead_action)
+        menu_container.addAction(invert_name_action)
         menu_container.addSeparator()
         menu_container.addAction(delete_action)
 
+    @Slot()
+    def _on_invert_name_clicked(self):
+        action = self.sender()
+        if action and isinstance(action, QAction):
+            target_index = action.data()
+            if isinstance(target_index, QModelIndex) and target_index.isValid():
+                self.invert_name_triggered.emit(target_index)
     @Slot()
     def _on_add_subheading_clicked(self):
         action = self.sender()
