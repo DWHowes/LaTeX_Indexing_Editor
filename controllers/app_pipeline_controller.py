@@ -40,8 +40,7 @@ class AppPipelineController(QObject):
     
     def __init__(self, window, prefs_model, backup_manager, doc_controller,  
                  lifecycle_controller, scope_controller, session_logger,
-                 name_inverter = None, name_suggestion_engine = None, 
-                 worker=None): 
+                 name_inverter = None, worker=None): 
         super().__init__()
         self.window = window
         self.prefs = prefs_model
@@ -51,7 +50,6 @@ class AppPipelineController(QObject):
         self.scope_ctrl = scope_controller
         self.session_logger = session_logger
         self.name_inverter = name_inverter
-        self.name_suggestion_engine = name_suggestion_engine
         self.worker = worker  
 
         # Executor for background VIAF lookups
@@ -243,12 +241,6 @@ class AppPipelineController(QObject):
         dialog.accepted.connect(on_accepted)
         dialog.rejected.connect(lambda: setattr(self, "_active_dialog", None))
         dialog.show()
-
-        if self.name_suggestion_engine:
-            future = self._executor.submit(self.name_suggestion_engine.suggest, source_name, None)
-            future.add_done_callback(
-                lambda fut: dialog.model_suggestion_ready.emit(fut.result() or "")
-            )
 
     def _apply_inverted_name(self, target_index: QModelIndex, inverted_text: str):
         if not target_index.isValid() or not inverted_text:

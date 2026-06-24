@@ -8,7 +8,6 @@ from models.preferences_persistence import PreferencesPersistence
 from models.text_sanitizer import TextSanitizer
 from models.session_backup_manager import SessionBackupManager
 from models.name_inverter import NameInverter
-from models.name_suggestion_engine import NameSuggestionEngine
 
 # Import all core operational controllers
 from controllers.app_pipeline_controller import AppPipelineController
@@ -51,7 +50,6 @@ if __name__ == "__main__":
 
         viaf_cache = os.path.join(os.path.dirname(__file__), "data", "viaf_cache.db")
         name_inverter = NameInverter(viaf_cache_path=viaf_cache, viaf_enabled=True)
-        name_suggestion_engine = NameSuggestionEngine(model_name="google/flan-t5-small")
 
         # Initialize the main visual window shell
         editor_window = LatexEditor()
@@ -92,8 +90,7 @@ if __name__ == "__main__":
             lifecycle_controller=lifecycle_controller,
             scope_controller=scope_controller,
             session_logger=logger,
-            name_inverter=name_inverter,
-            name_suggestion_engine=name_suggestion_engine
+            name_inverter=name_inverter
         )
 
         geometry = preferences_payload.get("geometry")
