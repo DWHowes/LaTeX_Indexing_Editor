@@ -22,16 +22,13 @@ class BaseContextMenuManager(QObject):
 
     @Slot(QPoint)
     def _intercept_context_request(self, pixel_position):
-        """Maps raw pixel vectors to specific row positions and renders the menu shell."""
         if not self.tree_view:
             return
 
-        viewport_pos = self.tree_view.viewport().mapFrom(self.tree_view, pixel_position)
-        proxy_index = self.tree_view.indexAt(viewport_pos)
-        
+        proxy_index = self.tree_view.indexAt(pixel_position)
         if not proxy_index.isValid():
             return
-
+            
         context_menu = QMenu(self.tree_view)
         
         try:
@@ -47,7 +44,7 @@ class BaseContextMenuManager(QObject):
         self.populate_menu_actions(context_menu, proxy_index)
 
         if not context_menu.isEmpty():
-            global_pos = self.tree_view.viewport().mapToGlobal(viewport_pos)
+            global_pos = self.tree_view.viewport().mapToGlobal(pixel_position)
             context_menu.exec(global_pos)
 
     def populate_menu_actions(self, menu_container: QMenu, proxy_index: QModelIndex):
