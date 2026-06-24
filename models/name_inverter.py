@@ -17,6 +17,8 @@ WIDOW_MARKERS = {"viuda", "vda."}
 SPANISH_PARTICLE_ARTICLES = {"la", "las", "los"}
 SPANISH_PREPOSITIONAL_PARTICLES = {"de", "del"}
 
+PORTUGUESE_FILIAL_MARKERS = {"filho", "filha", "junior", "júnior"}
+
 CJK_RANGES = [
     ("\u4e00", "\u9fff"),
     ("\u3040", "\u30ff"),
@@ -101,6 +103,11 @@ class NameInverter:
             return name
 
         lower_tokens = [token.lower().strip(".,") for token in tokens]
+        
+        if len(tokens) >= 3 and lower_tokens[-1] in PORTUGUESE_FILIAL_MARKERS:
+            family = " ".join(tokens[-2:])
+            given = " ".join(tokens[:-2])
+            return f"{family}, {given}".strip(", ")
 
         def _last_spanish_connector():
             for idx in range(len(tokens) - 1):
