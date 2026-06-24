@@ -1,7 +1,7 @@
 import os
 import re
 import json
-import shelve
+import sqlite3
 import requests
 import xml.etree.ElementTree as ET
 
@@ -47,20 +47,26 @@ class NameInverter:
     def __init__(self, viaf_cache_path: Optional[str] = None, viaf_enabled: bool = True):
         self.viaf_enabled = viaf_enabled
         self._shelf = None
-        if self.viaf_enabled and viaf_cache_path:
+        if viaf_enabled and viaf_cache_path:
             os.makedirs(os.path.dirname(viaf_cache_path), exist_ok=True)
             try:
-                self._shelf = shelve.open(viaf_cache_path, writeback=False)
-            except Exception:
-                self._shelf = None
+                self._conn = sqlite3.connect(viaf_cache_path, check_same_thread=False)
+                self._conn.execute(
+                    "CREATE TABLE IF NOT EXISTS cache "
+                    "(key TEXT PRIMARY KEY, value TEXT)"
+                )
+                self._conn.commit()
+            except Exception as exc:
+                print(f"VIAF cache DB init failed: {exc}")
+                self._conn = None
 
     def close(self):
-        if self._shelf:
+        if self._conn:
             try:
-                self._shelf.close()
+                self._conn.close()
             except Exception:
                 pass
-            self._shelf = None
+            self._conn = None
 
     def __del__(self):
         self.close()
@@ -568,26 +574,31 @@ class NameInverter:
         if prefer_authority:
             # Check shelf cache for the final resolved heading
             cache_key = f"resolved:{name}"
-            if self._shelf is not None:
+            if self._conn is not None:
                 try:
-                    cached = self._shelf.get(cache_key)
-                    if cached:
-                        authority_term = json.loads(cached)
+                    row = self._conn.execute(
+                        "SELECT value FROM cache WHERE key = ?", (cache_key,)
+                    ).fetchone()
+                    if row is not None:
+                        authority_term = row[0] or None
                 except Exception:
                     pass
-
             if authority_term is None:
                 viaf_entry = self._viaf_autosuggest(name)
                 if viaf_entry:
                     authority_term = self.fetch_authority_from_autosuggest_entry(viaf_entry)
 
                 # Cache the resolved heading (or a sentinel so we don't retry failed lookups)
-                if self._shelf is not None:
+                if self._conn is not None:
                     try:
-                        self._shelf[cache_key] = json.dumps(authority_term or "")
+                        self._conn.execute(
+                            "INSERT OR REPLACE INTO cache VALUES (?, ?)",
+                            (cache_key, authority_term or "")
+                        )
+                        self._conn.commit()
                     except Exception:
                         pass
-
+                    
         if authority_term:
             return NameInversionResult(
                 display_value=authority_term,
