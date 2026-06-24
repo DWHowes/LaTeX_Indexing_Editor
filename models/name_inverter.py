@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict, List
 
 _LC_DATE_QUALIFIER = re.compile(
-    r",\s*\d{4}(?:-\d{4})?\.?$"
+    r",\s*\d{4}-?\d*\.?$"
 )
 
 PARTICLES = {
@@ -420,6 +420,16 @@ class NameInverter:
 
         return entry.get("term") or entry.get("name") or None
 
+    def _strip_lc_date_qualifier(self, heading: str) -> str:
+        """Remove trailing LC date qualifiers from an authority heading.
+
+        'Churchill, Winston, 1874-1965'  → 'Churchill, Winston'
+        'Jones, John Paul, 1946-'        → 'Jones, John Paul'
+        'Aristotle'                      → 'Aristotle'
+        'Smith, J. D.'                   → 'Smith, J. D.'
+        """
+        return _LC_DATE_QUALIFIER.sub("", heading).rstrip(", ")
+
     def _fetch_lc_authority_heading(self, lc_id: str) -> Optional[str]:
         """Query the LC Linked Data Service for a single LC NAF control number.
 
@@ -484,17 +494,7 @@ class NameInverter:
             # Strip trailing MARC punctuation ("Churchill, Winston," → "Churchill, Winston")
             return cleaned.rstrip(",.")
         return None
-
-    def _strip_lc_date_qualifier(self, heading: str) -> str:
-        """Remove trailing LC date qualifiers from an authority heading.
-
-        'Churchill, Winston, 1874-1965'  → 'Churchill, Winston'
-        'Smith, John, 1920-'             → 'Smith, John'
-        'Aristotle'                      → 'Aristotle'
-        'Smith, J. D.'                   → 'Smith, J. D.'  (unchanged — no year)
-        """
-        return _LC_DATE_QUALIFIER.sub("", heading).rstrip(", ")
-    
+   
     def _fast_invert(self, name: str, locale: Optional[str] = None) -> str:
         if is_cjk(name) or (locale and locale.startswith(("zh", "ja", "ko"))):
             return name
@@ -583,11 +583,12 @@ class NameInverter:
                         authority_term = row[0] or None
                 except Exception:
                     pass
-            if authority_term is None:
+            if authority_term is not None:
                 viaf_entry = self._viaf_autosuggest(name)
                 if viaf_entry:
                     authority_term = self.fetch_authority_from_autosuggest_entry(viaf_entry)
 
+                print(f"Caching resolved heading: {authority_term!r}")
                 # Cache the resolved heading (or a sentinel so we don't retry failed lookups)
                 if self._conn is not None:
                     try:
@@ -598,7 +599,7 @@ class NameInverter:
                         self._conn.commit()
                     except Exception:
                         pass
-                    
+
         if authority_term:
             return NameInversionResult(
                 display_value=authority_term,
