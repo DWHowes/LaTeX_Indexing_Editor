@@ -51,7 +51,7 @@ if __name__ == "__main__":
 
         viaf_cache = os.path.join(os.path.dirname(__file__), "data", "viaf_cache.db")
         name_inverter = NameInverter(viaf_cache_path=viaf_cache, viaf_enabled=True)
-        name_suggestion_engine = NameSuggestionEngine(model_name="Davlan/xlm-roberta-base-ner-hrl")
+        name_suggestion_engine = NameSuggestionEngine(model_name="google/flan-t5-small")
 
         # Initialize the main visual window shell
         editor_window = LatexEditor()
