@@ -13,6 +13,10 @@ PARTICLES = {
     "al", "ibn", "bin", "del", "della", "du"
 }
 
+WIDOW_MARKERS = {"viuda", "vda."}
+SPANISH_PARTICLE_ARTICLES = {"la", "las", "los"}
+SPANISH_PREPOSITIONAL_PARTICLES = {"de", "del"}
+
 CJK_RANGES = [
     ("\u4e00", "\u9fff"),
     ("\u3040", "\u30ff"),
@@ -96,10 +100,52 @@ class NameInverter:
         if len(tokens) <= 1:
             return name
 
-        if (locale and locale.startswith(("es", "pt"))) or (len(tokens) >= 3 and locale is None):
-            family = " ".join(tokens[-2:]) if len(tokens) >= 3 else tokens[-1]
-            given = " ".join(tokens[:-len(family.split())])
-            return f"{family}, {given}".strip(", ")
+        lower_tokens = [token.lower().strip(".,") for token in tokens]
+
+        def _last_spanish_connector():
+            for idx in range(len(tokens) - 1):
+                if lower_tokens[idx] == "del":
+                    return idx, 1
+                if lower_tokens[idx] == "de":
+                    if idx + 1 < len(tokens) and lower_tokens[idx + 1] in SPANISH_PARTICLE_ARTICLES:
+                        return idx, 2
+                    return idx, 1
+            return None, 0
+
+        connector_index, connector_length = _last_spanish_connector()
+        if connector_index is not None and (
+            locale and locale.startswith(("es", "pt"))
+            or "de" in lower_tokens
+            or "del" in lower_tokens
+        ):
+            if connector_index >= 2 and lower_tokens[connector_index - 1] in WIDOW_MARKERS:
+                family_start = connector_index - 2
+                family = " ".join(tokens[family_start:])
+                given = " ".join(tokens[:family_start])
+                return f"{family}, {given}".strip(", ")
+
+            prefix_len = connector_index
+            suffix_len = len(tokens) - (connector_index + connector_length)
+
+            if connector_length == 2 and prefix_len <= 2:
+                family = " ".join(tokens[connector_index + connector_length:])
+                given = " ".join(tokens[: connector_index + connector_length])
+                return f"{family}, {given}".strip(", ")
+
+            if lower_tokens[connector_index] == "del" and prefix_len <= 2:
+                family = " ".join(tokens[connector_index + connector_length:])
+                given = " ".join(tokens[: connector_index + connector_length])
+                return f"{family}, {given}".strip(", ")
+
+            if lower_tokens[connector_index] == "de" and prefix_len == 1 and suffix_len == 1:
+                family = " ".join(tokens[connector_index + connector_length:])
+                given = " ".join(tokens[: connector_index + connector_length])
+                return f"{family}, {given}".strip(", ")
+
+            if prefix_len >= 3:
+                family = " ".join(tokens[1:])
+                given = tokens[0]
+                return f"{family}, {given}".strip(", ")
 
         i = len(tokens) - 1
         while i - 1 >= 0 and tokens[i - 1].lower().strip(".,") in PARTICLES:
