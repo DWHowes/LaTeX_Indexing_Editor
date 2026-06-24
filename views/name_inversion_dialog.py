@@ -22,10 +22,21 @@ class NameInversionDialog(QDialog):
         grid = QGridLayout()
         grid.addWidget(QLabel("Original name:"), 0, 0)
         grid.addWidget(QLabel(original_name), 0, 1)
+
         grid.addWidget(QLabel("Authority / VIAF:"), 1, 0)
-        grid.addWidget(QLabel(authority_value or "—"), 1, 1)
+        authority_label = QLabel(authority_value or "—")
+        if authority_value:
+            authority_label.setCursor(Qt.CursorShape.PointingHandCursor)
+            authority_label.setToolTip("Click to use this value")
+            authority_label.mousePressEvent = lambda _: self.override_edit.setText(authority_value)
+        grid.addWidget(authority_label, 1, 1)
+
         grid.addWidget(QLabel("Rule-based fallback:"), 2, 0)
-        grid.addWidget(QLabel(rule_value), 2, 1)
+        rule_label = QLabel(rule_value)
+        rule_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        rule_label.setToolTip("Click to use this value")
+        rule_label.mousePressEvent = lambda _: self.override_edit.setText(rule_value)
+        grid.addWidget(rule_label, 2, 1)
 
         grid.addWidget(QLabel("Final value:"), 3, 0)
         self.override_edit = QLineEdit(self._result_value, self)
