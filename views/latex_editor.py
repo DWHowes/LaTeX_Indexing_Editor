@@ -2,6 +2,8 @@ from PySide6.QtWidgets import QMainWindow, QSplitter, QTabWidget, QSizePolicy, Q
 from PySide6.QtCore import Signal, QSize, Qt, Slot
 from PySide6.QtGui import QGuiApplication
 
+from controllers.latex_index_controller import LatexIndexController
+
 from views.main_menu_bar import MainMenuBar
 from views.main_tool_bar import MainToolBar
 from views.main_status_bar import MainStatusBar
@@ -49,6 +51,7 @@ class LatexEditor(QMainWindow):
         
         # Initializing latex_index_window here instead of the controller as a layout convenience.
         self.latex_index_window = LatexIndexWindow("LaTeX Index", self, self.tabs)
+        self.latex_index_controller = LatexIndexController(self.latex_index_window, self.tabs)
         self.right_splitter.addWidget(self.latex_index_window)
         self.latex_index_window.hide()
 
