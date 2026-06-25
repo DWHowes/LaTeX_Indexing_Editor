@@ -513,7 +513,64 @@ class NameInverter:
         return None
    
     def _fast_invert(self, name: str, locale: Optional[str] = None) -> str:
-        # ── Already inverted ──────────────────────────────────────────────────────
+        """Invert a natural-order personal name to indexing form without network I/O.
+
+        Returns the name in ``Surname, Given`` form using a cascade of structural
+        rules.  The result is used as a fallback when VIAF/LC authority lookup is
+        disabled or returns nothing, and as the ``rule_suggestion`` value shown
+        alongside the authority term in ``NameInversionDialog``.
+
+        Processing order
+        ----------------
+        1. **Already-inverted guard** — if the name contains a comma it is returned
+        unchanged to prevent double-inversion.
+        2. **CJK passthrough** — names containing CJK characters, or whose locale
+        starts with ``zh``, ``ja``, or ``ko``, are returned unchanged because
+        family-name-first order is already correct.
+        3. **Single-token passthrough** — mononyms and single-word inputs are
+        returned unchanged; authority lookup handles these via VIAF.
+        4. **Generational suffix stripping** — a trailing token matching
+        ``GENERATIONAL_SUFFIXES`` (``Jr.``, ``Sr.``, ``III``, ``2nd``, etc.)
+        is removed before inversion and reappended after:
+        ``John Smith Jr.`` → ``Smith, John, Jr.``
+        5. **Hyphenated Arabic prefix** — if the final token begins with a
+        hyphenated prefix (``al-``, ``el-``, ``abu-``, ``umm-``, ``ibn-``,
+        ``bint-``) it is treated as the surname regardless of position:
+        ``Abdel Fattah el-Sisi`` → ``el-Sisi, Abdel Fattah``.
+        6. **Mac/Mc two-token surname** — when ``Mac`` or ``Mc`` appears as a
+        standalone token immediately before a capitalised component, the pair
+        is combined as the family name:
+        ``John Mac Donald`` → ``Mac Donald, John``.
+        Single-token forms (``MacDougall``) fall through to standard logic.
+        7. **Portuguese filial markers** — a trailing token in
+        ``PORTUGUESE_FILIAL_MARKERS`` (``filho``, ``filha``, ``junior``, etc.)
+        causes the last two tokens to be treated as the family name:
+        ``João Silva Filho`` → ``Silva Filho, João``.
+        8. **Spanish/Portuguese connectors** — detects ``de``, ``del``, and
+        ``de la / de los / de las`` constructions and applies heuristics based
+        on prefix length, suffix length, widow markers (``viuda``, ``vda.``),
+        and locale to determine the family-name boundary.
+        9. **Standard particle walk** — walks backwards from the last token,
+        absorbing any space-separated particles in ``PARTICLES`` (``van``,
+        ``von``, ``de``, ``al``, etc.) into the family name:
+        ``Ludwig van Beethoven`` → ``van Beethoven, Ludwig``.
+
+        Parameters
+        ----------
+        name:
+            Natural-order personal name, e.g. ``"Winston Churchill"`` or
+            ``"Gabriel García Márquez"``.
+        locale:
+            BCP 47 locale hint (e.g. ``"es"``, ``"pt"``, ``"ar"``).  Used to
+            activate locale-sensitive branches; may be ``None``.
+
+        Returns
+        -------
+        str
+            Inverted name in indexing form, or the original string if no
+            inversion rule applies.
+        """
+            # ── Already inverted ──────────────────────────────────────────────────────
         if "," in name:
             return name
 
