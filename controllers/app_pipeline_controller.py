@@ -237,11 +237,13 @@ class AppPipelineController(QObject):
 
         def on_accepted():
             final_value = dialog.result_value()
+            reason = dialog.correction_reason()
 
             # Cache if the user changed the auto-resolved value
             original_auto = inversion_result.authority_term or inversion_result.rule_suggestion or ""
             if final_value.strip() != original_auto.strip():
-                self.name_inverter.cache_resolved_heading(source_name, final_value)
+                # self.name_inverter.cache_resolved_heading(source_name, final_value)
+                self._name_inverter.cache_resolved_heading(source_name, final_value, reason=reason, user_edited=True)                
 
             self._apply_inverted_name(target_index, final_value)
 

@@ -53,7 +53,10 @@ class NameInverter:
                 self._conn = sqlite3.connect(viaf_cache_path, check_same_thread=False)
                 self._conn.execute(
                     "CREATE TABLE IF NOT EXISTS cache "
-                    "(key TEXT PRIMARY KEY, value TEXT)"
+                    "(key TEXT PRIMARY KEY, value TEXT, " \
+                    "reason TEXT, locale TEXT, " \
+                    "user_edited INTEGER DEFAULT 0, " \
+                    "created_at  TEXT DEFAULT (datetime('now')))"
                 )
                 self._conn.commit()
             except Exception as exc:
@@ -595,7 +598,7 @@ class NameInverter:
                 if self._conn is not None:
                     try:
                         self._conn.execute(
-                            "INSERT OR REPLACE INTO cache VALUES (?, ?)",
+                            "INSERT OR REPLACE INTO cache (key, value) VALUES (?, ?)",
                             (cache_key, authority_term or "")
                         )
                         self._conn.commit()
@@ -617,16 +620,31 @@ class NameInverter:
             used_authority=False,
         )
 
-    def cache_resolved_heading(self, name: str, heading: str) -> None:
+    def cache_resolved_heading(
+        self,
+        name: str,
+        heading: str,
+        reason: Optional[str] = None,
+        locale: Optional[str] = None,
+        user_edited: bool = False,
+    ) -> None:
         """Write a user-confirmed heading to the cache, overwriting any prior entry."""
         if not self._conn or not name or not heading:
             return
         try:
             self._conn.execute(
-                "INSERT OR REPLACE INTO cache VALUES (?, ?)",
-                (f"resolved:{name.strip()}", heading.strip())
+                "INSERT OR REPLACE INTO cache "
+                "(key, value, reason, locale, user_edited) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    f"resolved:{name.strip()}",
+                    heading.strip(),
+                    reason,
+                    locale,
+                    1 if user_edited else 0,
+                )
             )
             self._conn.commit()
-            print(f"User correction cached: {name!r} → {heading!r}")
+            print(f"User correction cached: {name!r} → {heading!r} (reason={reason!r})")
         except Exception as exc:
             print(f"Failed to cache user correction for {name!r}: {exc}")

@@ -1,9 +1,20 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QGridLayout, QLabel, QLineEdit, QVBoxLayout
+    QDialog, QDialogButtonBox, QGridLayout, QLabel, QLineEdit, QVBoxLayout, QComboBox
 )
+from typing import Optional
 
 class NameInversionDialog(QDialog):
+
+    CORRECTION_REASONS = [
+        ("none",        "No correction needed"),
+        ("patronymic",  "Patronymic / single-name culture"),
+        ("particle",    "Particle / article handling (al-, van, de, etc.)"),
+        ("regnal",      "Regnal or mononym (known by one name)"),
+        ("mismatch",    "Wrong person identified"),
+        ("other",       "Other"),
+    ]
+
     def __init__(
         self,
         original_name: str,
@@ -42,6 +53,20 @@ class NameInversionDialog(QDialog):
         self.override_edit = QLineEdit(self._result_value, self)
         grid.addWidget(self.override_edit, 3, 1)
 
+        # Correction reason — only shown when user edits the final value
+        self._reason_row_widgets = []
+        reason_label = QLabel("Correction reason:")
+        self.reason_combo = QComboBox()
+        for code, display in self.CORRECTION_REASONS:
+            self.reason_combo.addItem(display, code)
+        reason_label.setVisible(False)
+        self.reason_combo.setVisible(False)
+        self._reason_row_widgets = [reason_label, self.reason_combo]
+        grid.addWidget(reason_label, 4, 0)
+        grid.addWidget(self.reason_combo, 4, 1)
+
+        self.override_edit.textChanged.connect(self._on_value_changed)
+
         layout.addLayout(grid)
 
         buttons = QDialogButtonBox(
@@ -52,6 +77,16 @@ class NameInversionDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _on_value_changed(self, text: str):
+        is_correction = text.strip() != (self._result_value or "").strip()
+        for w in self._reason_row_widgets:
+            w.setVisible(is_correction)
+
+    def correction_reason(self) -> Optional[str]:
+        if not any(w.isVisible() for w in self._reason_row_widgets):
+            return None
+        return self.reason_combo.currentData()
 
     def result_value(self) -> str:
         return self.override_edit.text().strip()
