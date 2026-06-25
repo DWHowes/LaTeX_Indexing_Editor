@@ -88,8 +88,10 @@ class AppPipelineController(QObject):
         # before binding core structural infrastructure signal maps
         self.initialize_index_subsystem()
 
+        max_existing_id = self.scope_ctrl.get_max_unique_id()
+        starting_id = max_existing_id + 1  # 1 for new project, next available for existing
         # Instantiate isolated macro calculation tracking engines
-        self.macro_id_generator = MacroIDGenerator(starting_id=1001)
+        self.macro_id_generator = MacroIDGenerator(starting_id)
 
         self.macro_editing_ctrl = MacroEditingController(
             id_generator_model=self.macro_id_generator,
@@ -524,6 +526,10 @@ class AppPipelineController(QObject):
 
         # Enable menu items that are gated behind an active project context
         self.window.menu_bar.update_menu_item_state(is_enabled=True)
+
+        # Re-seed the ID generator from the actual project data
+        max_existing_id = self.scope_ctrl.get_max_unique_id()
+        self.macro_id_generator.reset(starting_id=max_existing_id + 1)
 
         # Force the finished tree hierarchy to expand fully
         self.index_tree_widget.expandAll()

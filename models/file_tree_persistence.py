@@ -552,4 +552,13 @@ class FileTreePersistence:
         except sqlite3.Error as err:
             print(f"[DB ERROR] update_reference_field failed for ID {entry_id}: {err}")
             return False
-        
+
+    def get_max_unique_id(self) -> int:
+        """Return the highest unique_id_number in the references table, or 0 if empty."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            row = cursor.execute(
+                "SELECT MAX(unique_id_number) FROM project_references"
+            ).fetchone()
+            
+            return row[0] if row and row[0] is not None else 0        

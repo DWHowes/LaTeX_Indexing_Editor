@@ -5,7 +5,7 @@ from PySide6.QtCore import QObject, Signal, Slot, QModelIndex
 
 class ProjectScopeController(QObject):
     """
-    Traffic Router & State Coordinator for Active Workspace Search Scopes.
+    Traffic Router & State Coordinator for Active Workspace.
     """
     # Emitted to tell downstream search/parse engines that the active scope changed
     scope_mutated = Signal()
@@ -121,7 +121,10 @@ class ProjectScopeController(QObject):
 
     def get_persistence_model(self):
         """Public contract exposing the underlying persistence model."""
-        return self.model        
+        return self.model   
+
+    def get_max_unique_id(self) -> int:
+        return self.model.get_max_unique_id()
 
     def prune_index_term(self, full_path_str:str) -> None:
         """Public contract to route pruning requests for index terms."""
