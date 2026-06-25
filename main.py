@@ -48,7 +48,7 @@ if __name__ == "__main__":
         text_sanitizer = TextSanitizer()
         backup_manager = SessionBackupManager()
 
-        viaf_cache = os.path.join(os.path.dirname(__file__), "data", "viaf_cache.db")
+        viaf_cache = os.path.join(os.path.dirname(__file__), "data", "name_cache.db")
         name_inverter = NameInverter(viaf_cache_path=viaf_cache, viaf_enabled=True)
 
         # Initialize the main visual window shell
