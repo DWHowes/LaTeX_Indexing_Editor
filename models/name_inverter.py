@@ -30,6 +30,20 @@ CJK_RANGES = [
     ("\u1100", "\u11ff"),
 ]
 
+GENERATIONAL_SUFFIXES = {
+    "jr", "jr.", "sr", "sr.",
+    "i", "ii", "iii", "iv", "v", "vi",          # Roman numerals to VI
+    "1st", "2nd", "3rd", "4th", "5th",
+}
+
+HYPHENATED_ARABIC_PREFIXES = re.compile(
+    r"^(al|el|abu|umm|ibn|bint)-",
+    re.IGNORECASE,
+)
+
+MAC_MC = re.compile(r"^(Mac|Mc)[A-Z]", re.UNICODE)
+
+
 def is_cjk(text: str) -> bool:
     return any(a <= ch <= b for ch in text for a, b in CJK_RANGES)
 
@@ -499,6 +513,11 @@ class NameInverter:
         return None
    
     def _fast_invert(self, name: str, locale: Optional[str] = None) -> str:
+        # ── Already inverted ──────────────────────────────────────────────────────
+        if "," in name:
+            return name
+
+        # ── CJK passthrough ───────────────────────────────────────────────────────
         if is_cjk(name) or (locale and locale.startswith(("zh", "ja", "ko"))):
             return name
 
@@ -508,11 +527,49 @@ class NameInverter:
 
         lower_tokens = [token.lower().strip(".,") for token in tokens]
 
+        # ── Strip generational suffix ─────────────────────────────────────────────
+        suffix = ""
+        if lower_tokens[-1] in GENERATIONAL_SUFFIXES:
+            suffix = tokens[-1]
+            tokens = tokens[:-1]
+            lower_tokens = lower_tokens[:-1]
+            if len(tokens) <= 1:
+                # e.g. "Cher Jr." — mononym with suffix; leave as-is after stripping
+                result = tokens[0] if tokens else name
+                return f"{result}, {suffix}" if suffix else result
+
+        # ── Hyphenated Arabic prefix (al-Rashid, el-Sisi, abu-Bakr) ─────────────
+        # Treat the final token as the surname if it carries a hyphenated prefix,
+        # regardless of position.
+        if HYPHENATED_ARABIC_PREFIXES.match(tokens[-1]):
+            family = tokens[-1]
+            given  = " ".join(tokens[:-1])
+            result = f"{family}, {given}".strip(", ")
+            return f"{result}, {suffix}" if suffix else result
+
+        # ── Mac/Mc compound surname (two trailing tokens) ─────────────────────────
+        # "Duncan MacDougall" → "MacDougall, Duncan"
+        # "John Mac Donald"   → "Mac Donald, John"  (space form, two tokens)
+        if len(tokens) >= 3:
+            if MAC_MC.match(tokens[-1]):
+                # Single-token Mac/Mc: treat last token as family name (falls through
+                # to standard logic below — no special case needed).
+                pass
+            elif MAC_MC.match(tokens[-2]) and tokens[-2].lower() in ("mac", "mc"):
+                # Two-token form: "Mac Donald" — combine last two as family name
+                family = " ".join(tokens[-2:])
+                given  = " ".join(tokens[:-2])
+                result = f"{family}, {given}".strip(", ")
+                return f"{result}, {suffix}" if suffix else result
+
+        # ── Portuguese filial markers ─────────────────────────────────────────────
         if len(tokens) >= 3 and lower_tokens[-1] in PORTUGUESE_FILIAL_MARKERS:
             family = " ".join(tokens[-2:])
-            given = " ".join(tokens[:-2])
-            return f"{family}, {given}".strip(", ")
+            given  = " ".join(tokens[:-2])
+            result = f"{family}, {given}".strip(", ")
+            return f"{result}, {suffix}" if suffix else result
 
+        # ── Spanish/Portuguese connectors ─────────────────────────────────────────
         def _last_spanish_connector():
             for idx in range(len(tokens) - 1):
                 if lower_tokens[idx] == "del":
@@ -532,39 +589,46 @@ class NameInverter:
             if connector_index >= 2 and lower_tokens[connector_index - 1] in WIDOW_MARKERS:
                 family_start = connector_index - 2
                 family = " ".join(tokens[family_start:])
-                given = " ".join(tokens[:family_start])
-                return f"{family}, {given}".strip(", ")
+                given  = " ".join(tokens[:family_start])
+                result = f"{family}, {given}".strip(", ")
+                return f"{result}, {suffix}" if suffix else result
 
-            prefix_len = connector_index
-            suffix_len = len(tokens) - (connector_index + connector_length)
+            prefix_len  = connector_index
+            suffix_len  = len(tokens) - (connector_index + connector_length)
 
             if connector_length == 2 and prefix_len <= 2:
                 family = " ".join(tokens[connector_index + connector_length:])
-                given = " ".join(tokens[: connector_index + connector_length])
-                return f"{family}, {given}".strip(", ")
+                given  = " ".join(tokens[: connector_index + connector_length])
+                result = f"{family}, {given}".strip(", ")
+                return f"{result}, {suffix}" if suffix else result
 
             if lower_tokens[connector_index] == "del" and prefix_len <= 2:
                 family = " ".join(tokens[connector_index + connector_length:])
-                given = " ".join(tokens[: connector_index + connector_length])
-                return f"{family}, {given}".strip(", ")
+                given  = " ".join(tokens[: connector_index + connector_length])
+                result = f"{result}, {suffix}" if suffix else result
+                return f"{result}, {suffix}" if suffix else result
 
             if lower_tokens[connector_index] == "de" and prefix_len == 1 and suffix_len == 1:
                 family = " ".join(tokens[connector_index + connector_length:])
-                given = " ".join(tokens[: connector_index + connector_length])
-                return f"{family}, {given}".strip(", ")
+                given  = " ".join(tokens[: connector_index + connector_length])
+                result = f"{family}, {given}".strip(", ")
+                return f"{result}, {suffix}" if suffix else result
 
             if prefix_len >= 3:
                 family = " ".join(tokens[1:])
-                given = tokens[0]
-                return f"{family}, {given}".strip(", ")
+                given  = tokens[0]
+                result = f"{family}, {given}".strip(", ")
+                return f"{result}, {suffix}" if suffix else result
 
+        # ── Standard particle walk (van, von, de, etc.) ───────────────────────────
         i = len(tokens) - 1
         while i - 1 >= 0 and tokens[i - 1].lower().strip(".,") in PARTICLES:
             i -= 1
 
         family = " ".join(tokens[i:])
-        given = " ".join(tokens[:i])
-        return f"{family}, {given}".strip(", ")
+        given  = " ".join(tokens[:i])
+        result = f"{family}, {given}".strip(", ")
+        return f"{result}, {suffix}" if suffix else result
 
     def invert(self, name: str, locale: Optional[str] = None, prefer_authority: bool = True) -> NameInversionResult:
         if not name:
