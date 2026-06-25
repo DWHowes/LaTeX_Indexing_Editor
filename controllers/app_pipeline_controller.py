@@ -236,7 +236,14 @@ class AppPipelineController(QObject):
         self._active_dialog = dialog
 
         def on_accepted():
-            self._apply_inverted_name(target_index, dialog.result_value())
+            final_value = dialog.result_value()
+
+            # Cache if the user changed the auto-resolved value
+            original_auto = inversion_result.authority_term or inversion_result.rule_suggestion or ""
+            if final_value.strip() != original_auto.strip():
+                self.name_inverter.cache_resolved_heading(source_name, final_value)
+
+            self._apply_inverted_name(target_index, final_value)
 
         dialog.accepted.connect(on_accepted)
         dialog.rejected.connect(lambda: setattr(self, "_active_dialog", None))

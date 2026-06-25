@@ -572,8 +572,9 @@ class NameInverter:
 
         authority_term = None
         if prefer_authority:
-            # Check shelf cache for the final resolved heading
             cache_key = f"resolved:{name}"
+
+            # ── Check cache first ──────────────────────────────────────────────
             if self._conn is not None:
                 try:
                     row = self._conn.execute(
@@ -583,13 +584,14 @@ class NameInverter:
                         authority_term = row[0] or None
                 except Exception:
                     pass
-            if authority_term is not None:
+
+            # ── Cache miss: go live ────────────────────────────────────────────
+            if authority_term is None:                        # ← was `is not None`
                 viaf_entry = self._viaf_autosuggest(name)
                 if viaf_entry:
                     authority_term = self.fetch_authority_from_autosuggest_entry(viaf_entry)
 
                 print(f"Caching resolved heading: {authority_term!r}")
-                # Cache the resolved heading (or a sentinel so we don't retry failed lookups)
                 if self._conn is not None:
                     try:
                         self._conn.execute(
@@ -613,4 +615,18 @@ class NameInverter:
             authority_term=None,
             rule_suggestion=rule_value,
             used_authority=False,
-        )    
+        )
+
+    def cache_resolved_heading(self, name: str, heading: str) -> None:
+        """Write a user-confirmed heading to the cache, overwriting any prior entry."""
+        if not self._conn or not name or not heading:
+            return
+        try:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO cache VALUES (?, ?)",
+                (f"resolved:{name.strip()}", heading.strip())
+            )
+            self._conn.commit()
+            print(f"User correction cached: {name!r} → {heading!r}")
+        except Exception as exc:
+            print(f"Failed to cache user correction for {name!r}: {exc}")
