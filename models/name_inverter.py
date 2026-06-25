@@ -408,12 +408,6 @@ class NameInverter:
         if not entry:
             return None
 
-        # print(f"VIAF autosuggest entry keys: {list(entry.keys())}")
-        # try:
-        #     print("VIAF autosuggest entry sample:", json.dumps(entry, ensure_ascii=False)[:1000])
-        # except Exception:
-        #     pass
-
         # ── Fast path: LC ID is present directly in the AutoSuggest payload ──
         # AutoSuggest returns source-library IDs as top-level fields.
         # "lc" is the LC NAF control number — go straight to LC Linked Data
