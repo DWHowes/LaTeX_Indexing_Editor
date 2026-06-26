@@ -6,7 +6,6 @@ from PySide6.QtCore import Signal, Qt, QModelIndex
 
 from views.latex_folder_filter_proxy import LatexFolderFilterProxy
 from controllers.app_style_configuration import AppStyleConfiguration
-from controllers.context_menu_subsystem import FileTreeContextMenuManager
 
 class FileTreeView(QTreeView):
     """
@@ -40,10 +39,6 @@ class FileTreeView(QTreeView):
         # Apply the type-safe model stack to the layout view instance
         self.setModel(self.proxy_model) 
         self.setHeaderHidden(True)
-
-        self.context_menu_manager = FileTreeContextMenuManager(self)
-        self.context_menu_manager.set_root_file_triggered.connect(self._on_set_root_file)
-        self.context_menu_manager.prune_file_triggered.connect(self._on_prune_file_requested)
 
         # Connect event broker for theme mutation
         AppStyleConfiguration.event_broker().theme_mutated.connect(self._on_theme_mutated)
