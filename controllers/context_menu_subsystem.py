@@ -41,18 +41,8 @@ class BaseContextMenuManager(QObject):
             self.view_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             self.view_widget.customContextMenuRequested.connect(self._intercept_context_request)
 
-        if viewport is not None:
-            policy = viewport.contextMenuPolicy()
-            widget_policy = self.view_widget.contextMenuPolicy()
-            print(f"[ContextMenu] {type(self).__name__} viewport policy after set: {policy}")
-            print(f"[ContextMenu] {type(self).__name__} widget policy after set: {widget_policy}")
-        else:
-            policy = self.view_widget.contextMenuPolicy()
-            print(f"[ContextMenu] {type(self).__name__} policy after set: {policy}")
-
     @Slot(QPoint)
     def _intercept_context_request(self, pixel_position):
-        print(f"[ContextMenu] slot fired: {type(self).__name__} at {pixel_position}")
         if not self.view_widget:
             return
 
@@ -62,7 +52,6 @@ class BaseContextMenuManager(QObject):
             viewport = None
 
         proxy_index = self.view_widget.indexAt(pixel_position)
-        print(f"[ContextMenu] indexAt -> valid={proxy_index.isValid()} row={proxy_index.row()} col={proxy_index.column()}")
 
         if not proxy_index.isValid():
             return
