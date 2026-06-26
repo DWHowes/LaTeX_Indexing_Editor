@@ -21,8 +21,7 @@ from models.name_inverter import NameInverter
 
 from controllers.index_tree_controller import IndexTreeController
 from controllers.macro_editing_controller import MacroEditingController
-from controllers.context_menu_subsystem import FileTreeContextMenuManager
-from controllers.context_menu_subsystem import IndexTreeContextMenuManager
+from controllers.context_menu_subsystem import FileTreeContextMenuManager, IndexTreeContextMenuManager, EditEntryContextMenuManager
 from controllers.index_prefs_config_controller import IndexPrefsConfigController
 from controllers.latex_command_controller import CreateCommandController
 from controllers.theme_config_controller import ThemeConfigController
@@ -115,6 +114,7 @@ class AppPipelineController(QObject):
         # Map context menu structures straight to the newly instantiated widgets
         self._file_context_manager = FileTreeContextMenuManager(self.file_tree_widget)
         self._index_context_manager = IndexTreeContextMenuManager(self.index_tree_widget)
+        self._edit_table_context_manager = EditEntryContextMenuManager(self.entry_table_widget.table_view)
 
         self.command_registry = LatexCommandRegistryModel()
         self.create_command_controller = CreateCommandController(window=self.window, 
@@ -198,10 +198,12 @@ class AppPipelineController(QObject):
         self.doc_io.save_error_encountered.connect(self._display_document_io_error)
 
         if self.idx_ctrl:
-            self._index_context_manager.add_subheading_triggered.connect(self.idx_ctrl.handle_add_subheading_slot)
-            self._index_context_manager.delete_term_triggered.connect(self._handle_index_deletion_request)
-            self._index_context_manager.invert_name_triggered.connect(self._handle_index_name_inversion_request)            
+            self._index_context_manager.delete_tree_term_triggered.connect(self._handle_index_deletion_request)
+            # self._index_context_manager.invert_tree_name_triggered.connect(self._handle_index_name_inversion_request)            
             self.idx_ctrl.tree_population_requested.connect(self.index_tree_widget.populate_hierarchy_tree)
+
+        self._edit_table_context_manager.delete_edit_term_triggered.connect(self._handle_table_deletion_request)
+        self._edit_table_context_manager.invert_name_triggered.connect(self._handle_index_name_inversion_request)
 
         self.macro_editing_ctrl.state_dirty_flag_raised.connect(self._handle_macro_workspace_mutation)
         
@@ -783,6 +785,9 @@ class AppPipelineController(QObject):
 
         self._tree_modified = True
         self.window.status_bar.set_status_text("Index term safely marked for deletion.")
+
+    def _handle_table_deletion_request(self):
+        pass
 
     @Slot()
     def _handle_macro_workspace_mutation(self):

@@ -141,3 +141,6 @@ class EntryModifierList(QWidget):
         """Returns hidden coordinate and encap metadata for the given entry ID."""
         return self._location_map.get(entry_id)
         
+    @property
+    def table_view(self) -> QTableView:
+        return self.entries_table_view        
