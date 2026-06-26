@@ -192,9 +192,6 @@ class EditEntryContextMenuManager(BaseContextMenuManager):
     invert_name_triggered = Signal(QModelIndex)
 
     def populate_menu_actions(self, menu_container: QMenu, proxy_index: QModelIndex):
-        if proxy_index.column() != 0:
-            proxy_index = proxy_index.siblingAtColumn(0)
-
         display_text = str(proxy_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
 
         invert_name_action = QAction(f"Invert Name for '{display_text}'", menu_container)
