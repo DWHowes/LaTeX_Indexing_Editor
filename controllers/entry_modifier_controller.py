@@ -31,7 +31,7 @@ class EntryModifierController(QObject):
             path=location.get("file_path", ""),
             line=location.get("line_number", 1),
             col=location.get("column_offset", 0),
-            fallback=self.model.get_heading_text(entry_id)
+            fallback=self.model.get_display_label(entry_id)
         )
 
     @Slot(int, str)

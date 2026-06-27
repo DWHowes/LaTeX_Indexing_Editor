@@ -25,6 +25,18 @@ class EntryModifierModel(QObject):
         record = self._records.get(entry_id)
         return record.get("heading_raw_text", "") if record else ""
 
+    def get_display_label(self, entry_id: int) -> str:
+        """Returns a human-readable label stripped of sort-key and encap syntax."""
+        raw = self.get_heading_text(entry_id)
+        # Take display portion of each level (post-@ if present), drop |encap
+        raw = raw.split("|")[0]
+        levels = raw.split("!")
+        display_parts = []
+        for level in levels:
+            _, _, disp = level.partition("@")
+            display_parts.append(disp if disp else level)
+        return " > ".join(p.strip() for p in display_parts if p.strip())
+    
     # ------------------------------------------------------------------
     # Cache management
     # ------------------------------------------------------------------
@@ -66,9 +78,10 @@ class EntryModifierModel(QObject):
             return False
 
         # Domain constraint: the first segment (Main) must not be blank
-        parts = canonical_heading.split("!")
-        main = parts[0].strip() if parts else ""
-        if not main:
+        # Extract sort key (pre-@) from the first level
+        first_level = canonical_heading.split("!")[0] if canonical_heading else ""
+        main_sort = first_level.split("|")[0].split("@")[0].strip()  # strip encap too, just in case
+        if not main_sort:
             return False
 
         # Update the in-memory cache
