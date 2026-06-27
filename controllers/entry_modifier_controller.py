@@ -22,6 +22,18 @@ class EntryModifierController(QObject):
         records = self.model.fetch_entry_modifier_records()
         self.view.populate_entry_modifier_display(records)
 
+    def handle_new_entry_created(self, entry_dict: dict) -> None:
+        """
+        Called by AppPipelineController after a new \\index macro has been
+        written to the .tex file.  Updates model cache and appends to the
+        view without a full reload.
+        """
+        # Register in model cache so get_heading_text / get_display_label work
+        self.model.register_new_entry(entry_dict)
+
+        # Append a single row to the view — no full repopulation
+        self.view.append_entry_row(entry_dict)
+
     @Slot(int)
     def _on_row_selected(self, entry_id: int):
         location = self.view.get_location_metadata(entry_id)

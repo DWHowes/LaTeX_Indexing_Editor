@@ -738,21 +738,31 @@ class AppPipelineController(QObject):
 
     @Slot(list, dict)
     def _handle_manual_index_insertion(self, parts_list: list, metadata: dict):
-        # Intercepts indexInserted events and incrementally appends the new node to the tree.
-        # Normalize key names: handle_insert's uid_dict uses "path"/"line"/"col",
-        # but IndexTreeView._populate_row_metadata expects "file_path"/"line_number"/"column_offset".
-        ref_record = dict(metadata)
-        ref_record["file_path"] = metadata.get("path", "")
-        ref_record["line_number"] = metadata.get("line", 0)
-        ref_record["column_offset"] = metadata.get("col", 0)
+        # Build the canonical reference record once — shared by both consumers.
+        # absolute_position and absolute_end are not available at insertion time;
+        # they will be populated on the next full parse pass.
+        entry_dict = {
+            "unique_id_number":  metadata["id"],
+            "heading_raw_text":  "!".join(parts_list),   # parts_list is already normalised
+            "file_path":         metadata.get("path", ""),
+            "line_number":       metadata.get("line", 0),
+            "column_offset":     metadata.get("col", 0),
+            "absolute_position": None,
+            "absolute_end":      None,
+            "encap":             metadata.get("encap", "standard"),
+            "heading_id":        None,
+            "see_references":    metadata.get("see"),
+            "seealso_references": metadata.get("seealso"),
+        }
 
-        self.index_tree_widget.append_entry(parts_list, [ref_record])
-
-        # Push onto undo stack, clear redo (new action invalidates redo history)
-        self._index_undo_stack.append((parts_list, [ref_record]))
+        # Index tree — existing path, now driven from entry_dict
+        self.index_tree_widget.append_entry(parts_list, [entry_dict])
+        self._index_undo_stack.append((parts_list, [entry_dict]))
         self._index_redo_stack.clear()
-
         self._tree_modified = True
+
+        # Entry modifier — incremental append, no reload
+        self.entry_modifier_ctrl.handle_new_entry_created(entry_dict)        
 
     @Slot(object, object)
     def _handle_view_save_request(self, editor_tab: EditorTab, save_carrier: ReferenceCarrier) -> None:

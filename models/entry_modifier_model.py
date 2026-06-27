@@ -56,6 +56,16 @@ class EntryModifierModel(QObject):
         """Binds the active FileTreePersistence instance after project load."""
         self._persistence = persistence
 
+    def register_new_entry(self, entry_dict: dict) -> None:
+        """
+        Adds a single new entry to the in-memory cache and persists it.
+        Called after the .tex file has already been written.
+        """
+        unique_id = entry_dict["unique_id_number"]
+        self._records[unique_id] = entry_dict
+        self._persist_record(unique_id, entry_dict)
+        self.entry_modifier_updated.emit(unique_id, True)        
+
     # ------------------------------------------------------------------
     # Write path
     # ------------------------------------------------------------------

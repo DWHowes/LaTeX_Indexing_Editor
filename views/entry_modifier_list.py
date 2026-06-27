@@ -297,6 +297,56 @@ class EntryModifierList(QWidget):
         """Return hidden coordinate and encap metadata for *entry_id*."""
         return self._location_map.get(entry_id)
 
+    def append_entry_row(self, ref: dict) -> None:
+        """
+        Appends a single new entry row without clearing or reloading the table.
+        Safe to call after populate_entry_modifier_display has already run.
+        """
+        # Temporarily disconnect to suppress spurious edit signals during append
+        self.base_model.dataChanged.disconnect(self._on_cell_data_changed)
+
+        unique_id = ref["unique_id_number"]
+        parsed = _parse_heading_raw_text(ref.get("heading_raw_text", ""))
+        stored_encap = ref.get("encap") or parsed["encap"] or ""
+
+        id_item = QStandardItem()
+        id_item.setData(unique_id, Qt.ItemDataRole.DisplayRole)
+        id_item.setFlags(id_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+        def _item(text: str) -> QStandardItem:
+            return QStandardItem(text)
+
+        self.base_model.appendRow([
+            id_item,
+            _item(parsed["main_sort"]),
+            _item(parsed["main_disp"]),
+            _item(parsed["sub1_sort"]),
+            _item(parsed["sub1_disp"]),
+            _item(parsed["sub2_sort"]),
+            _item(parsed["sub2_disp"]),
+            _item(stored_encap),
+        ])
+
+        # Update the location map so get_location_metadata works immediately
+        self._location_map[unique_id] = {
+            "file_path":          ref.get("file_path"),
+            "line_number":        ref.get("line_number"),
+            "column_offset":      ref.get("column_offset"),
+            "absolute_position":  ref.get("absolute_position"),
+            "absolute_end":       ref.get("absolute_end"),
+            "encap":              stored_encap,
+            "heading_id":         ref.get("heading_id"),
+            "see_references":     ref.get("see_references"),
+            "seealso_references": ref.get("seealso_references"),
+        }
+
+        # Scroll to the new row and reconnect
+        new_proxy_index = self.proxy_model.mapFromSource(
+            self.base_model.index(self.base_model.rowCount() - 1, COL_MAIN_DISP)
+        )
+        self.entries_table_view.scrollTo(new_proxy_index)
+        self.base_model.dataChanged.connect(self._on_cell_data_changed)
+
     @property
     def table_view(self) -> QTableView:
         return self.entries_table_view
