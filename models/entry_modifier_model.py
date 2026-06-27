@@ -63,9 +63,15 @@ class EntryModifierModel(QObject):
         """
         unique_id = entry_dict["unique_id_number"]
         self._records[unique_id] = entry_dict
-        self._persist_record(unique_id, entry_dict)
-        self.entry_modifier_updated.emit(unique_id, True)        
-
+        # Use insert, not update — row does not exist yet
+        if self._persistence is not None:
+            success = self._persistence.insert_reference(entry_dict)
+            if not success:
+                print(f"[MODEL WARNING] insert_reference failed for ID {unique_id}")
+        else:
+            print(f"[MODEL STUB] No persistence layer — skipping insert for ID {unique_id}")
+        self.entry_modifier_updated.emit(unique_id, True)
+        
     # ------------------------------------------------------------------
     # Write path
     # ------------------------------------------------------------------

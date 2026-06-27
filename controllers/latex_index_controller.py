@@ -59,30 +59,42 @@ class LatexIndexController(QObject):
 
         self.insert_latex(editor, entry, path, assigned_idn, line, col)
 
-    def insert_latex(self, editor, entry: IndexEntryModel, path: str, assigned_id: int, line: int, col: int):
-        cursor = editor.textCursor()
-        chain = entry.chain()
+    def insert_latex(self, editor, entry: IndexEntryModel, path: str, assigned_id: int):
+            cursor = editor.textCursor()
+            chain = entry.chain()
 
-        if entry.xref_enabled:
-            target_term = entry.xref_target.strip()
-            mode = entry.xref_type
-            macro_tag = f"\\index{{{chain}|{mode}{{{target_term}}}}}"
-            cursor.insertText(macro_tag)
-        else:
-            if cursor.hasSelection():
-                selected_text = cursor.selectedText()
-                start_format = f"|{entry.page_style}|(" if entry.page_style else "|("
-                end_format = f"|{entry.page_style}|)" if entry.page_style else "|)"
-                start_tag = f"\\index{{{chain}{start_format}}}"
-                end_tag = f"\\index{{{chain}{end_format}}}"
-                wrapped_text = f"{start_tag}{selected_text}{end_tag}"
-                cursor.insertText(wrapped_text)
-            else:
-                macro_tag = f"\\index{{{chain}|{entry.page_style}}}" if entry.page_style else f"\\index{{{chain}}}"
+            absolute_start = cursor.position()
+
+            if entry.xref_enabled:
+                target_term = entry.xref_target.strip()
+                mode = entry.xref_type
+                macro_tag = f"\\index{{{chain}|{mode}{{{target_term}}}}}"
                 cursor.insertText(macro_tag)
+            else:
+                if cursor.hasSelection():
+                    selected_text = cursor.selectedText()
+                    start_format = f"|{entry.page_style}|(" if entry.page_style else "|("
+                    end_format = f"|{entry.page_style}|)" if entry.page_style else "|)"
+                    start_tag = f"\\index{{{chain}{start_format}}}"
+                    end_tag = f"\\index{{{chain}{end_format}}}"
+                    cursor.insertText(f"{start_tag}{selected_text}{end_tag}")
+                else:
+                    macro_tag = f"\\index{{{chain}|{entry.page_style}}}" if entry.page_style else f"\\index{{{chain}}}"
+                    cursor.insertText(macro_tag)
 
-        editor.setTextCursor(cursor)
+            absolute_end = cursor.position()
+            editor.setTextCursor(cursor)
 
-        uid_dict = entry.metadata(assigned_id, path, line, col)
-        self.view.indexInserted.emit(entry.normalized_parts(), uid_dict)
-        self.view.reset_ui()
+            # Recompute line/col from absolute_start — authoritative regardless of
+            # where the caret was when the Insert button was clicked
+            doc = editor.document()
+            block = doc.findBlock(absolute_start)
+            true_line = block.blockNumber() + 1
+            true_col = absolute_start - block.position() + 1
+
+            uid_dict = entry.metadata(assigned_id, path, true_line, true_col)
+            uid_dict["absolute_position"] = absolute_start
+            uid_dict["absolute_end"] = absolute_end
+
+            self.view.indexInserted.emit(entry.normalized_parts(), uid_dict)
+            self.view.reset_ui()

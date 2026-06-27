@@ -102,7 +102,7 @@ class FileTreePersistence:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS project_references (
                     id INTEGER PRIMARY KEY,
-                    heading_id INTEGER NOT NULL,
+                    heading_id INTEGER,
                     heading_raw_text TEXT NOT NULL,
                     uid TEXT UNIQUE NOT NULL,
                     unique_id_number INTEGER NOT NULL,
@@ -110,11 +110,12 @@ class FileTreePersistence:
                     line_number INTEGER NOT NULL,
                     column_offset INTEGER NOT NULL,
                     absolute_position INTEGER,
+                    absolute_end INTEGER,
                     encap TEXT DEFAULT 'standard',
                     see_references TEXT,       
                     seealso_references TEXT,
                     has_references INTEGER DEFAULT 0,
-                    FOREIGN KEY(heading_id) REFERENCES project_headings(id) ON DELETE CASCADE
+                    FOREIGN KEY(heading_id) REFERENCES project_headings(id) ON DELETE SET NULL
                 );
             """)
             
@@ -417,7 +418,7 @@ class FileTreePersistence:
                 if references:
                     references_batch = [
                         (
-                            int(r.get("heading_id")),
+                            r.get("heading_id"),
                             str(r.get("heading_raw_text", "")),
                             str(r.get("uid", "")),
                             int(r.get("unique_id_number", 0)),
@@ -425,6 +426,7 @@ class FileTreePersistence:
                             int(r.get("line_number", 1)),
                             int(r.get("column_offset", 0)),
                             r.get("absolute_position"), # Int or None
+                            r.get("absolute_end"),
                             str(r.get("encap", "standard")),
                             json.dumps(r.get("see_references")) if isinstance(r.get("see_references"), list) else None,
                             json.dumps(r.get("seealso_references")) if isinstance(r.get("seealso_references"), list) else None,
@@ -436,9 +438,9 @@ class FileTreePersistence:
                     cursor.executemany("""
                         INSERT INTO project_references (
                             heading_id, heading_raw_text, uid, unique_id_number, 
-                            file_path, line_number, column_offset, absolute_position, 
+                            file_path, line_number, column_offset, absolute_position, absolute_end,
                             encap, see_references, seealso_references, has_references
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                     """, references_batch)
                     
                 conn.commit()
@@ -521,7 +523,7 @@ class FileTreePersistence:
         MUTABLE_COLUMNS = {
             "heading_raw_text", "heading_id",
             "file_path", "line_number", "column_offset",
-            "absolute_position", "encap",
+            "absolute_position", "absolute_end", "encap",
             "see_references", "seealso_references", "has_references"
         }
 
@@ -552,7 +554,37 @@ class FileTreePersistence:
         except sqlite3.Error as err:
             print(f"[DB ERROR] update_reference_field failed for ID {entry_id}: {err}")
             return False
-
+        
+    def insert_reference(self, entry_dict: dict) -> bool:
+        """Inserts a brand-new reference row. Called only from register_new_entry."""
+        import uuid
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO project_references (
+                        unique_id_number, heading_raw_text, uid,
+                        file_path, line_number, column_offset,
+                        absolute_position, absolute_end,
+                        encap, heading_id,
+                        see_references, seealso_references, has_references
+                    ) VALUES (
+                        :unique_id_number, :heading_raw_text, :uid,
+                        :file_path, :line_number, :column_offset,
+                        :absolute_position, :absolute_end,
+                        :encap, :heading_id,
+                        :see_references, :seealso_references, :has_references
+                    )
+                """, {
+                    **entry_dict,
+                    "uid": entry_dict.get("uid") or str(uuid.uuid4()),
+                    "heading_id": entry_dict.get("heading_id"),  # None — no parser node yet
+                    "has_references": 1 if entry_dict.get("has_references", True) else 0,
+                })
+            return True
+        except Exception as e:
+            print(f"[DB ERROR] insert_reference failed for ID {entry_dict.get('unique_id_number')}: {e}")
+            return False
+    
     def get_max_unique_id(self) -> int:
         """Return the highest unique_id_number in the references table, or 0 if empty."""
         with self._get_connection() as conn:
