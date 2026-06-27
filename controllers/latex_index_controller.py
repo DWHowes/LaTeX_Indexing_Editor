@@ -53,11 +53,7 @@ class LatexIndexController(QObject):
             print("Error: Failed to retrieve a valid unique ID for the new index entry.")
             return
 
-        cursor = editor.textCursor()
-        line = cursor.blockNumber() + 1
-        col = cursor.columnNumber() + 1
-
-        self.insert_latex(editor, entry, path, assigned_idn, line, col)
+        self.insert_latex(editor, entry, path, assigned_idn)
 
     def insert_latex(self, editor, entry: IndexEntryModel, path: str, assigned_id: int):
             cursor = editor.textCursor()
