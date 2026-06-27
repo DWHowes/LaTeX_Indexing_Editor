@@ -508,6 +508,9 @@ class AppPipelineController(QObject):
         # Populate the workspace reference editor view
         self.entry_modifier_model.set_persistence(self.scope_ctrl.get_persistence_model())
         self.entry_modifier_model.load_records(references)
+
+        # Populate the edit entry table view
+        self.entry_table_widget.populate_entry_modifier_display(references)
         
         # Realign session logging paths natively
         project_root_dir = os.path.dirname(os.path.normpath(db_path))
