@@ -6,11 +6,12 @@ class EntryModifierController(QObject):
     Orchestrates application data state balance between Model actions and View rendering.
     """
 class EntryModifierController(QObject):
-    def __init__(self, view_instance, model_instance, navigation_helper, parent=None):
+    def __init__(self, view_instance, model_instance, navigation_helper, index_edit_ctrl, parent=None):
         super().__init__(parent)
         self.view = view_instance
         self.model = model_instance
         self._nav = navigation_helper
+        self._index_edit_ctrl = index_edit_ctrl
 
         self.model.entry_modifier_reloaded.connect(self.view.populate_entry_modifier_display)
         self.model.entry_modifier_updated.connect(self._on_model_save_confirmed)
@@ -36,7 +37,7 @@ class EntryModifierController(QObject):
 
     @Slot(int)
     def _on_row_selected(self, entry_id: int):
-        location = self.view.get_location_metadata(entry_id)
+        location = self.model.get_location_metadata(entry_id)
         if not location:
             return
         self._nav.navigate(
@@ -48,16 +49,30 @@ class EntryModifierController(QObject):
 
     @Slot(int, str)
     def _on_user_edit_submitted(self, entry_id: int, canonical_heading: str):
-        """Intercepts UI edit events and pushes updates to the business layer."""
-        location = self.view.get_location_metadata(entry_id)
-        success = self.model.update_entry_modifier_field(entry_id, canonical_heading, location)
+        """
+        Intercepts UI edit events.
+
+        Routes through IndexEditController which owns:
+          - macro rewrite in the .tex file
+          - coordinate shift for subsequent references
+          - heading node reconciliation in the index tree
+
+        Falls back to a view reload if the edit is rejected.
+        """
+        success = self._index_edit_ctrl.handle_entry_table_edit(
+            entry_id, canonical_heading
+        )
 
         if not success:
-            print(f"[CONTROLLER WARNING] Rejected validation for Record {entry_id}")
+            print(f"[CONTROLLER WARNING] Edit rejected for Record {entry_id}")
             self.load_initial_entry_modifier_records()
+            return
+
+        # Keep the model cache heading_raw_text in sync — IndexEditController
+        # already updated _records directly, so just emit the updated signal.
+        self.model.entry_modifier_updated.emit(entry_id, True)
 
     @Slot(int, bool)
     def _on_model_save_confirmed(self, entry_id: int, success: bool):
-        """Performs structural operations or status updates after data writes confirm."""
         if success:
-            print(f"[CONTROLLER SUCCESS] Database synchronized for Record ID: {entry_id}")
+            print(f"[CONTROLLER SUCCESS] Record ID {entry_id} synchronised")

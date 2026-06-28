@@ -44,11 +44,6 @@ class DocumentIOController(QObject):
             
             editor.document().setModified(False)
                 
-            # try:
-            #     self.backup_manager.sync_file_modification_backup(cleaned_path)
-            # except Exception as backup_err:
-            #     self.operation_status_emitted.emit(f"Session backup skipped: {backup_err}")
-
             self.file_saved_successfully.emit(cleaned_path)
             return True
             
@@ -83,11 +78,150 @@ class DocumentIOController(QObject):
                         success = self.save_tex_file_to_disk(editor, target_path)
                         if not success:
                             all_successful = False
-                        # if success:
-                        #     self.backup_manager.sync_file_modification_backup(target_path)
-                        # else:
-                        #     all_successful = False
         return all_successful
+    
+    # ------------------------------------------------------------------
+    # Macro span rewrite — shared primitive for index entry editing
+    # ------------------------------------------------------------------
+
+    def rewrite_macro_span(
+        self,
+        file_path: str,
+        absolute_position: int,
+        absolute_end: int,
+        new_macro_text: str,
+    ) -> int | None:
+        """
+        Replaces the macro span at absolute_position:absolute_end with
+        new_macro_text.
+
+        If file_path is currently open in an editor tab, operates on the
+        live QTextDocument so the tab content stays authoritative.
+        Otherwise registers the file for session backup, then rewrites
+        directly on disk.
+
+        Returns the length delta (positive = macro grew, negative = macro
+        shrank, zero = same length), or None if the span guard check fails
+        (stale or misaligned coordinates).
+        """
+        open_editor = self._find_open_editor(file_path)
+        if open_editor:
+            return self._rewrite_in_document(
+                open_editor, absolute_position, absolute_end, new_macro_text
+            )
+        return self._rewrite_on_disk(
+            file_path, absolute_position, absolute_end, new_macro_text
+        )
+
+    def _find_open_editor(self, file_path: str) -> "EditorTab | None":
+        """Returns the open EditorTab for file_path, or None if not open."""
+        if not self.tabs:
+            return None
+        norm = os.path.normpath(file_path)
+        for i in range(self.tabs.count()):
+            editor = self.tabs.widget(i)
+            if isinstance(editor, EditorTab):
+                if os.path.normpath(editor.get_absolute_path()) == norm:
+                    return editor
+        return None
+
+    def _rewrite_in_document(
+        self,
+        editor: "EditorTab",
+        absolute_position: int,
+        absolute_end: int,
+        new_macro_text: str,
+    ) -> int | None:
+        """
+        Rewrites a macro span in a live QTextDocument via QTextCursor.
+        Marks the document modified so the tab's unsaved-changes indicator
+        fires normally.
+        """
+        from PySide6.QtGui import QTextCursor
+
+        doc = editor.document()
+        if absolute_end > len(doc.toPlainText()):
+            print(
+                f"[IO GUARD] absolute_end={absolute_end} exceeds document "
+                f"length {len(doc.toPlainText())} — aborting rewrite"
+            )
+            return None
+
+        cursor = editor.textCursor()
+        cursor.setPosition(absolute_position)
+        cursor.setPosition(absolute_end, QTextCursor.MoveMode.KeepAnchor)
+
+        existing = cursor.selectedText()
+        if not existing.startswith("\\index{"):
+            print(
+                f"[IO GUARD] Span at {absolute_position}:{absolute_end} "
+                f"is {existing[:30]!r} — does not look like \\index macro, "
+                f"aborting rewrite"
+            )
+            return None
+
+        delta = len(new_macro_text) - (absolute_end - absolute_position)
+        cursor.insertText(new_macro_text)
+        editor.setTextCursor(cursor)
+        editor.document().setModified(True)
+        return delta
+
+    def _rewrite_on_disk(
+        self,
+        file_path: str,
+        absolute_position: int,
+        absolute_end: int,
+        new_macro_text: str,
+    ) -> int | None:
+        """
+        Registers a session backup for file_path (no-op if already registered),
+        then rewrites the macro span directly in the .tex file on disk.
+        """
+        self.backup_manager.register_file_for_session(file_path)
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception as e:
+            print(f"[IO ERROR] Could not read {file_path}: {e}")
+            return None
+
+        if absolute_end > len(content):
+            print(
+                f"[IO GUARD] absolute_end={absolute_end} exceeds file "
+                f"length {len(content)} for {file_path} — aborting rewrite"
+            )
+            return None
+
+        existing_span = content[absolute_position:absolute_end]
+        if not existing_span.startswith("\\index{"):
+            print(
+                f"[IO GUARD] Span at {absolute_position}:{absolute_end} "
+                f"is {existing_span[:30]!r} — does not look like \\index macro, "
+                f"aborting rewrite"
+            )
+            return None
+
+        new_content = (
+            content[:absolute_position]
+            + new_macro_text
+            + content[absolute_end:]
+        )
+
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+        except Exception as e:
+            print(f"[IO ERROR] Could not write {file_path}: {e}")
+            return None
+
+        delta = len(new_macro_text) - (absolute_end - absolute_position)
+        print(
+            f"[IO] Rewrote macro in {os.path.basename(file_path)} "
+            f"at {absolute_position}:{absolute_end} "
+            f"(delta={delta:+d})"
+        )
+        return delta
     
     def set_tabs_widget(self, tabs_widget) -> None:
         """Public contract for updating the active tab container reference."""

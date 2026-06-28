@@ -26,6 +26,7 @@ from controllers.index_prefs_config_controller import IndexPrefsConfigController
 from controllers.latex_command_controller import CreateCommandController
 from controllers.theme_config_controller import ThemeConfigController
 from controllers.entry_modifier_controller import EntryModifierController
+from controllers.index_edit_controller import IndexEditController
 
 from controllers.app_style_configuration import AppStyleConfiguration
 from views.editor_tab import EditorTab
@@ -73,19 +74,29 @@ class AppPipelineController(QObject):
         self.window.refresh_splitter_proportions()
         self.window.refresh_right_pane_proportions()
         
+        # Initialize the index layout engines and swap out internal views 
+        # before binding core structural infrastructure signal maps
+        self.initialize_index_subsystem()
+
         # Capture the static child tree view cleanly
         self.file_tree_widget = self.sidebar_view_panel.get_file_tree_view()
         self.entry_table_widget = self.sidebar_view_panel.get_entry_table_view()
         self.entry_modifier_model = EntryModifierModel(persistence=None)  # persistence injected after project load
+
+        self.index_edit_ctrl = IndexEditController(
+            tree_view=self.index_tree_view,
+            doc_io=self.doc_io,
+            entry_modifier_model=self.entry_modifier_model,
+            parent=self,
+        )
+
         self.entry_modifier_ctrl = EntryModifierController(
             view_instance=self.entry_table_widget,
             model_instance=self.entry_modifier_model,
             navigation_helper=self.lc_ctrl.get_index_navigator(),
+            index_edit_ctrl=self.index_edit_ctrl,
             parent=self
         )
-        # Initialize the index layout engines and swap out internal views 
-        # before binding core structural infrastructure signal maps
-        self.initialize_index_subsystem()
 
         max_existing_id = self.scope_ctrl.get_max_unique_id()
         starting_id = max_existing_id + 1  # 1 for new project, next available for existing
@@ -138,11 +149,13 @@ class AppPipelineController(QObject):
         self.index_model_engine = IndexTreeModelEngine(active_database_model)
         self.index_tree_view = IndexTreeView(model_engine=self.index_model_engine)
 
-        # Pure presentation layer boundary swap contract execution
         self.sidebar_view_panel.replace_index_tree_view(self.index_tree_view)
         self.index_tree_widget = self.index_tree_view
 
         self.idx_ctrl = IndexTreeController(self.index_model_engine, self)
+
+        # IndexEditController constructed after return — see __init__
+        self.index_edit_ctrl = None
 
     def _bind_signal_pipelines(self):
         """Bridges presentation signals directly to controller slots with explicit contracts."""
@@ -738,31 +751,51 @@ class AppPipelineController(QObject):
 
     @Slot(list, dict)
     def _handle_manual_index_insertion(self, parts_list: list, metadata: dict):
-        # Build the canonical reference record once — shared by both consumers.
-        # absolute_position and absolute_end are not available at insertion time;
-        # they will be populated on the next full parse pass.
         entry_dict = {
-            "unique_id_number":  metadata["id"],
-            "heading_raw_text":  "!".join(parts_list),   # parts_list is already normalised
-            "file_path":         metadata.get("path", ""),
-            "line_number":       metadata.get("line", 0),
-            "column_offset":     metadata.get("col", 0),
-            "absolute_position": metadata.get("absolute_position"),
-            "absolute_end":      metadata.get("absolute_end"),
-            "encap":             metadata.get("encap", "standard"),
-            "heading_id":        None,
-            "see_references":    metadata.get("see"),
+            "unique_id_number":   metadata["id"],
+            "heading_raw_text":   "!".join(parts_list),
+            "file_path":          metadata.get("path", ""),
+            "line_number":        metadata.get("line", 0),
+            "column_offset":      metadata.get("col", 0),
+            "absolute_position":  metadata.get("absolute_position"),
+            "absolute_end":       metadata.get("absolute_end"),
+            "encap":              metadata.get("encap", "standard"),
+            "uid":                f"{metadata.get('path', '')}:{metadata.get('line', 0)}:{metadata.get('col', 0)}",
+            "see_references":     metadata.get("see"),
             "seealso_references": metadata.get("seealso"),
+            "has_references":     True,
         }
 
-        # Index tree — existing path, now driven from entry_dict
+        # Resolve or create the heading row before any consumer touches heading_id
+        persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+        if persistence:
+            heading_text = entry_dict["heading_raw_text"]
+            depth = heading_text.count("!")
+            parent_id = None
+            if depth > 0:
+                parent_text = "!".join(heading_text.split("!")[:-1])
+                parent_id = persistence.resolve_or_insert_heading(
+                    heading_text=parent_text,
+                    name=parent_text,
+                    depth=depth - 1,
+                    parent_id=None
+                )
+            entry_dict["heading_id"] = persistence.resolve_or_insert_heading(
+                heading_text=heading_text,
+                name=heading_text,
+                depth=depth,
+                parent_id=parent_id
+            )
+        else:
+            entry_dict["heading_id"] = None
+
+        # Both consumers now receive a fully populated entry_dict
         self.index_tree_widget.append_entry(parts_list, [entry_dict])
         self._index_undo_stack.append((parts_list, [entry_dict]))
         self._index_redo_stack.clear()
         self._tree_modified = True
 
-        # Entry modifier — incremental append, no reload
-        self.entry_modifier_ctrl.handle_new_entry_created(entry_dict)        
+        self.entry_modifier_ctrl.handle_new_entry_created(entry_dict)
 
     @Slot(object, object)
     def _handle_view_save_request(self, editor_tab: EditorTab, save_carrier: ReferenceCarrier) -> None:

@@ -81,16 +81,13 @@ class IndexTreeModelEngine:
 
     def compile_transaction_record(self, clean_parts: list, ref_data: dict, encap: str, aid: int):
         """Compiles uncommitted metadata parameters for database staging."""
-        h_path = " // ".join(clean_parts)
-        macro = "!".join(clean_parts)
-        v_tag = f"\\index{{{macro}|{encap}}}" if encap != "standard" else f"\\index{{{macro}}}"
-        
         self._staged_db_entries.append({
-            "id": int(aid), "entry_path": h_path,
+            "unique_id_number": int(aid),
+            "heading_raw_text": "!".join(clean_parts),
             "file_path": os.path.normpath(str(ref_data.get("file_path", ""))),
-            "line_number": int(ref_data.get("line_number", 0)), 
-            "column_number": int(ref_data.get("column_offset", 0)),
-            "encap_style": encap, "visual_tag": v_tag
+            "line_number": int(ref_data.get("line_number", 0)),
+            "column_offset": int(ref_data.get("column_offset", 0)),
+            "encap": encap,
         })
 
     def compile_and_retain_project_paths(self, file_paths: list[str]) -> tuple[list[dict], list[dict]]:

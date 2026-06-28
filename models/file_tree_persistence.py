@@ -584,6 +584,49 @@ class FileTreePersistence:
         except Exception as e:
             print(f"[DB ERROR] insert_reference failed for ID {entry_dict.get('unique_id_number')}: {e}")
             return False
+
+    def resolve_or_insert_heading(self, heading_text: str, name: str, depth: int, parent_id: int | None = None) -> int | None:
+        """Returns the id of an existing matching heading, or inserts and returns a new one."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                row = cursor.execute(
+                    "SELECT id FROM project_headings WHERE heading_text = ? AND depth = ?",
+                    (heading_text, depth)
+                ).fetchone()
+                if row:
+                    return row["id"]
+                cursor.execute(
+                    "INSERT INTO project_headings (parent_id, heading_text, name, depth) VALUES (?, ?, ?, ?)",
+                    (parent_id, heading_text, name, depth)
+                )
+                conn.commit()
+                return cursor.lastrowid
+        except sqlite3.Error as e:
+            print(f"[DB ERROR] resolve_or_insert_heading failed: {e}")
+            return None
+
+    def save_batch_index_manifest(self, entries: list[dict]) -> bool:
+        """
+        Persists a batch of staged reference edits to project_references.
+        Each entry must contain 'unique_id_number' plus one or more mutable fields.
+        Delegates to update_reference_field per entry; returns True if all succeed.
+        """
+        if not entries:
+            return False
+
+        all_successful = True
+        for entry in entries:
+            entry_id = entry.get("unique_id_number")
+            if entry_id is None:
+                print(f"[DB TRACE] save_batch_index_manifest: skipping entry missing unique_id_number")
+                all_successful = False
+                continue
+            success = self.update_reference_field(entry_id, entry)
+            if not success:
+                all_successful = False
+
+        return all_successful            
     
     def get_max_unique_id(self) -> int:
         """Return the highest unique_id_number in the references table, or 0 if empty."""
