@@ -37,14 +37,19 @@ class EntryModifierModel(QObject):
 
     def load_records(self, references: list[dict]) -> None:
         """
-        Accepts the references payload from the pipeline and populates the
-        in-memory cache. Called by the controller after project load completes.
+        Populates the in-memory cache from the project load payload.
+        Closers are retained in full cache for coordinate operations but
+        excluded from the display cache so views never see them.
         """
         self._records = {ref["unique_id_number"]: ref for ref in references}
+        self._display_ids: set[int] = {
+            ref["unique_id_number"] for ref in references
+            if not ref.get("is_range_closer", False)
+        }
 
     def fetch_entry_modifier_records(self) -> list[dict]:
-        """Returns a snapshot of all cached records for view population."""
-        return list(self._records.values())
+        """Returns only display-eligible records for view population."""
+        return [r for uid, r in self._records.items() if uid in self._display_ids]
     
     def set_persistence(self, persistence) -> None:
         """Binds the active FileTreePersistence instance after project load."""

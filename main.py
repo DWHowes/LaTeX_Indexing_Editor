@@ -64,6 +64,8 @@ if __name__ == "__main__":
             editor_window
         )
         
+        editor_window.latex_index_controller.set_doc_io(doc_controller)
+
         # Initialize the background utility engine
         # This engine watches for external modification of project LaTeX files
         file_watcher_engine = ExternalFileWatcherEngine(editor_window)

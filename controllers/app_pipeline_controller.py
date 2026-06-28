@@ -764,11 +764,14 @@ class AppPipelineController(QObject):
             "see_references":     metadata.get("see"),
             "seealso_references": metadata.get("seealso"),
             "has_references":     True,
+            "range_partner_id":   metadata.get("range_partner_id"),
+            "is_range_closer":    metadata.get("is_range_closer", False),
         }
 
-        # Resolve or create the heading row before any consumer touches heading_id
+        # Resolve or create heading — skip for range closers, 
+        # they share the opener's heading
         persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
-        if persistence:
+        if persistence and not entry_dict["is_range_closer"]:
             heading_text = entry_dict["heading_raw_text"]
             depth = heading_text.count("!")
             parent_id = None
@@ -786,15 +789,26 @@ class AppPipelineController(QObject):
                 depth=depth,
                 parent_id=parent_id
             )
+        elif persistence and entry_dict["is_range_closer"]:
+            # Closer shares the opener's heading_id — look it up via range_partner_id
+            partner_id = entry_dict["range_partner_id"]
+            if partner_id is not None:
+                partner_record = self.entry_modifier_ctrl.model._records.get(partner_id)
+                entry_dict["heading_id"] = partner_record.get("heading_id") if partner_record else None
+            else:
+                entry_dict["heading_id"] = None
         else:
             entry_dict["heading_id"] = None
 
-        # Both consumers now receive a fully populated entry_dict
-        self.index_tree_widget.append_entry(parts_list, [entry_dict])
-        self._index_undo_stack.append((parts_list, [entry_dict]))
-        self._index_redo_stack.clear()
-        self._tree_modified = True
+        # Only the opener goes to the tree and undo stack
+        if not entry_dict["is_range_closer"]:
+            self.index_tree_widget.append_entry(parts_list, [entry_dict])
+            self._index_undo_stack.append((parts_list, [entry_dict]))
+            self._index_redo_stack.clear()
+            self._tree_modified = True
 
+        # Both opener and closer go to the entry modifier 
+        # (model caches both; view only shows opener)
         self.entry_modifier_ctrl.handle_new_entry_created(entry_dict)
 
     @Slot(object, object)

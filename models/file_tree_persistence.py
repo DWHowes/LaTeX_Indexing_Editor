@@ -112,13 +112,15 @@ class FileTreePersistence:
                     absolute_position INTEGER,
                     absolute_end INTEGER,
                     encap TEXT DEFAULT 'standard',
-                    see_references TEXT,       
+                    see_references TEXT,
                     seealso_references TEXT,
                     has_references INTEGER DEFAULT 0,
+                    range_partner_id INTEGER DEFAULT NULL,
+                    is_range_closer INTEGER DEFAULT 0,
                     FOREIGN KEY(heading_id) REFERENCES project_headings(id) ON DELETE SET NULL
                 );
             """)
-            
+
             default_metadata = [
                 ("schema_version", "1.0.0"),
                 ("project_name", self._pending_project_name),

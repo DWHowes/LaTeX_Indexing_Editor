@@ -24,8 +24,8 @@ class EntryModifierController(QObject):
         self.view.populate_entry_modifier_display(records)
 
     def handle_new_entry_created(self, entry_dict: dict) -> None:
-        """
-        Called by AppPipelineController after a new \\index macro has been
+        r"""
+        Called by AppPipelineController after a new \index macro has been
         written to the .tex file.  Updates model cache and appends to the
         view without a full reload.
         """
@@ -33,7 +33,9 @@ class EntryModifierController(QObject):
         self.model.register_new_entry(entry_dict)
 
         # Append a single row to the view — no full repopulation
-        self.view.append_entry_row(entry_dict)
+        # Do not append entry if it is the closer of an index range
+        if not entry_dict.get("is_range_closer", False):
+            self.view.append_entry_row(entry_dict)
 
     @Slot(int)
     def _on_row_selected(self, entry_id: int):

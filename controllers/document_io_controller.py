@@ -222,7 +222,32 @@ class DocumentIOController(QObject):
             f"(delta={delta:+d})"
         )
         return delta
-    
+
+    def compute_byte_offset(self, file_path: str, line_number: int, col_offset: int) -> int:
+        r"""
+        Returns the byte offset of (line_number, col_offset) in file_path.
+        line_number is 1-based, col_offset is 0-based character count from
+        line start — matches QTextDocument block/position arithmetic.
+        Scans for \n only, matching the parser's line_offsets convention.
+        """
+        try:
+            with open(file_path, 'rb') as f:
+                content = f.read()
+            line_starts = [0]
+            for i, b in enumerate(content):
+                if b == ord('\n'):
+                    line_starts.append(i + 1)
+            if line_number - 1 >= len(line_starts):
+                print(f"[DOC IO] compute_byte_offset: line {line_number} out of range for {file_path}")
+                return 0
+            line_start_byte = line_starts[line_number - 1]
+            line_text = content[line_start_byte:].decode('utf-8', errors='replace')
+            col_byte_offset = len(line_text[:col_offset].encode('utf-8'))
+            return line_start_byte + col_byte_offset
+        except Exception as e:
+            print(f"[DOC IO] compute_byte_offset failed for {file_path}: {e}")
+            return 0
+
     def set_tabs_widget(self, tabs_widget) -> None:
         """Public contract for updating the active tab container reference."""
         self.tabs = tabs_widget    
