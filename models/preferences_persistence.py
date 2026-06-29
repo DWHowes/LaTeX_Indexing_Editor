@@ -73,35 +73,6 @@ class PreferencesPersistence(QObject):
 
         return defaults
 
-    # def load_application_preferences(self) -> dict:
-    #     try:
-    #         font_size = int(self.settings.value("font_size", 12))
-    #     except (ValueError, TypeError):
-    #         font_size = 12
-
-    #     raw_geometry = self.settings.value("window_geometry")
-    #     raw_state = self.settings.value("window_state")
-    #     raw_splitter = self.settings.value("splitter_state")
-
-    #     if isinstance(raw_geometry, str):
-    #         raw_geometry = QByteArray.fromHex(raw_geometry.encode())
-    #     if isinstance(raw_state, str):
-    #         raw_state = QByteArray.fromHex(raw_state.encode())
-    #     if isinstance(raw_splitter, str):
-    #         raw_splitter = QByteArray.fromHex(raw_splitter.encode())
-
-    #     return {
-    #         "last_project_root": self.settings.value("last_project_root", ""),
-    #         "last_project_name": self.settings.value("last_project_name", ""),
-    #         "font_family": self.settings.value("font_family", "Arial"),
-    #         "font_size": font_size,
-    #         "dark_mode": str(self.settings.value("dark_mode", "false")).lower() == "true",
-    #         "last_project_path": self.settings.value("last_project_path", QDir.homePath()),
-    #         "geometry": raw_geometry,
-    #         "state": raw_state,
-    #         "splitter_state": raw_splitter,
-    #     }
-
     def serialize_layout_state(self, closure_payload: dict):
         if "geometry" in closure_payload:
             geom = closure_payload["geometry"]
