@@ -17,6 +17,7 @@ class MainMenuBar(QMenuBar):
     preferences_requested = Signal()
     add_head_note_requested = Signal()
     create_latex_command_requested = Signal()
+    create_rtf_file_requested = Signal()
 
     def __init__(self, parent_window=None):
         super().__init__(parent_window)
@@ -88,6 +89,11 @@ class MainMenuBar(QMenuBar):
 
         self.create_latex_command_action = tools_menu.addAction("Create &LaTeX Command...", QKeySequence("Ctrl+Alt+C"))
         self.create_latex_command_action.triggered.connect(lambda: self.create_latex_command_requested.emit())
+
+        tools_menu.addSeparator()
+
+        self.create_rtf_file_action = tools_menu.addAction("Create &Rtf File", QKeySequence("Ctrl+B"))
+        self.create_rtf_file_action.triggered.connect(lambda: self.create_rtf_file_requested.emit())
        
         # --- Global Action Container Tracking ---
         # Free-floating action container tracking the dark mode shortcut globally
