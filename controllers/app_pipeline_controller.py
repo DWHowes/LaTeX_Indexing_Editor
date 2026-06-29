@@ -544,6 +544,9 @@ class AppPipelineController(QObject):
         # Enable menu items that are gated behind an active project context
         self.window.menu_bar.update_menu_item_state(is_enabled=True)
 
+        # Set up autocompletion for the index entry window
+        self.window.latex_index_window.setup_autocompletion(references)
+
         # Re-seed the ID generator from the actual project data
         max_existing_id = self.scope_ctrl.get_max_unique_id()
         self.macro_id_generator.reset(starting_id=max_existing_id + 1)
@@ -799,6 +802,8 @@ class AppPipelineController(QObject):
                 entry_dict["heading_id"] = None
         else:
             entry_dict["heading_id"] = None
+
+        self.window.latex_index_window.add_completion_entry(parts_list)            
 
         # Only the opener goes to the tree and undo stack
         if not entry_dict["is_range_closer"]:

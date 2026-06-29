@@ -46,21 +46,21 @@ class IndexEntryModel:
     def chain(self) -> str:
         return "!".join(self.normalized_parts())
 
-def metadata(self, assigned_id: int, path: str, line: int, col: int) -> dict:
-    uid_dict = {
-        "id": assigned_id,
-        "path": path,
-        "line": int(line),
-        "col": int(col),
-        "encap": "standard",
-        "see": None,
-        "seealso": None,
-        "has_references": True,
-        "range_partner_id": None,
-        "is_range_closer": False,
-    }
-    if self.xref_enabled:
-        uid_dict["encap"] = f"{self.xref_type}{{{self.xref_target}}}"
-        uid_dict[self.xref_type] = self.xref_target
-        uid_dict["has_references"] = False
-    return uid_dict
+    def metadata(self, assigned_id: int, path: str, line: int, col: int) -> dict:
+        uid_dict = {
+            "id": assigned_id,
+            "path": path,
+            "line": int(line),
+            "col": int(col),
+            "encap": "standard",
+            "see": None,
+            "seealso": None,
+            "has_references": True,
+            "range_partner_id": None,
+            "is_range_closer": False,
+        }
+        if self.xref_enabled:
+            uid_dict["encap"] = f"{self.xref_type}{{{self.xref_target}}}"
+            uid_dict[self.xref_type] = self.xref_target
+            uid_dict["has_references"] = False
+        return uid_dict

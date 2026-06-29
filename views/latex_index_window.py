@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QEvent, Qt, Signal, QSize, Slot
 
 from controllers.app_style_configuration import AppStyleConfiguration
+from views.latex_entry_auto_completer import LatexEntryAutoCompleter
 
 class EntryWindowTitleBar(QWidget):
     """
@@ -123,6 +124,8 @@ class LatexIndexWindow(QDockWidget):
         self.setTitleBarWidget(self.custom_title_bar)
 
         self.last_focused_field = None
+
+        self._completion_helpers = {}
 
         self._init_ui()
 
@@ -260,6 +263,50 @@ class LatexIndexWindow(QDockWidget):
         self.layout.addLayout(self.bar_layout)
         self.setWidget(self.container)
 
+    def setup_autocompletion(self, heading_data: list[dict]) -> None:
+        """
+        Builds prefix-match completers for all three entry fields.
+        heading_data is the _active_references list from IndexTreeModelEngine,
+        each dict containing 'heading_raw_text'.
+        Called by the controller after project load completes.
+        """
+        mains, sub1s, sub2s = set(), set(), set()
+        for ref in heading_data:
+            raw = ref.get("heading_raw_text", "")
+            parts = raw.split("!")
+            if parts:
+                mains.add(parts[0].strip())
+            if len(parts) > 1:
+                sub1s.add(parts[1].strip())
+            if len(parts) > 2:
+                sub2s.add(parts[2].strip())
+
+        self._attach_completer(self.main_entry, sorted(mains))
+        self._attach_completer(self.sub1_entry, sorted(sub1s))
+        self._attach_completer(self.sub2_entry, sorted(sub2s))
+
+    def _attach_completer(self, field: QLineEdit, completions: list[str]) -> None:
+        existing = self._completion_helpers.get(field)
+        if existing is not None:
+            existing.deleteLater()
+
+        self._completion_helpers[field] = LatexEntryAutoCompleter(field, completions, parent=self)
+
+    def add_completion_entry(self, parts_list: list[str]) -> None:
+        """Appends a newly created heading to the live completer models."""
+        fields = [self.main_entry, self.sub1_entry, self.sub2_entry]
+        for i, field in enumerate(fields):
+            if i >= len(parts_list):
+                break
+
+            term = parts_list[i].strip()
+            if not term:
+                continue
+
+            helper = self._completion_helpers.get(field)
+            if helper is not None:
+                helper.add_completion_entry(term)
+
     def reveal_sub1(self):
         if self.main_entry.text().strip():
             self.sub1_label.show()
@@ -350,6 +397,7 @@ class LatexIndexWindow(QDockWidget):
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.FocusIn and isinstance(obj, QLineEdit):
             self.last_focused_field = obj
+
         return super().eventFilter(obj, event)
 
     def showEvent(self, event):
