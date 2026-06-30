@@ -248,6 +248,13 @@ class EntryModifierList(QWidget):
         self._location_map: dict[int, dict] = {}
 
         for ref in references:
+            # Range closers are coordinate-only records; only the opener
+            # is ever shown in the tree (matches fresh-insert behaviour
+            # in _handle_manual_index_insertion, which never sends the
+            # closer to append_entry).
+            if ref.get("is_range_closer"):
+                continue
+            
             unique_id = ref["unique_id_number"]
             parsed = _parse_heading_raw_text(ref.get("heading_raw_text", ""))
 
