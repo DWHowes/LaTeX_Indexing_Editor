@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (
-    QDialog, QTabWidget, QWidget, QVBoxLayout, QFormLayout, 
+    QDialog, QTabWidget, QWidget, QVBoxLayout, QFormLayout, QHBoxLayout, QFileDialog, 
     QCheckBox, QLineEdit, QDialogButtonBox, QSpinBox, QComboBox, QGroupBox, QLabel, QPushButton,
 )
 from PySide6.QtCore import Signal
@@ -14,7 +14,7 @@ class IndexPrefsConfigDialog(QDialog):
     
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Application Engine Preferences")
+        self.setWindowTitle("Application Preferences")
         self.resize(720, 560)
         self._init_ui()
 
@@ -138,9 +138,46 @@ class IndexPrefsConfigDialog(QDialog):
         self.horizontal_theme_tabs.addTab(self._light_tab, "Light Theme")
         vthemes_layout.addWidget(self.horizontal_theme_tabs)
 
+        # PRIMARY VERTICAL TAB 3: RTF EXPORT CONFIGURATION
+        self.vtab_rtf_export = QWidget()
+        vtab_rtf_layout = QVBoxLayout(self.vtab_rtf_export)
+        vtab_rtf_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.txt_rtf_pdflatex = QLineEdit()
+        self.btn_rtf_pdflatex_browse = QPushButton("Browse")
+        pdflatex_row = QWidget()
+        pdflatex_row_layout = QHBoxLayout(pdflatex_row)
+        pdflatex_row_layout.setContentsMargins(0, 0, 0, 0)
+        pdflatex_row_layout.addWidget(self.txt_rtf_pdflatex)
+        pdflatex_row_layout.addWidget(self.btn_rtf_pdflatex_browse)
+
+        self.txt_rtf_makeidx = QLineEdit()
+        self.btn_rtf_makeidx_browse = QPushButton("Browse")
+        makeidx_row = QWidget()
+        makeidx_row_layout = QHBoxLayout(makeidx_row)
+        makeidx_row_layout.setContentsMargins(0, 0, 0, 0)
+        makeidx_row_layout.addWidget(self.txt_rtf_makeidx)
+        makeidx_row_layout.addWidget(self.btn_rtf_makeidx_browse)
+
+        form_rtf = QFormLayout()
+        form_rtf.addRow("pdflatex:", pdflatex_row)
+        form_rtf.addRow("makeidx:", makeidx_row)
+        vtab_rtf_layout.addLayout(form_rtf)
+
+        reset_layout = QHBoxLayout()
+        reset_layout.addStretch()
+        self.btn_rtf_reset = QPushButton("Reset")
+        reset_layout.addWidget(self.btn_rtf_reset)
+        vtab_rtf_layout.addLayout(reset_layout)
+
+        self.btn_rtf_pdflatex_browse.clicked.connect(self._choose_pdflatex_dir)
+        self.btn_rtf_makeidx_browse.clicked.connect(self._choose_makeidx_dir)
+        self.btn_rtf_reset.clicked.connect(self._reset_rtf_export_fields)
+
         # Mount Primary West View Elements to Root Frame
         self.vertical_tabs.addTab(self.vtab_latex, "LaTeX Settings")
         self.vertical_tabs.addTab(self.vtab_themes, "UI Themes")
+        self.vertical_tabs.addTab(self.vtab_rtf_export, "RTF Export")        
         main_layout.addWidget(self.vertical_tabs)
         
         # Dialog Decision Box Base Action Matrix
@@ -167,6 +204,20 @@ class IndexPrefsConfigDialog(QDialog):
     def _toggle_hyperref_widgets(self, state: bool) -> None:
         self.chk_hyperref_color.setEnabled(state)
         self.cmb_hyperref_color.setEnabled(state)
+
+    def _choose_pdflatex_dir(self) -> None:
+        directory = QFileDialog.getExistingDirectory(self, "Select pdflatex directory")
+        if directory:
+            self.txt_rtf_pdflatex.setText(directory)
+
+    def _choose_makeidx_dir(self) -> None:
+        directory = QFileDialog.getExistingDirectory(self, "Select makeidx directory")
+        if directory:
+            self.txt_rtf_makeidx.setText(directory)
+
+    def _reset_rtf_export_fields(self) -> None:
+        self.txt_rtf_pdflatex.clear()
+        self.txt_rtf_makeidx.clear()
 
     def populate_fields(self, data: dict) -> None:
         """Concrete mapping initialization layer without hasattr/getattr leaks."""
@@ -259,3 +310,4 @@ class IndexPrefsConfigDialog(QDialog):
     def apply_theme_configuration(self, is_dark: bool) -> None:
         colours = DarkThemeColours() if is_dark else LightThemeColours()
         self.setStyleSheet(AppStyleConfiguration.get_dialog_stylesheet(colours))
+
