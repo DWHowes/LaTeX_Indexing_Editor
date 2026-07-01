@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QTableView, QVBoxLayout, QWidget, QLabel, QHeaderView
+from PySide6.QtWidgets import QLineEdit, QTableView, QVBoxLayout, QWidget, QLabel, QHeaderView, QHBoxLayout
 from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Signal, Slot, Qt
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QFont
 
@@ -211,6 +211,16 @@ class EntryModifierList(QWidget):
         self.title_label.setStyleSheet("font-weight: bold; color: #888888;")
         layout.addWidget(self.title_label)
 
+        # Search bar layout
+        search_layout = QHBoxLayout()
+        search_label = QLabel("Filter:", self)
+        self.search_input = QLineEdit(self)
+        self.search_input.setPlaceholderText("Search Main, Sub1, Sub2 display columns...")
+        self.search_input.textChanged.connect(self._on_search_text_changed)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.search_input)
+        layout.addLayout(search_layout)
+
         # Table view
         self.entries_table_view = QTableView(self)
         self.entries_table_view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
@@ -380,6 +390,46 @@ class EntryModifierList(QWidget):
     # ------------------------------------------------------------------
     # Private slots
     # ------------------------------------------------------------------
+    @Slot(str)
+    def _on_search_text_changed(self, search_text: str) -> None:
+        """
+        Filter proxy model based on search text across display columns.
+        Matches against COL_MAIN_DISP, COL_SUB1_DISP, and COL_SUB2_DISP.
+        """
+        if not search_text:
+            # Show all rows when search is cleared
+            for row in range(self.base_model.rowCount()):
+                source_index = self.base_model.index(row, 0)
+                proxy_index = self.proxy_model.mapFromSource(source_index)
+                self.entries_table_view.setRowHidden(proxy_index.row(), False)
+            return
+        
+        # Custom filter: check if search term exists in any of the display columns
+        self.proxy_model.setFilterFixedString("")  # Reset
+        self.proxy_model.setFilterRole(Qt.ItemDataRole.DisplayRole)
+        
+        # Use a simple row-by-row filter via setFilterWildcard on display columns
+        self._apply_custom_display_filter(search_text)
+
+    def _apply_custom_display_filter(self, search_text: str) -> None:
+        """Apply custom filtering across Main, Sub1, and Sub2 display columns."""
+        search_lower = search_text.lower()
+        
+        for row in range(self.base_model.rowCount()):
+            main_disp = self.base_model.item(row, COL_MAIN_DISP)
+            sub1_disp = self.base_model.item(row, COL_SUB1_DISP)
+            sub2_disp = self.base_model.item(row, COL_SUB2_DISP)
+            
+            matches = (
+                (main_disp and search_lower in main_disp.text().lower()) or
+                (sub1_disp and search_lower in sub1_disp.text().lower()) or
+                (sub2_disp and search_lower in sub2_disp.text().lower())
+            )
+            
+            # Map source row to proxy and hide/show accordingly
+            source_index = self.base_model.index(row, 0)
+            proxy_index = self.proxy_model.mapFromSource(source_index)
+            self.entries_table_view.setRowHidden(proxy_index.row(), not matches)
 
     @Slot(QModelIndex)
     def _on_row_clicked(self, proxy_index: QModelIndex) -> None:
