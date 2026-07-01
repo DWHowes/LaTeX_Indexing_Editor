@@ -1,22 +1,22 @@
 from PySide6.QtWidgets import QTableView, QVBoxLayout, QWidget, QLabel, QHeaderView
 from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Signal, Slot, Qt
-from PySide6.QtGui import QStandardItemModel, QStandardItem
+from PySide6.QtGui import QStandardItemModel, QStandardItem, QFont
 
 
 # ---------------------------------------------------------------------------
 # Column index constants — single source of truth for the 8-column layout
 # ---------------------------------------------------------------------------
 COL_ID         = 0
-COL_MAIN_SORT  = 1
-COL_MAIN_DISP  = 2
-COL_SUB1_SORT  = 3
-COL_SUB1_DISP  = 4
-COL_SUB2_SORT  = 5
-COL_SUB2_DISP  = 6
+COL_MAIN_DISP  = 1
+COL_MAIN_SORT  = 2
+COL_SUB1_DISP  = 3
+COL_SUB1_SORT  = 4
+COL_SUB2_DISP  = 5
+COL_SUB2_SORT  = 6
 COL_ENCAP      = 7
 
-_HEADERS = ["ID", "Main Sort", "Main Display", "Sub1 Sort", "Sub1 Display",
-            "Sub2 Sort", "Sub2 Display", "Page"]
+_HEADERS = ["ID", "Main Display", "Main Sort", "Sub1 Display", "Sub1 Sort",
+            "Sub2 Display", "Sub2 Sort", "Page"]
 
 # Columns that must never be edited by the user
 _READ_ONLY_COLS = frozenset({COL_ID})
@@ -33,12 +33,12 @@ def _parse_index_level(raw: str) -> tuple[str, str]:
         "Die Linke@\\textit{Die Linke} (Germany)" → ("Die Linke", "\\textit{Die Linke} (Germany)")
         "redistribution from policies@\\textit{redistribution from} policies"
             → ("redistribution from policies", "\\textit{redistribution from} policies")
-        "analysis"  → ("analysis", "analysis")   # no @ — sort key == display text
+        "analysis"  → ("", "analysis")   # no @ — no explicit sort override
     """
     if "@" in raw:
         sort_key, _, display = raw.partition("@")
         return sort_key.strip(), display.strip()
-    return raw.strip(), raw.strip()
+    return "", raw.strip()
 
 
 def _parse_heading_raw_text(heading_raw_text: str) -> dict:
@@ -108,6 +108,24 @@ def _parse_heading_raw_text(heading_raw_text: str) -> dict:
     )
 
 
+_BOLD_ENCAP_VALUES = frozenset({"bold", "textbf", "bf"})
+
+
+def _is_bold_encap(value: str) -> bool:
+    """Return True if *value* denotes a bold page-number encap style."""
+    return value.strip().lower() in _BOLD_ENCAP_VALUES
+
+
+def _make_encap_item(value: str) -> QStandardItem:
+    """Build the Page/encap cell, rendering it in bold when the encap calls for it."""
+    item = QStandardItem(value)
+    if _is_bold_encap(value):
+        font = item.font()
+        font.setBold(True)
+        item.setFont(font)
+    return item
+
+
 def _build_canonical_heading(row_items: list[QStandardItem | None]) -> str:
     """
     Reconstruct the full LaTeX makeindex string from a row's ``QStandardItem`` list.
@@ -127,8 +145,8 @@ def _build_canonical_heading(row_items: list[QStandardItem | None]) -> str:
     def _level_str(sort_key: str, display: str) -> str:
         if not sort_key and not display:
             return None  # type: ignore[return-value]  # sentinel: level absent
-        if sort_key == display:
-            return sort_key
+        if not sort_key or sort_key == display:
+            return display  # blank/matching sort key — no @ override needed
         return f"{sort_key}@{display}"
 
     main  = _level_str(_text(COL_MAIN_SORT), _text(COL_MAIN_DISP))
@@ -159,12 +177,12 @@ class EntryModifierList(QWidget):
     Column layout (see module-level COL_* constants)::
 
         0  ID           — non-editable, hidden from normal use
-        1  Main Sort    — pre-@ portion of the main level
-        2  Main Display — post-@ portion (equals sort key when no @ present)
-        3  Sub1 Sort
-        4  Sub1 Display
-        5  Sub2 Sort
-        6  Sub2 Display
+        1  Main Display — post-@ portion (equals sort key when no @ present)
+        2  Main Sort    — pre-@ portion of the main level
+        3  Sub1 Display
+        4  Sub1 Sort
+        5  Sub2 Display
+        6  Sub2 Sort
         7  Encap        — post-| portion (e.g. textbf, see, seealso)
 
     Signals
@@ -258,10 +276,11 @@ class EntryModifierList(QWidget):
             unique_id = ref["unique_id_number"]
             parsed = _parse_heading_raw_text(ref.get("heading_raw_text", ""))
 
-            # Prefer explicit encap field from the payload over parsed encap
-            # (the parser handles the |encap suffix; the payload field is the
-            # authoritative source for the stored value).
-            stored_encap = ref.get("encap") or parsed["encap"] or ""
+            # Prefer the encap parsed straight from heading_raw_text — it's
+            # derived fresh from the source .tex on every load, whereas the
+            # payload's encap field may be a stale or generic default. Fall
+            # back to the payload field only when the raw text has none.
+            stored_encap = parsed["encap"] or ref.get("encap") or ""
 
             id_item = QStandardItem()
             id_item.setData(unique_id, Qt.ItemDataRole.DisplayRole)
@@ -275,13 +294,13 @@ class EntryModifierList(QWidget):
 
             row = [
                 id_item,
-                _item(parsed["main_sort"]),
                 _item(parsed["main_disp"]),
-                _item(parsed["sub1_sort"]),
+                _item(parsed["main_sort"]),
                 _item(parsed["sub1_disp"]),
-                _item(parsed["sub2_sort"]),
+                _item(parsed["sub1_sort"]),
                 _item(parsed["sub2_disp"]),
-                _item(stored_encap),
+                _item(parsed["sub2_sort"]),
+                _make_encap_item(stored_encap),
             ]
             self.base_model.appendRow(row)
 
@@ -314,7 +333,7 @@ class EntryModifierList(QWidget):
 
         unique_id = ref["unique_id_number"]
         parsed = _parse_heading_raw_text(ref.get("heading_raw_text", ""))
-        stored_encap = ref.get("encap") or parsed["encap"] or ""
+        stored_encap = parsed["encap"] or ref.get("encap") or ""
 
         id_item = QStandardItem()
         id_item.setData(unique_id, Qt.ItemDataRole.DisplayRole)
@@ -325,13 +344,13 @@ class EntryModifierList(QWidget):
 
         self.base_model.appendRow([
             id_item,
-            _item(parsed["main_sort"]),
             _item(parsed["main_disp"]),
-            _item(parsed["sub1_sort"]),
+            _item(parsed["main_sort"]),
             _item(parsed["sub1_disp"]),
-            _item(parsed["sub2_sort"]),
+            _item(parsed["sub1_sort"]),
             _item(parsed["sub2_disp"]),
-            _item(stored_encap),
+            _item(parsed["sub2_sort"]),
+            _make_encap_item(stored_encap),
         ])
 
         # Update the location map so get_location_metadata works immediately
@@ -394,6 +413,14 @@ class EntryModifierList(QWidget):
 
         entry_id = id_item.data(Qt.ItemDataRole.DisplayRole)
         row_items = [self.base_model.item(row, c) for c in range(len(_HEADERS))]
+
+        # Keep bold styling in sync with manual edits to the Page/encap cell.
+        encap_item = row_items[COL_ENCAP]
+        if col == COL_ENCAP and encap_item:
+            font = encap_item.font()
+            font.setBold(_is_bold_encap(encap_item.text()))
+            encap_item.setFont(font)
+
         canonical_heading = _build_canonical_heading(row_items)
 
         self.entry_modifier_edit_committed.emit(entry_id, canonical_heading)
