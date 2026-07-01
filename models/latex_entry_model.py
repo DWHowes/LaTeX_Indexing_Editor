@@ -52,7 +52,7 @@ class IndexEntryModel:
             "path": path,
             "line": int(line),
             "col": int(col),
-            "encap": "standard",
+            "encap": self.page_style if self.page_style else "standard",
             "see": None,
             "seealso": None,
             "has_references": True,
@@ -64,3 +64,4 @@ class IndexEntryModel:
             uid_dict[self.xref_type] = self.xref_target
             uid_dict["has_references"] = False
         return uid_dict
+    
