@@ -1,4 +1,7 @@
-from PySide6.QtWidgets import QLineEdit, QTableView, QVBoxLayout, QWidget, QLabel, QHeaderView, QHBoxLayout
+from PySide6.QtWidgets import (
+    QLineEdit, QTableView, QVBoxLayout, QWidget, QLabel, QHeaderView, QHBoxLayout,
+    QStyledItemDelegate, QComboBox, QStyleOptionViewItem,
+)
 from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Signal, Slot, Qt
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QFont
 
@@ -117,13 +120,82 @@ def _is_bold_encap(value: str) -> bool:
 
 
 def _make_encap_item(value: str) -> QStandardItem:
-    """Build the Page/encap cell, rendering it in bold when the encap calls for it."""
+    """Build the Page/encap cell, rendering it in bold/italic when the encap calls for it."""
     item = QStandardItem(value)
     if _is_bold_encap(value):
         font = item.font()
         font.setBold(True)
         item.setFont(font)
+    elif _is_italic_encap(value):
+        font = item.font()
+        font.setItalic(True)
+        item.setFont(font)
     return item
+
+
+_ITALIC_ENCAP_VALUES = frozenset({"textit", "it", "italic"})
+
+
+def _is_italic_encap(value: str) -> bool:
+    """Return True if *value* denotes an italic page-number encap style."""
+    return value.strip().lower() in _ITALIC_ENCAP_VALUES
+
+
+# (label, canonical value) — order defines combo box index order
+_PAGE_STYLE_OPTIONS: list[tuple[str, str]] = [
+    ("Standard", ""),
+    ("Bold", "textbf"),
+    ("Italic", "textit"),
+]
+
+
+class PageStyleDelegate(QStyledItemDelegate):
+    """
+    QStyledItemDelegate for the Page/encap column.
+
+    Presents a QComboBox with Standard/Bold/Italic options in place of free
+    text entry. Legacy on-disk aliases (e.g. "bf", "bold", "it") are
+    recognised when populating the editor but always normalised to the
+    canonical "textbf"/"textit" values on commit.
+    """
+
+    def createEditor(self, parent, option: QStyleOptionViewItem, index: QModelIndex) -> QComboBox:
+        combo = QComboBox(parent)
+        for label, _value in _PAGE_STYLE_OPTIONS:
+            combo.addItem(label)
+        # Persistent editors never get a focus-out, so we commit on every
+        # selection change instead. setEditorData's blockSignals guard (below)
+        # keeps the initial setCurrentIndex() call from firing this and
+        # committing right back the value we just loaded.
+        combo.currentIndexChanged.connect(lambda _index, ed=combo: self.commitData.emit(ed))
+        return combo
+
+    def setEditorData(self, editor: QComboBox, index: QModelIndex) -> None:
+        current = str(index.data(Qt.ItemDataRole.EditRole) or "")
+        if _is_bold_encap(current):
+            target_value = "textbf"
+        elif _is_italic_encap(current):
+            target_value = "textit"
+        else:
+            target_value = ""
+
+        editor.blockSignals(True)
+        try:
+            for row, (_label, value) in enumerate(_PAGE_STYLE_OPTIONS):
+                if value == target_value:
+                    editor.setCurrentIndex(row)
+                    break
+            else:
+                editor.setCurrentIndex(0)  # fall back to "Standard" for unrecognised values
+        finally:
+            editor.blockSignals(False)
+
+    def setModelData(self, editor: QComboBox, model, index: QModelIndex) -> None:
+        _label, value = _PAGE_STYLE_OPTIONS[editor.currentIndex()]
+        model.setData(index, value, Qt.ItemDataRole.EditRole)
+
+    def updateEditorGeometry(self, editor: QComboBox, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        editor.setGeometry(option.rect)
 
 
 def _build_canonical_heading(row_items: list[QStandardItem | None]) -> str:
@@ -252,6 +324,11 @@ class EntryModifierList(QWidget):
         header.setSectionResizeMode(COL_ENCAP,      QHeaderView.ResizeMode.ResizeToContents)
         self.entries_table_view.verticalHeader().hide()
 
+        # Page/encap column uses a Standard/Bold/Italic combo box instead of
+        # free text entry.
+        self._page_style_delegate = PageStyleDelegate(self.entries_table_view)
+        self.entries_table_view.setItemDelegateForColumn(COL_ENCAP, self._page_style_delegate)
+
         # Wire edit-commit signal after view is fully constructed
         self.base_model.dataChanged.connect(self._on_cell_data_changed)
 
@@ -328,6 +405,18 @@ class EntryModifierList(QWidget):
 
         self.proxy_model.setDynamicSortFilter(True)
         self.base_model.dataChanged.connect(self._on_cell_data_changed)
+        self._open_all_persistent_encap_editors()
+
+    def _open_persistent_encap_editor(self, source_row: int) -> None:
+        """Open a persistent PageStyleDelegate combo box for one row's Page/encap cell."""
+        proxy_index = self.proxy_model.mapFromSource(
+            self.base_model.index(source_row, COL_ENCAP)
+        )
+        self.entries_table_view.openPersistentEditor(proxy_index)
+
+    def _open_all_persistent_encap_editors(self) -> None:
+        for row in range(self.base_model.rowCount()):
+            self._open_persistent_encap_editor(row)
 
     def get_location_metadata(self, entry_id: int) -> dict | None:
         """Return hidden coordinate and encap metadata for *entry_id*."""
@@ -377,11 +466,13 @@ class EntryModifierList(QWidget):
         }
 
         # Scroll to the new row and reconnect
+        new_row = self.base_model.rowCount() - 1
         new_proxy_index = self.proxy_model.mapFromSource(
-            self.base_model.index(self.base_model.rowCount() - 1, COL_MAIN_DISP)
+            self.base_model.index(new_row, COL_MAIN_DISP)
         )
         self.entries_table_view.scrollTo(new_proxy_index)
         self.base_model.dataChanged.connect(self._on_cell_data_changed)
+        self._open_persistent_encap_editor(new_row)
 
     @property
     def table_view(self) -> QTableView:
@@ -464,11 +555,12 @@ class EntryModifierList(QWidget):
         entry_id = id_item.data(Qt.ItemDataRole.DisplayRole)
         row_items = [self.base_model.item(row, c) for c in range(len(_HEADERS))]
 
-        # Keep bold styling in sync with manual edits to the Page/encap cell.
+        # Keep bold/italic styling in sync with edits to the Page/encap cell.
         encap_item = row_items[COL_ENCAP]
         if col == COL_ENCAP and encap_item:
             font = encap_item.font()
             font.setBold(_is_bold_encap(encap_item.text()))
+            font.setItalic(_is_italic_encap(encap_item.text()))
             encap_item.setFont(font)
 
         canonical_heading = _build_canonical_heading(row_items)
