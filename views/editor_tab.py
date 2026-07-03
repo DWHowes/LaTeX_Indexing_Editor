@@ -1,6 +1,6 @@
 import re
-from PySide6.QtWidgets import QPlainTextEdit, QTextEdit
-from PySide6.QtGui import QPalette, QTextDocument, QTextCursor, QColor, QFont
+from PySide6.QtWidgets import QPlainTextEdit, QMenu
+from PySide6.QtGui import QPalette, QTextDocument, QTextCursor, QColor, QFont, QAction
 from PySide6.QtCore import QEvent, QTimer, Qt, Signal
 
 from models.latex_highlighter import LatexHighlighter
@@ -410,6 +410,49 @@ class EditorTab(QPlainTextEdit):
             super().keyPressEvent(event)
         else:
             event.ignore()
+
+    def _canUndo(self) -> bool:
+        """Return whether an undo operation is available."""
+        doc = self.document()
+        return bool(doc and doc.isUndoAvailable())
+
+    def _canRedo(self) -> bool:
+        """Return whether a redo operation is available."""
+        doc = self.document()
+        return bool(doc and doc.isRedoAvailable())
+    
+    def contextMenuEvent(self, event):
+        """
+        Restrict the context menu to only: Undo, Redo, Copy, Select All.
+        This prevents cut/paste operations from bypassing keyPressEvent restrictions.
+        """
+        menu = QMenu(self)
+
+        undo_action = QAction("Undo", self)
+        undo_action.setEnabled(self._canUndo())
+        undo_action.triggered.connect(self.undo)
+        menu.addAction(undo_action)
+
+        redo_action = QAction("Redo", self)
+        redo_action.setEnabled(self._canRedo())
+        redo_action.triggered.connect(self.redo)
+        menu.addAction(redo_action)
+
+        menu.addSeparator()
+
+        copy_action = QAction("Copy", self)
+        copy_action.setEnabled(self.textCursor().hasSelection())
+        copy_action.triggered.connect(self.copy)
+        menu.addAction(copy_action)
+
+        select_all_action = QAction("Select All", self)
+        # enable select-all when there's at least one character
+        select_all_action.setEnabled(self.document().characterCount() > 1)
+        select_all_action.triggered.connect(self.selectAll)
+        menu.addAction(select_all_action)
+
+        menu.exec(event.globalPos())
+        event.accept()
 
     def is_modified(self) -> bool:
         """Public contract exposing the underlying document's modified state."""
