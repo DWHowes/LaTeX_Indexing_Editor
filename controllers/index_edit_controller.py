@@ -1,14 +1,15 @@
 import os
-from PySide6.QtCore import QObject, Signal, Slot, Qt
+from PySide6.QtCore import QObject, Signal, Slot, Qt, QTimer
 from PySide6.QtGui import QStandardItem
+from PySide6.QtWidgets import QMessageBox
 
 from views.index_tree_view import IndexTreeView
 from controllers.document_io_controller import DocumentIOController
 
 
 class IndexEditController(QObject):
-    """
-    Owns the rewrite pipeline for existing \\index macro edits.
+    r"""
+    Owns the rewrite pipeline for existing \index macro edits.
 
     Responsibilities
     ----------------
@@ -26,18 +27,22 @@ class IndexEditController(QObject):
     # project dirty and update any other interested parties.
     heading_renamed = Signal(str, str)   # old_raw_token, new_raw_token
     heading_node_orphaned = Signal(int)  # heading_id of the removed node
+    entry_deleted = Signal(int)          # entry_id of a deleted reference
+    heading_rename_conflict = Signal(str, list)  # old_raw_token, blocking entry ids
 
     def __init__(
         self,
         tree_view: IndexTreeView,
         doc_io: DocumentIOController,
         entry_modifier_model,   # EntryModifierModel — avoid circular import
+        staging_model,          # IndexEditStagingModel — avoid circular import
         parent=None,
     ):
         super().__init__(parent)
         self._tree = tree_view
         self._doc_io = doc_io
         self._entry_model = entry_modifier_model
+        self._staging_model = staging_model
 
         # Wire double-click to our handler — we disconnect the existing
         # navigation handler and re-route so we can split col 0 / col 1 behaviour.
@@ -80,12 +85,23 @@ class IndexEditController(QObject):
         raw_token = item.data(Qt.ItemDataRole.ToolTipRole) or item.text()
         item.setData(raw_token, Qt.ItemDataRole.UserRole + 10)   # stash pre-edit value
 
-        self._tree.setEditTriggers(
-            self._tree.EditTrigger.DoubleClicked |
-            self._tree.EditTrigger.EditKeyPressed
-        )
+        # edit(QModelIndex) opens the editor unconditionally — it does not
+        # consult editTriggers() at all (that overload only matters for
+        # Qt's own internal open-on-trigger checks). Toggling triggers on
+        # and back off around this call therefore does nothing useful,
+        # and it's actively harmful: this slot runs from inside
+        # doubleClicked, which itself fires from inside
+        # QAbstractItemView::mouseDoubleClickEvent(). That method rechecks
+        # the current trigger state immediately after the signal emission
+        # returns, to decide whether it should also open an editor itself.
+        # Flipping editTriggers on then back off while still on that same
+        # call stack is what was corrupting the view's persistent-editor
+        # bookkeeping, producing "editor does not belong to this view"
+        # once the editor was later closed. editTriggers stays permanently
+        # NoEditTriggers (set in IndexTreeView.__init__) so no other path
+        # (F2, single click, etc.) can open an editor — only this explicit
+        # call does.
         self._tree.edit(index)
-        self._tree.setEditTriggers(self._tree.EditTrigger.NoEditTriggers)
 
     # ------------------------------------------------------------------
     # Edit commit handler
@@ -95,9 +111,28 @@ class IndexEditController(QObject):
     def _on_tree_item_edited(self, top_left, bottom_right, roles):
         """
         Fires when the inline editor commits a value to the base model.
-        Drives the full rewrite pipeline for all references sharing the
-        edited heading token.
+
+        IMPORTANT: this fires synchronously from inside the view's own
+        commitData() -> closeEditor() sequence — the delegate writes the
+        edited text into the model, which raises dataChanged right there,
+        before the view has finished tearing down its persistent editor
+        for this index. The actual rewrite pipeline below does heavy
+        model/tree mutation (restoring item text on a failed rewrite,
+        and heading_renamed potentially driving a tree repopulation
+        elsewhere in the pipeline) — doing that here, still mid-call-stack
+        inside commitData/closeEditor, can replace or destroy the model
+        out from under the view before it finishes, which is exactly what
+        produces Qt's "editor does not belong to this view" warnings and
+        silently aborts the pipeline before it reaches the table or the
+        .tex file.
+
+        So only cheap, read-only validity checks happen here. The real
+        work is scheduled for the next event-loop tick via
+        QTimer.singleShot(0, ...), by which point the view has fully
+        finished closing its editor and this handler is no longer on that
+        call stack.
         """
+
         if self._rewriting:
             return
         if Qt.ItemDataRole.EditRole not in roles and Qt.ItemDataRole.DisplayRole not in roles:
@@ -113,19 +148,73 @@ class IndexEditController(QObject):
         old_raw_token = item.data(Qt.ItemDataRole.UserRole + 10)
 
         if not new_display or new_display == old_raw_token:
-            return  # nothing changed or empty — restore and bail
+            return  # nothing changed or empty — nothing to do
         if not old_raw_token:
             return
 
-        # The new raw token is the display text; @-sort-key notation is
-        # preserved if the user types it explicitly, otherwise sort key == display.
-        new_raw_token = new_display
+        QTimer.singleShot(
+            0, lambda: self._process_heading_rename(item, old_raw_token, new_display)
+        )
+
+    def _process_heading_rename(self, item: QStandardItem, old_raw_token: str, new_raw_token: str) -> None:
+        """
+        The actual rewrite pipeline, deferred out of the commitData/
+        closeEditor call stack by _on_tree_item_edited. See that method's
+        docstring for why this split exists.
+        """
+        # The item (or its model) may have gone away between scheduling
+        # and this tick firing — e.g. a project close in the interim.
+        # item is a wrapped C++ QStandardItem: if the model was torn down
+        # in that window, touching it at all (not just item.model())
+        # raises RuntimeError rather than returning None, so this is
+        # caught explicitly rather than relying on a None check alone.
+        try:
+            if item is None or item.model() is None:
+                return
+        except RuntimeError:
+            return
+
 
         # Collect all references under this node (column 1 sibling, UserRole+1)
         affected_refs = self._collect_refs_from_node(item)
         if not affected_refs:
-            print(f"[EDIT CTRL] No references found under node '{old_raw_token}' — aborting")
             self._restore_item_text(item, old_raw_token)
+            return
+
+        # ------------------------------------------------------------
+        # Stage 5: conflict guard
+        # ------------------------------------------------------------
+        # A heading rename rewrites every reference sharing this node in
+        # one atomic sweep. If any of those references already has an
+        # unsaved, in-flight edit staged from the table side (user is
+        # mid-edit on that row, not yet finalized via
+        # EntryModifierController._finalize_row_edit), proceeding here
+        # would silently clobber it: the rewrite loop below calls
+        # stage_edit() with a value computed from the stale cached
+        # heading, discarding whatever the table had staged, and its
+        # .tex write targets coordinates the table's own finalize is
+        # also about to write to. The whole rename is blocked rather
+        # than applied to only the unaffected entries — a rename that
+        # lands on some but not all of a node's children would leave
+        # the tree node itself out of sync with its own subtree.
+        conflict_ids = sorted({
+            uid for uid in (
+                int(ref.get("unique_id_number") or ref.get("id") or 0)
+                for ref in affected_refs
+            )
+            if uid and self._staging_model.is_dirty(uid)
+        })
+        if conflict_ids:
+            self._restore_item_text(item, old_raw_token)
+            self.heading_rename_conflict.emit(old_raw_token, conflict_ids)
+            QMessageBox.warning(
+                self._tree,
+                "Rename blocked",
+                "This heading can't be renamed right now because "
+                f"{len(conflict_ids)} of its entries have an edit in "
+                "progress in the entry table. Finish that edit (move to "
+                "another row, or press Enter) and try the rename again."
+            )
             return
 
         # Build the old and new macro text for each reference and rewrite
@@ -142,15 +231,8 @@ class IndexEditController(QObject):
             self._rewriting = False
 
         if success_count == 0:
-            print(f"[EDIT CTRL] All rewrites failed for '{old_raw_token}' — restoring node")
             self._restore_item_text(item, old_raw_token)
             return
-
-        if success_count < len(affected_refs):
-            print(
-                f"[EDIT CTRL] Partial rewrite: {success_count}/{len(affected_refs)} "
-                f"references updated for '{old_raw_token}'"
-            )
 
         # Update the node's ToolTipRole to the new raw token
         item.setData(new_raw_token, Qt.ItemDataRole.ToolTipRole)
@@ -161,10 +243,6 @@ class IndexEditController(QObject):
             item.sort_key = item._compute_clean_sort_key(new_raw_token)
 
         self.heading_renamed.emit(old_raw_token, new_raw_token)
-        print(
-            f"[EDIT CTRL] Renamed '{old_raw_token}' → '{new_raw_token}' "
-            f"across {success_count} reference(s)"
-        )
 
     # ------------------------------------------------------------------
     # Reference collection
@@ -207,12 +285,10 @@ class IndexEditController(QObject):
     ) -> bool:
         uid = int(ref.get("unique_id_number") or ref.get("id") or 0)
         if uid == 0:
-            print(f"[EDIT CTRL] Reference missing unique_id_number — skipping")
             return False
 
         location = self._entry_model.get_location_metadata(uid)
         if location is None:
-            print(f"[EDIT CTRL] No location metadata for ID {uid} — skipping")
             return False
 
         file_path = location.get("file_path", "")
@@ -220,32 +296,33 @@ class IndexEditController(QObject):
         abs_end = location.get("absolute_end")
 
         if not file_path or abs_pos is None or abs_end is None:
-            print(
-                f"[EDIT CTRL] Reference ID {uid} missing coordinates "
-                f"(file={file_path!r}, pos={abs_pos}, end={abs_end}) — skipping"
-            )
             return False
 
         current_heading = self._entry_model.get_heading_text(uid)
         if not current_heading:
-            print(f"[EDIT CTRL] No heading_raw_text in cache for ID {uid} — skipping")
             return False
 
         new_heading = self._substitute_token_in_heading(
             current_heading, old_raw_token, new_raw_token
         )
         if new_heading == current_heading:
-            print(f"[EDIT CTRL] Token '{old_raw_token}' not found in heading for ID {uid} — skipping")
             return False
+
+        # Record the intended value before attempting the .tex write, so the
+        # staging model reflects "what the controller currently believes
+        # this entry's heading is" even while the write is in flight.
+        self._staging_model.stage_edit(uid, new_heading)
 
         new_macro = f"\\index{{{new_heading}}}"
         delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro)
         if delta is None:
-            print(f"[EDIT CTRL] rewrite_macro_span failed for ID {uid}")
+            # Write did not happen — revert the staged value so it doesn't
+            # drift out of sync with what's actually on the .tex source.
+            self._staging_model.discard(uid)
             return False
 
         self._entry_model.update_entry_coordinates(uid, abs_pos, abs_pos + len(new_macro))
-        self._entry_model.mark_dirty(uid)                           
+        self._entry_model.mark_dirty(uid)
 
         record = self._entry_model._records.get(uid)
         if record:
@@ -253,8 +330,16 @@ class IndexEditController(QObject):
 
         if delta != 0:
             shifted_ids = self._entry_model.shift_coordinates_after(file_path, abs_pos, delta)
-            for shifted_id in shifted_ids:                          
-                self._entry_model.mark_dirty(shifted_id)           
+            for shifted_id in shifted_ids:
+                self._entry_model.mark_dirty(shifted_id)
+
+        # .tex write confirmed successful — promote staged to original.
+        self._staging_model.commit(uid)
+
+        # Keep this entry's range partner (if any) in sync -- see
+        # _sync_range_partner's docstring for why this wasn't happening at
+        # all beforehand.
+        self._sync_range_partner(uid, self._strip_encap_suffix(new_heading))
 
         return True
 
@@ -325,6 +410,129 @@ class IndexEditController(QObject):
             result = f"{result}|{encap}"
         return result
 
+    @staticmethod
+    def _strip_encap_suffix(heading_text: str) -> str:
+        """
+        Returns heading_text with any trailing "|encap" suffix removed,
+        respecting brace depth (same unbraced-"|" scan already used by
+        _substitute_token_in_heading). No-ops if there's no unbraced "|".
+        """
+        depth = 0
+        for i in range(len(heading_text) - 1, -1, -1):
+            ch = heading_text[i]
+            if ch == "}":
+                depth += 1
+            elif ch == "{":
+                depth -= 1
+            elif ch == "|" and depth == 0:
+                return heading_text[:i]
+        return heading_text
+
+    # ------------------------------------------------------------------
+    # Range-partner syncing
+    # ------------------------------------------------------------------
+
+    def _sync_range_partner(self, entry_id: int, new_heading_no_encap: str) -> bool:
+        r"""
+        If entry_id is one half of a \index range pair (range_partner_id
+        set on its cached record), rewrites the partner's macro so both
+        halves keep an identical heading chain — makeindex requires the
+        opener and closer to share the exact same path for the range to
+        be recognised as one range rather than two unrelated entries.
+
+        range_partner_id is assigned at insert time (see
+        LatexIndexController.insert_latex and
+        AppPipelineController._handle_manual_index_insertion) but nothing
+        in this controller ever consulted it before this method existed —
+        confirmed by there being no other reference to range_partner_id
+        anywhere in this file. That gap is what let a table edit rewrite
+        only the one entry_id it was given (leaving the other half of the
+        range with its original, now-mismatched heading indefinitely),
+        while a tree rename would only reach whatever refs happened to
+        already be attached to the renamed node — and
+        IndexTreeView.populate_hierarchy_tree explicitly excludes range
+        closers from every node's ref list. This method is the one place
+        that now closes that gap for both call sites.
+
+        The partner's own "|encap" suffix (its page style and/or its own
+        "(" / ")" marker — necessarily the opposite one from entry_id's)
+        is preserved exactly as it currently stands on disk: neither
+        heading_raw_text (which never includes encap, across every
+        loading path in this codebase) nor the cached "encap" field
+        (whose meaning differs between the regex-fallback scan and the
+        live-insert path — see read_macro_span's docstring) can be
+        trusted as the source of truth for it, so it's read directly via
+        DocumentIOController.read_macro_span instead.
+
+        No-ops (returns True) if entry_id has no range partner. Returns
+        False if a partner exists but syncing it failed — callers should
+        treat that as a partial-success condition to warn about rather
+        than a reason to fail the whole edit, since by the time this
+        runs the primary entry's own rewrite has already succeeded.
+        """
+        record = self._entry_model._records.get(entry_id)
+        partner_id = record.get("range_partner_id") if record else None
+        if not partner_id:
+            return True
+
+        partner_location = self._entry_model.get_location_metadata(partner_id)
+        if partner_location is None:
+            print(f"[CONTROLLER WARNING] _sync_range_partner: no location for partner {partner_id}")
+            return False
+
+        partner_file = partner_location.get("file_path", "")
+        partner_pos = partner_location.get("absolute_position")
+        partner_end = partner_location.get("absolute_end")
+        if not partner_file or partner_pos is None or partner_end is None:
+            print(f"[CONTROLLER WARNING] _sync_range_partner: incomplete coordinates for partner {partner_id}")
+            return False
+
+        current_partner_macro = self._doc_io.read_macro_span(partner_file, partner_pos, partner_end)
+        if (
+            current_partner_macro is None
+            or not current_partner_macro.startswith("\\index{")
+            or not current_partner_macro.endswith("}")
+        ):
+            print(
+                f"[CONTROLLER WARNING] _sync_range_partner: unexpected span "
+                f"content for partner {partner_id}: {current_partner_macro!r}"
+            )
+            return False
+
+        partner_inner = current_partner_macro[len("\\index{"):-1]
+        partner_heading_only = self._strip_encap_suffix(partner_inner)
+        partner_encap = (
+            partner_inner[len(partner_heading_only) + 1:]
+            if len(partner_inner) > len(partner_heading_only)
+            else ""
+        )
+
+        new_partner_heading = (
+            f"{new_heading_no_encap}|{partner_encap}" if partner_encap else new_heading_no_encap
+        )
+        if new_partner_heading == partner_inner:
+            return True  # already in sync — nothing to do
+
+        new_partner_macro = f"\\index{{{new_partner_heading}}}"
+        delta = self._doc_io.rewrite_macro_span(partner_file, partner_pos, partner_end, new_partner_macro)
+        if delta is None:
+            print(f"[CONTROLLER WARNING] _sync_range_partner: rewrite rejected for partner {partner_id}")
+            return False
+
+        self._entry_model.update_entry_coordinates(partner_id, partner_pos, partner_pos + len(new_partner_macro))
+        self._entry_model.mark_dirty(partner_id)
+
+        partner_record = self._entry_model._records.get(partner_id)
+        if partner_record:
+            partner_record["heading_raw_text"] = new_heading_no_encap
+
+        if delta != 0:
+            shifted_ids = self._entry_model.shift_coordinates_after(partner_file, partner_pos, delta)
+            for shifted_id in shifted_ids:
+                self._entry_model.mark_dirty(shifted_id)
+
+        return True
+
     # ------------------------------------------------------------------
     # Shared service API — called by EntryModifierController
     # ------------------------------------------------------------------
@@ -336,7 +544,6 @@ class IndexEditController(QObject):
     ) -> bool:
         location = self._entry_model.get_location_metadata(entry_id)
         if location is None:
-            print(f"[EDIT CTRL] No location metadata for ID {entry_id} — aborting")
             return False
 
         file_path = location.get("file_path", "")
@@ -344,12 +551,10 @@ class IndexEditController(QObject):
         abs_end = location.get("absolute_end")
 
         if not file_path or abs_pos is None or abs_end is None:
-            print(f"[EDIT CTRL] Missing coordinates for ID {entry_id} — aborting")
             return False
 
         old_heading = self._entry_model.get_heading_text(entry_id)
         if not old_heading:
-            print(f"[EDIT CTRL] No heading_raw_text for ID {entry_id} — aborting")
             return False
 
         if new_canonical_heading == old_heading:
@@ -358,7 +563,6 @@ class IndexEditController(QObject):
         new_macro = f"\\index{{{new_canonical_heading}}}"
         delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro)
         if delta is None:
-            print(f"[EDIT CTRL] rewrite_macro_span failed for ID {entry_id}")
             return False
 
         self._entry_model.update_entry_coordinates(
@@ -375,8 +579,78 @@ class IndexEditController(QObject):
             for shifted_id in shifted_ids:                          # NEW
                 self._entry_model.mark_dirty(shifted_id)           # NEW
 
+        # Keep this entry's range partner (if any) in sync -- this is the
+        # actual fix for table edits only ever updating the range opener
+        # and leaving the closer with its original heading text. Nothing
+        # in this controller ever consulted range_partner_id before this.
+        self._sync_range_partner(entry_id, self._strip_encap_suffix(new_canonical_heading))
+
         self._reconcile_heading_node(entry_id, old_heading, new_canonical_heading)
-        
+
+        return True
+
+    def handle_entry_deletion(self, entry_id: int) -> bool:
+        r"""
+        Shared service API — permanently deletes a single \index reference.
+
+        Mirrors handle_entry_table_edit's shape (same location-metadata
+        guard, same rewrite_macro_span + coordinate-shift sequence) but
+        rewrites the macro span to an empty string instead of a new
+        heading, then removes rather than updates the model cache and
+        reconciles the tree by removing this reference's entry from the
+        heading node's display, pruning the node entirely if no
+        references remain under its heading_id.
+
+        This is the single entry point for reference deletion regardless
+        of origin — EntryModifierController._perform_row_deletion (table)
+        and any future tree-side "delete reference" context-menu action
+        both call this directly, so the .tex write, coordinate shift, and
+        cache/tree cleanup only exist in one place. entry_deleted is
+        emitted on success so any view that didn't initiate the deletion
+        (i.e. the table, when a tree-originated delete lands here) can
+        remove its own row without a full reload.
+        """
+        location = self._entry_model.get_location_metadata(entry_id)
+        if location is None:
+            return False
+
+        file_path = location.get("file_path", "")
+        abs_pos = location.get("absolute_position")
+        abs_end = location.get("absolute_end")
+        heading_id = location.get("heading_id")
+
+        if not file_path or abs_pos is None or abs_end is None:
+            return False
+
+        heading_text = self._entry_model.get_heading_text(entry_id)
+
+        delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, "")
+        if delta is None:
+            return False
+
+        if delta != 0:
+            shifted_ids = self._entry_model.shift_coordinates_after(file_path, abs_pos, delta)
+            for shifted_id in shifted_ids:
+                self._entry_model.mark_dirty(shifted_id)
+
+        # Cache/staging cleanup before the orphan check below, so a heading
+        # with only this one reference correctly reads as having zero
+        # remaining records.
+        self._entry_model.delete_record(entry_id)
+        self._staging_model.forget(entry_id)
+
+        if heading_text:
+            self._remove_reference_from_tree_display(entry_id, heading_text)
+
+            if heading_id is not None:
+                remaining = [
+                    r for r in self._entry_model._records.values()
+                    if r.get("heading_id") == heading_id
+                ]
+                if not remaining:
+                    self._remove_orphaned_heading(self._tree.engine, heading_id, heading_text)
+
+        self.entry_deleted.emit(entry_id)
         return True
 
     # ------------------------------------------------------------------
@@ -400,34 +674,75 @@ class IndexEditController(QObject):
              and insert a new tree node.
           3. old_heading node has no remaining references — remove it from
              the tree and _active_headings.
+
+        Previously this method only patched _active_headings / the model
+        cache's heading_id — it never touched the tree's own per-node ref
+        list (the column-1 sibling's UserRole+1 data + "[uid]" bracket
+        text), so a table-originated heading change never showed up in the
+        tree: the entry stayed listed under its old node (never detached)
+        and, if a brand-new node had to be created, that node was inserted
+        with an empty ref list so the entry didn't appear there either.
+        Detaching from the old node and attaching to the new one — via the
+        same primitives handle_entry_deletion already uses for the
+        detach side — closes that gap.
         """
         engine = self._tree.engine
+        record = self._entry_model._records.get(entry_id)
+
+        # Both old_heading and new_heading may carry a "|encap" suffix
+        # (new_heading always does when EntryModifierController
+        # ._assemble_canonical_heading built it from a row with a
+        # non-empty Page/encap column; old_heading normally doesn't,
+        # since EntryModifierModel's cached heading_raw_text never
+        # includes it — but stripping both defensively costs nothing).
+        # _active_headings' own heading_text values never include encap
+        # either, so leaving it in would mean _find_heading_id_by_text
+        # never matches an existing node for an encap'd heading (spawning
+        # a spurious duplicate every time) and the encap literal would
+        # leak into the tree node's own display label as if it were a
+        # heading level.
+        old_heading_clean = self._strip_encap_suffix(old_heading)
+        new_heading_clean = self._strip_encap_suffix(new_heading)
+
+        # Detach this reference from the OLD heading node's display first —
+        # must happen before the heading_id reassignment below, and while
+        # old_heading still names the node this entry is currently attached
+        # to. Mirrors handle_entry_deletion's use of the same helper.
+        self._remove_reference_from_tree_display(entry_id, old_heading_clean)
 
         # --- Find or create the new heading in _active_headings ---
-        new_heading_id = self._find_heading_id_by_text(engine, new_heading)
-
+        new_heading_id = self._find_heading_id_by_text(engine, new_heading_clean)
         if new_heading_id is None:
-            new_heading_id = self._create_heading_in_engine(engine, new_heading)
-            # Insert the new node into the tree
-            parts = [p.strip() for p in new_heading.split("!") if p.strip()]
-            self._tree._insert_visual_node(
-                self._tree.base_model.invisibleRootItem(), parts, []
-            )
+            new_heading_id = self._create_heading_in_engine(engine, new_heading_clean)
+
+        # Attach this reference to the new heading's tree node, via the same
+        # public incremental-insert contract IndexTreeView already exposes
+        # for live single-entry inserts (append_entry). Its underlying
+        # _find_or_create_row transparently finds the node if new_heading
+        # already matches an existing one (case 1) or creates it fresh
+        # (case 2) — either way _populate_row_metadata appends this record
+        # to that node's ref list/bracket display, so the entry is never
+        # left dangling under the old node or attached to a visually-empty
+        # new one. append_entry (rather than calling _insert_visual_node
+        # directly) also re-sorts and re-expands the tree afterward so a
+        # freshly created node is immediately visible in place.
+        parts = [p.strip() for p in new_heading_clean.split("!") if p.strip()]
+        if parts and record:
+            self._tree.append_entry(parts, [record])
 
         # Update the reference record's heading_id in the model cache
-        record = self._entry_model._records.get(entry_id)
         if record:
             record["heading_id"] = new_heading_id
 
         # --- Check whether old heading is now orphaned ---
-        old_heading_id = self._find_heading_id_by_text(engine, old_heading)
+        old_heading_id = self._find_heading_id_by_text(engine, old_heading_clean)
         if old_heading_id is not None:
             remaining = [
                 r for r in self._entry_model._records.values()
                 if r.get("heading_id") == old_heading_id
             ]
             if not remaining:
-                self._remove_orphaned_heading(engine, old_heading_id, old_heading)
+                self._remove_orphaned_heading(engine, old_heading_id, old_heading_clean)
 
     def _find_heading_id_by_text(self, engine, heading_text: str) -> int | None:
         """
@@ -459,7 +774,6 @@ class IndexEditController(QObject):
             "depth": len(parts) - 1,
         }
         engine._active_headings.append(new_heading)
-        print(f"[EDIT CTRL] Created new heading id={new_id} '{heading_text}'")
         return new_id
 
     def _remove_orphaned_heading(
@@ -468,6 +782,14 @@ class IndexEditController(QObject):
         """
         Removes an orphaned heading from _active_headings and removes its
         node from the index tree.
+
+        Shared by two callers: _reconcile_heading_node (a rename left the
+        old heading with zero remaining references) and
+        handle_entry_deletion (a deleted reference was the last one under
+        its heading). Both cases mean the same thing at this point — no
+        reference anywhere still points to heading_id — so the DB row is
+        cleaned up here too, via EntryModifierModel.delete_heading_if_orphaned,
+        rather than in each caller separately.
         """
         engine._active_headings = [
             h for h in engine._active_headings if h.get("id") != heading_id
@@ -478,14 +800,87 @@ class IndexEditController(QObject):
         if parts:
             self._remove_tree_node_by_path(parts)
 
+        self._entry_model.delete_heading_if_orphaned(heading_id)
+
         self.heading_node_orphaned.emit(heading_id)
-        print(f"[EDIT CTRL] Removed orphaned heading id={heading_id} '{heading_text}'")
+
+    def _remove_reference_from_tree_display(self, entry_id: int, heading_text: str) -> None:
+        """
+        Removes entry_id from the ref-list (UserRole+1) stored on the
+        column-1 sibling of the tree node matching heading_text, and
+        refreshes the displayed "[id] [id]" bracket text accordingly.
+
+        Does not touch node structure — orphan-node pruning is a separate
+        decision made by the caller (handle_entry_deletion) once it has
+        confirmed no records remain under that heading_id, via
+        _remove_orphaned_heading.
+        """
+        parts = [p.strip() for p in heading_text.split("!") if p.strip()]
+        if not parts:
+            return
+
+        node = self._find_tree_node_by_path(parts)
+        if node is None:
+            return
+
+        parent = node.parent() or self._tree.base_model.invisibleRootItem()
+        sibling_col1 = parent.child(node.row(), 1)
+        if sibling_col1 is None:
+            return
+
+        role_uid = Qt.ItemDataRole.UserRole + 1
+        stored = sibling_col1.data(role_uid) or []
+        if not isinstance(stored, list):
+            return
+
+        remaining = [
+            r for r in stored
+            if int(r.get("unique_id_number") or r.get("id") or 0) != entry_id
+        ]
+        sibling_col1.setData(remaining, role_uid)
+        sibling_col1.setText(
+            " ".join(f"[{r['unique_id_number']}]" for r in remaining) if remaining else ""
+        )
+
+    def _find_tree_node_by_path(self, parts: list[str]) -> QStandardItem | None:
+        """
+        Walks the tree by ToolTipRole token matching (same traversal used
+        by _remove_tree_node_by_path) and returns the leaf node for parts,
+        or None if the path doesn't exist.
+        """
+        parent = self._tree.base_model.invisibleRootItem()
+        node = None
+        for token in parts:
+            found = None
+            for row in range(parent.rowCount()):
+                child = parent.child(row, 0)
+                if child and child.data(Qt.ItemDataRole.ToolTipRole).strip().lower() == token.lower():
+                    found = child
+                    break
+            if found is None:
+                return None
+            node = found
+            parent = found
+        return node
 
     def _remove_tree_node_by_path(self, parts: list[str]) -> None:
-        """
+        r"""
         Walks the tree by ToolTipRole token matching and removes the leaf
-        node for the given path.  Parent nodes are left intact (they may
-        have other children).
+        node for the given path — but ONLY if that node has no children.
+
+        A node can become "orphaned" (no references of its own) while
+        still being a live intermediate heading — e.g. "Sports" has no
+        direct \index{Sports} reference left, but "Sports!Football" is
+        still a child row under it in the tree. QStandardItemModel's
+        removeRow deletes a row's entire child subtree along with it, so
+        removing "Sports" in that case would silently delete "Football"
+        and everything under it too — the same kind of hierarchy gap the
+        table-side validation guards against, just approached from the
+        deletion direction instead of the edit direction. When that's the
+        case, the node is left in place as a structural placeholder (its
+        own ref-list cell has already been cleared by the caller); parent
+        nodes are otherwise left intact regardless (they may have other
+        children).
         """
         parent = self._tree.base_model.invisibleRootItem()
         for depth, token in enumerate(parts):
@@ -498,7 +893,9 @@ class IndexEditController(QObject):
             if found is None:
                 return  # path not found — tree already clean
             if depth == len(parts) - 1:
-                # This is the leaf — remove it
+                # This is the leaf — remove it, unless it still has children.
+                if found.rowCount() > 0:
+                    return
                 parent.removeRow(found.row())
                 return
             parent = found
@@ -511,4 +908,3 @@ class IndexEditController(QObject):
             item.setData(None, Qt.ItemDataRole.UserRole + 10)
         finally:
             self._rewriting = False
-            

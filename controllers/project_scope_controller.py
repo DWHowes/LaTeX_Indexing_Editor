@@ -52,6 +52,45 @@ class ProjectScopeController(QObject):
         """Returns the current list of paths for the Advanced Search Engine."""
         return self.model.fetch_active_unpruned_paths()
 
+    def detect_and_persist_root_tex_file(self) -> str | None:
+        r"""
+        Auto-detects the project's base/master .tex file when one hasn't
+        already been chosen (root_tex_file metadata is empty), so the user
+        isn't required to manually pick it via the tree view's "Set as
+        base file" action on every project open.
+
+        A LaTeX master file is distinguished from an \include-d/\input-ed
+        sub-file by containing both \documentclass{...} and
+        \begin{document} -- sub-files are just fragments meant to be pulled
+        into a master document and normally have neither. If exactly one
+        active project file matches, it's persisted as root_tex_file and
+        returned. If zero or multiple files match, detection is ambiguous
+        and nothing is set -- the user still has to choose manually via the
+        tree view in that case, same as before this method existed.
+        """
+        existing = self.get_current_project_metadata_value("root_tex_file")
+        if existing:
+            return existing
+
+        candidates: list[str] = []
+        for path in self.get_active_search_scope():
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+            except OSError:
+                continue
+            if "\\documentclass" in text and "\\begin{document}" in text:
+                candidates.append(path)
+
+        if len(candidates) == 1:
+            detected = os.path.normpath(candidates[0])
+            self.model.set_metadata_value("root_tex_file", detected)
+            return detected
+
+        return None
+
     def initialize_project_database(self, target_directory: str, project_name: str) -> None:
         """
         Public boundary contract to configure the project's data storage.

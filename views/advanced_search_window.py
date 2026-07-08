@@ -15,7 +15,7 @@ class AdvancedSearchWindow(QDialog):
     Coordinates search triggers across panel abstractions and emits navigation signals.
     """
     # Signature: absolute_file_path, 1_indexed_line, 1_indexed_column
-    navigate_to_target = Signal(str, int, int)
+    navigate_to_target = Signal(str, int, int, str, bool)
     # Session Management tracking signal
     closed = Signal()
 
@@ -61,6 +61,16 @@ class AdvancedSearchWindow(QDialog):
         self.search_btn.setFixedWidth(120)
         self.search_btn.setFixedHeight(26)
         self.search_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        # Qt auto-designates the first QPushButton in a QDialog as the
+        # implicit "default" button, which Return/Enter activates in
+        # addition to whatever explicitly has focus. Since search_input
+        # already reacts to Enter via returnPressed, leaving this button's
+        # autoDefault/default on means a single Enter keypress fires
+        # execute_project_search() twice back-to-back (once per signal),
+        # which races two SafeSearchThread instances against each other --
+        # see the reentrancy guard in execute_project_search for the fallout.
+        self.search_btn.setAutoDefault(False)
+        self.search_btn.setDefault(False)
         self.search_btn.clicked.connect(self.execute_project_search)
         query_layout.addWidget(self.search_btn)
         main_layout.addLayout(query_layout)
@@ -112,8 +122,26 @@ class AdvancedSearchWindow(QDialog):
 
         # Ensure any running background parsing passes are stopped safely
         if self.worker and self.worker.isRunning():
-            self.worker.terminate()
-            self.worker.wait()
+            # QThread.terminate() is a forceful OS-level kill (TerminateThread
+            # on Windows) applied to a thread that's running plain Python
+            # code -- it can hit mid-syscall (e.g. mid file-read) or mid
+            # GIL bookkeeping and leave the thread in a state the OS/runtime
+            # can't fully tear down, so the subsequent wait() either hangs
+            # or returns having left a zombie thread behind. Since a non-
+            # daemon thread in that state blocks clean interpreter shutdown,
+            # this was very likely what kept the process (and its console
+            # window) alive well after the search dialog itself was closed.
+            # SearchWorker already implements a cooperative cancellation
+            # path for exactly this (stop() sets _is_abort_requested, which
+            # process()'s loop checks between every line/file and exits
+            # from normally) -- it just wasn't being used here. wait() is
+            # still given a bound so a pathological hang here can't freeze
+            # the GUI thread indefinitely either.
+            self.worker.stop()
+            if not self.worker.wait(3000):
+                print("[SEARCH WARNING] worker did not stop within 3s of a cooperative stop request -- "
+                      "aborting this search request rather than risk destroying a still-running QThread")
+                return
 
         # Clear existing search items safely across tree nodes
         self.model.removeRows(0, self.model.rowCount())
@@ -148,8 +176,11 @@ class AdvancedSearchWindow(QDialog):
 
         loc_item = QStandardItem(location)
         loc_item.setEditable(False)
-        # Pack line and character parameters into UserRole metadata tracking cells
-        loc_item.setData((abs_path, line, col), Qt.ItemDataRole.UserRole)
+        # Pack line/column/fallback-text parameters into UserRole metadata
+        # cells. The snippet is carried through as the fallback re-locate
+        # string, used by IndexNavigationHelper if the stored line/col has
+        # drifted out of range since this result was indexed.
+        loc_item.setData((abs_path, line, col, snippet), Qt.ItemDataRole.UserRole)
 
         snip_item = QStandardItem(snippet)
         snip_item.setEditable(False)
@@ -170,8 +201,12 @@ class AdvancedSearchWindow(QDialog):
 
         metadata = item.data(Qt.ItemDataRole.UserRole)
         if metadata and isinstance(metadata, tuple):
-            abs_path, line, col = metadata
-            self.navigate_to_target.emit(abs_path, line, col)
+            abs_path, line, col, fallback = metadata
+            # Search hits land on arbitrary prose, not on the start of an
+            # \index{...} macro -- request whole-line highlighting rather
+            # than the index-tree/table navigation path's macro-boundary
+            # detection (see EditorTab.jump_to_coordinates).
+            self.navigate_to_target.emit(abs_path, line, col, fallback, True)
 
     def apply_theme_styles(self):
         """Palette Sync Observer: Refreshes component trees safely via native propagation."""
@@ -213,8 +248,24 @@ class AdvancedSearchWindow(QDialog):
         """
         # Halt any ongoing background lookups immediately to avoid dangling pointers
         if self.worker and self.worker.isRunning():
-            self.worker.terminate()
-            self.worker.wait()
+            # QThread.terminate() is a forceful OS-level kill (TerminateThread
+            # on Windows) applied to a thread that's running plain Python
+            # code -- it can hit mid-syscall (e.g. mid file-read) or mid
+            # GIL bookkeeping and leave the thread in a state the OS/runtime
+            # can't fully tear down, so the subsequent wait() either hangs
+            # or returns having left a zombie thread behind. Since a non-
+            # daemon thread in that state blocks clean interpreter shutdown,
+            # this was very likely what kept the process (and its console
+            # window) alive well after the search dialog itself was closed.
+            # SearchWorker already implements a cooperative cancellation
+            # path for exactly this (stop() sets _is_abort_requested, which
+            # process()'s loop checks between every line/file and exits
+            # from normally) -- it just wasn't being used here. wait() is
+            # still given a bound so a pathological hang here can't freeze
+            # the GUI thread indefinitely either.
+            self.worker.stop()
+            if not self.worker.wait(3000):
+                print("[SEARCH WARNING] worker did not stop within 3s of a cooperative stop request")
 
         settings = QSettings()
         

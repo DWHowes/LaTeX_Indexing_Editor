@@ -107,7 +107,19 @@ class ProjectLoadWorker(QObject):
         seen_headings = {}
         running_id_pool = 1
         heading_id_counter = 1
-        
+
+        # Tracks the still-open "(" entry dict for each heading path, keyed
+        # by the same lowercased path_key used for seen_headings, so a
+        # later ")" for that same path can be linked back to it. Neither
+        # range_partner_id nor is_range_closer was ever assigned anywhere
+        # in this regex-fallback scan before this fix -- every entry came
+        # out with range_partner_id absent and is_range_closer False,
+        # opener and closer alike, which silently defeated
+        # IndexEditController._sync_range_partner (it no-ops whenever
+        # range_partner_id is missing) for any project loaded through a
+        # fresh scan rather than an already-populated DB.
+        pending_range_opens: dict[str, dict] = {}
+
         for file_path in self._tex_file_paths:
             if self._is_abort_requested: return
             norm_target = Path(file_path).resolve().as_posix()
@@ -141,18 +153,59 @@ class ProjectLoadWorker(QObject):
                 file_target = uid_dict.get("file_path") or uid_dict.get("path") or norm_target
                 unique_id = uid_dict.get("id") or uid_dict.get("unique_id_number") or running_id_pool
                 abs_pos_coord = uid_dict.get("absolute_index") or uid_dict.get("absolute_position")
-                abs_end_coord = uid_dict.get("absolute_end")
+                # LatexIndexParser.parse_file never emits a key literally named
+                # "absolute_end" -- it emits "end_absolute_index", and that value
+                # is the index OF the macro's closing brace (inclusive), not one
+                # past it. Every other consumer of absolute_end (DocumentIOController
+                # .rewrite_macro_span's content[absolute_position:absolute_end]
+                # slicing, EntryModifierModel.shift_coordinates_after, and the
+                # live-insert path in LatexIndexController, which sets absolute_end
+                # to cursor.position() immediately *after* inserting the full
+                # macro text including its closing brace) treats absolute_end as
+                # the exclusive end -- one past the closing brace. Reading the
+                # nonexistent "absolute_end" key here silently produced None for
+                # every entry ingested through this regex-fallback scan (i.e. any
+                # project loaded fresh, without an already-populated DB), which
+                # then tripped the "abs_end is None" guard in
+                # IndexEditController.handle_entry_table_edit /
+                # _rewrite_single_reference / handle_entry_deletion -- aborting
+                # the .tex rewrite before it ever happened, for table edits and
+                # tree renames alike. +1 converts the parser's inclusive index to
+                # the exclusive end everything else expects.
+                abs_end_raw = uid_dict.get("end_absolute_index")
+                abs_end_coord = (abs_end_raw + 1) if abs_end_raw is not None else uid_dict.get("absolute_end")
 
-                references_payload.append({
+                encap_value = uid_dict.get("encap", "standard")
+
+                entry_dict = {
                     "heading_id": assigned_heading_id, "heading_raw_text": full_heading_path, 
                     "uid": f"{file_target}:{line_coord}:{col_coord}", "unique_id_number": int(unique_id),
                     "file_path": str(file_target), "line_number": int(line_coord), "column_offset": int(col_coord), 
                     "absolute_position": int(abs_pos_coord) if abs_pos_coord is not None else None,
                     "absolute_index": int(abs_pos_coord) if abs_pos_coord is not None else None,
                     "absolute_end": int(abs_end_coord) if abs_end_coord is not None else None,
-                    "encap": uid_dict.get("encap", "standard"), "see_references": uid_dict.get("see"),       
-                    "seealso_references": uid_dict.get("seealso"), "has_references": uid_dict.get("has_references")
-                })
+                    "encap": encap_value, "see_references": uid_dict.get("see"),       
+                    "seealso_references": uid_dict.get("seealso"), "has_references": uid_dict.get("has_references"),
+                    "range_partner_id": None,
+                    "is_range_closer": False,
+                }
+                references_payload.append(entry_dict)
+
+                # Pair this entry with its range partner, if any. A "("
+                # opens a range for this heading path; the next ")" seen
+                # for that same path closes it. Entries between them for
+                # *other* heading paths don't interfere, since pairing is
+                # tracked per path_key rather than by pure document order.
+                # A ")" with no matching pending "(" (malformed source) is
+                # left unlinked rather than guessed at.
+                if encap_value == "(":
+                    pending_range_opens[path_key] = entry_dict
+                elif encap_value == ")":
+                    opener_entry = pending_range_opens.pop(path_key, None)
+                    if opener_entry is not None:
+                        entry_dict["is_range_closer"] = True
+                        entry_dict["range_partner_id"] = int(opener_entry["unique_id_number"])
+                        opener_entry["range_partner_id"] = int(entry_dict["unique_id_number"])
                 
         self.status_updated.emit("Macro markers compiled successfully. Synchronizing project states...")
         self.finished.emit(True, True, headings_payload, references_payload, file_tree_payload, fallback_db_path)

@@ -10,7 +10,81 @@ class PreferencesPersistence(QObject):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.settings = QSettings("DH Indexing", "LatexEditor")
+        # Bare QSettings() inherits the org/app name set once on QApplication
+        # in main.py ("DH Indexing" / "LaTeX Indexing Editor") -- this is the
+        # same location every other QSettings() call in the app already
+        # writes to (advanced_search_window.py, latex_command_registry_model.py).
+        # This class previously used an explicit, differently-named
+        # constructor (QSettings("DH Indexing", "LatexEditor")), which put
+        # window layout, fonts, dark mode, last-project, and all IndexPrefs
+        # under a second, separate registry/ini location. Migrate any
+        # existing data from that legacy location before settling in here.
+        self.settings = QSettings()
+        self._migrate_legacy_settings_location()
+        self._migrate_legacy_index_prefs_keys()
+
+    def _migrate_legacy_settings_location(self) -> None:
+        """
+        One-time consolidation: copies every key from the old
+        QSettings("DH Indexing", "LatexEditor") location into the current
+        bare-QSettings() location, then clears the old location.
+
+        Checked per-key via contains() rather than bailing out if the new
+        location has ANY keys at all -- the new bare-QSettings() location
+        is NOT actually empty on a real install, since AdvancedSearch/* and
+        latex_commands/* have been written there all along by other classes
+        that already used bare QSettings(). An all-or-nothing "new location
+        already has data" guard would (and did) skip migration entirely
+        just because those unrelated keys existed, even though none of the
+        actual preference keys had been copied over yet.
+        """
+        legacy = QSettings("DH Indexing", "LatexEditor")
+        legacy_keys = legacy.allKeys()
+        if not legacy_keys:
+            return
+
+        migrated = 0
+        for key in legacy_keys:
+            if not self.settings.contains(key):
+                self.settings.setValue(key, legacy.value(key))
+                migrated += 1
+
+        legacy.clear()
+        legacy.sync()
+        self.settings.sync()
+        if migrated:
+            print(f"[PreferencesPersistence] Migrated {migrated} legacy setting(s) "
+                  f"from 'DH Indexing/LatexEditor' into the unified settings location.")
+
+    def _migrate_legacy_index_prefs_keys(self) -> None:
+        """
+        The Index Formatting Rules fields under IndexPrefs/global were
+        originally named ist_* (back when that group only ever meant
+        makeindex's .ist file, before xindy support existed). They're now
+        engine-neutral and were renamed to fmt_* -- see
+        models.index_prefs_config_model.LEGACY_INDEX_PREFS_KEY_ALIASES.
+        Rewrite any already-persisted ist_* registry values to their fmt_*
+        equivalents and remove the old names, so a value doesn't linger
+        under both names indefinitely.
+        """
+        from models.index_prefs_config_model import LEGACY_INDEX_PREFS_KEY_ALIASES
+
+        self.settings.beginGroup("IndexPrefs/global")
+        try:
+            renamed = 0
+            for old_key, new_key in LEGACY_INDEX_PREFS_KEY_ALIASES.items():
+                if self.settings.contains(old_key):
+                    if not self.settings.contains(new_key):
+                        self.settings.setValue(new_key, self.settings.value(old_key))
+                        renamed += 1
+                    self.settings.remove(old_key)
+        finally:
+            self.settings.endGroup()
+
+        if renamed:
+            self.settings.sync()
+            print(f"[PreferencesPersistence] Renamed {renamed} legacy Index Formatting "
+                  f"Rules key(s) from 'ist_*' to 'fmt_*' naming.")
 
     def load_application_preferences(self) -> dict:
         # Build a baseline of common defaults (keeps backward compatibility)

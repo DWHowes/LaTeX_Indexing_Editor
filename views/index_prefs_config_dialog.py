@@ -67,23 +67,53 @@ class IndexPrefsConfigDialog(QDialog):
         lay_hyperref.addRow(self.chk_hyperref_color)
         lay_hyperref.addRow("Link Target Color:", self.cmb_hyperref_color)
 
-        # --- sub-tab: makeindex ---
+        # --- sub-tab: makeindex / xindy ---
         self.tab_makeindex = QWidget()
         lay_makeindex = QVBoxLayout(self.tab_makeindex)
-        
+
         grp_binary = QGroupBox("Core Compiler Configuration")
-        form_binary = QFormLayout(grp_binary)
-        self.txt_makeindex_cmd = QLineEdit()
+        vbox_binary = QVBoxLayout(grp_binary)
+
+        engine_form = QFormLayout()
+        self.cmb_index_engine = QComboBox()
+        self.cmb_index_engine.addItems(["makeindex", "xindy"])
+        engine_form.addRow("Execution Command Binary:", self.cmb_index_engine)
+        vbox_binary.addLayout(engine_form)
+
+        # --- engine-specific page: makeindex ---
+        self.pg_makeindex = QWidget()
+        form_binary = QFormLayout(self.pg_makeindex)
+        form_binary.setContentsMargins(0, 0, 0, 0)
         self.chk_makeindex_blank = QCheckBox("Compress Intermediate Blanks (-c)")
         self.chk_makeindex_space = QCheckBox("Ignore Leading Spaces (-p)")
         self.cmb_makeindex_order = QComboBox()
         self.cmb_makeindex_order.addItems(["word", "character"])
         self.txt_makeindex_style = QLineEdit()
-        form_binary.addRow("Execution Command Binary:", self.txt_makeindex_cmd)
         form_binary.addRow(self.chk_makeindex_blank)
         form_binary.addRow(self.chk_makeindex_space)
         form_binary.addRow("Sort Ordering Rule:", self.cmb_makeindex_order)
         form_binary.addRow("Target Stylesheet Name (.ist):", self.txt_makeindex_style)
+        vbox_binary.addWidget(self.pg_makeindex)
+
+        # --- engine-specific page: xindy ---
+        self.pg_xindy = QWidget()
+        form_xindy = QFormLayout(self.pg_xindy)
+        form_xindy.setContentsMargins(0, 0, 0, 0)
+        self.cmb_xindy_language = QComboBox()
+        self.cmb_xindy_language.addItems(["english", "french", "german", "ngerman", "spanish", "italian"])
+        self.cmb_xindy_codepage = QComboBox()
+        self.cmb_xindy_codepage.addItems(["utf8", "ascii", "latin1", "applemac"])
+        self.cmb_xindy_markup = QComboBox()
+        self.cmb_xindy_markup.addItems(["latex", "tex"])
+        self.chk_xindy_duplicates = QCheckBox("Allow Duplicate Page References")
+        self.txt_xindy_module = QLineEdit()
+        form_xindy.addRow("Language Module (-L):", self.cmb_xindy_language)
+        form_xindy.addRow("Input Encoding (-C):", self.cmb_xindy_codepage)
+        form_xindy.addRow("Markup Language (-I):", self.cmb_xindy_markup)
+        form_xindy.addRow(self.chk_xindy_duplicates)
+        form_xindy.addRow("Target Module Name (.xdy):", self.txt_xindy_module)
+        vbox_binary.addWidget(self.pg_xindy)
+
         lay_makeindex.addWidget(grp_binary)
         
         grp_ist = QGroupBox("Index Formatting Rules")
@@ -116,7 +146,7 @@ class IndexPrefsConfigDialog(QDialog):
         self.horizontal_latex_tabs.addTab(self.tab_imakeidx, "pkg: imakeidx")
         self.horizontal_latex_tabs.addTab(self.tab_idxlayout, "pkg: idxlayout")
         self.horizontal_latex_tabs.addTab(self.tab_hyperref, "pkg: hyperref")
-        self.horizontal_latex_tabs.addTab(self.tab_makeindex, "cmd: makeindex")
+        self.horizontal_latex_tabs.addTab(self.tab_makeindex, "cmd: makeindex/xindy")
         self.horizontal_latex_tabs.addTab(self.tab_printindex, "cmd: printindex")
         vlatex_layout.addWidget(self.horizontal_latex_tabs)
 
@@ -191,6 +221,7 @@ class IndexPrefsConfigDialog(QDialog):
         self.chk_idxlayout.toggled.connect(self._toggle_idxlayout_widgets)
         self.chk_hyperref.toggled.connect(self._toggle_hyperref_widgets)
         self.chk_ist_headings.toggled.connect(self.chk_ist_bold.setEnabled)
+        self.cmb_index_engine.currentTextChanged.connect(self._toggle_index_engine_widgets)
 
     def _toggle_imakeidx_widgets(self, state: bool) -> None:
         self.chk_imakeidx_noauto.setEnabled(state)
@@ -204,6 +235,11 @@ class IndexPrefsConfigDialog(QDialog):
     def _toggle_hyperref_widgets(self, state: bool) -> None:
         self.chk_hyperref_color.setEnabled(state)
         self.cmb_hyperref_color.setEnabled(state)
+
+    def _toggle_index_engine_widgets(self, engine: str) -> None:
+        is_makeindex = (engine == "makeindex")
+        self.pg_makeindex.setVisible(is_makeindex)
+        self.pg_xindy.setVisible(not is_makeindex)
 
     def _choose_pdflatex_dir(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "Select pdflatex directory")
@@ -237,20 +273,26 @@ class IndexPrefsConfigDialog(QDialog):
         self.cmb_hyperref_color.setCurrentText(data.get("hyperref_linkcolor", "blue"))
         self._toggle_hyperref_widgets(self.chk_hyperref.isChecked())
         
-        self.txt_makeindex_cmd.setText(data.get("makeindex_command", "makeindex"))
+        self.cmb_index_engine.setCurrentText(data.get("index_engine", "makeindex"))
         self.chk_makeindex_blank.setChecked(data.get("makeindex_compress_blanks", True))
         self.chk_makeindex_space.setChecked(data.get("makeindex_ignore_spaces", False))
         self.cmb_makeindex_order.setCurrentText(data.get("makeindex_ordering", "word"))
         self.txt_makeindex_style.setText(data.get("makeindex_stylesheet", "default.ist"))
+        self.cmb_xindy_language.setCurrentText(data.get("xindy_language", "english"))
+        self.cmb_xindy_codepage.setCurrentText(data.get("xindy_codepage", "utf8"))
+        self.cmb_xindy_markup.setCurrentText(data.get("xindy_markup", "latex"))
+        self.chk_xindy_duplicates.setChecked(data.get("xindy_allow_duplicates", True))
+        self.txt_xindy_module.setText(data.get("xindy_module", "default.xdy"))
+        self._toggle_index_engine_widgets(self.cmb_index_engine.currentText())
         
-        self.chk_ist_headings.setChecked(data.get("ist_enable_headings", True))
-        self.chk_ist_bold.setChecked(data.get("ist_heading_bold", True))
+        self.chk_ist_headings.setChecked(data.get("fmt_enable_headings", True))
+        self.chk_ist_bold.setChecked(data.get("fmt_heading_bold", True))
         self.chk_ist_bold.setEnabled(self.chk_ist_headings.isChecked())
-        self.chk_ist_dots.setChecked(data.get("ist_use_dot_leaders", False))
-        self.txt_ist_sym.setText(data.get("ist_symbols_label", "Symbols"))
-        self.txt_ist_num.setText(data.get("ist_numbers_label", "Numbers"))
-        self.txt_ist_pdelim.setText(data.get("ist_page_delimiter", ", "))
-        self.txt_ist_rdelim.setText(data.get("ist_range_delimiter", "--"))
+        self.chk_ist_dots.setChecked(data.get("fmt_use_dot_leaders", False))
+        self.txt_ist_sym.setText(data.get("fmt_symbols_label", "Symbols"))
+        self.txt_ist_num.setText(data.get("fmt_numbers_label", "Numbers"))
+        self.txt_ist_pdelim.setText(data.get("fmt_page_delimiter", ", "))
+        self.txt_ist_rdelim.setText(data.get("fmt_range_delimiter", "--"))
         
         self.txt_printindex_cmd.setText(data.get("printindex_command", "printindex"))
         self.chk_printindex_multi.setChecked(data.get("printindex_use_multicols", False))
@@ -285,18 +327,23 @@ class IndexPrefsConfigDialog(QDialog):
             "include_hyperref": self.chk_hyperref.isChecked(),
             "hyperref_colorlinks": self.chk_hyperref_color.isChecked(),
             "hyperref_linkcolor": self.cmb_hyperref_color.currentText(),
-            "makeindex_command": self.txt_makeindex_cmd.text().strip(),
+            "index_engine": self.cmb_index_engine.currentText(),
             "makeindex_compress_blanks": self.chk_makeindex_blank.isChecked(),
             "makeindex_ignore_spaces": self.chk_makeindex_space.isChecked(),
             "makeindex_ordering": self.cmb_makeindex_order.currentText(),
             "makeindex_stylesheet": self.txt_makeindex_style.text().strip(),
-            "ist_enable_headings": self.chk_ist_headings.isChecked(),
-            "ist_heading_bold": self.chk_ist_bold.isChecked(),
-            "ist_use_dot_leaders": self.chk_ist_dots.isChecked(),
-            "ist_symbols_label": self.txt_ist_sym.text().strip(),
-            "ist_numbers_label": self.txt_ist_num.text().strip(),
-            "ist_page_delimiter": self.txt_ist_pdelim.text(),
-            "ist_range_delimiter": self.txt_ist_rdelim.text(),
+            "xindy_language": self.cmb_xindy_language.currentText(),
+            "xindy_codepage": self.cmb_xindy_codepage.currentText(),
+            "xindy_markup": self.cmb_xindy_markup.currentText(),
+            "xindy_allow_duplicates": self.chk_xindy_duplicates.isChecked(),
+            "xindy_module": self.txt_xindy_module.text().strip(),
+            "fmt_enable_headings": self.chk_ist_headings.isChecked(),
+            "fmt_heading_bold": self.chk_ist_bold.isChecked(),
+            "fmt_use_dot_leaders": self.chk_ist_dots.isChecked(),
+            "fmt_symbols_label": self.txt_ist_sym.text().strip(),
+            "fmt_numbers_label": self.txt_ist_num.text().strip(),
+            "fmt_page_delimiter": self.txt_ist_pdelim.text(),
+            "fmt_range_delimiter": self.txt_ist_rdelim.text(),
             "printindex_command": self.txt_printindex_cmd.text().strip(),
             "printindex_use_multicols": self.chk_printindex_multi.isChecked(),
         }

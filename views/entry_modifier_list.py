@@ -1,10 +1,11 @@
 from PySide6.QtWidgets import (
-    QLineEdit, QTableView, QVBoxLayout, QWidget, QLabel, QHeaderView, QHBoxLayout,
-    QStyledItemDelegate, QComboBox, QStyleOptionViewItem,
+    QLineEdit, QVBoxLayout, QWidget, QLabel, QHeaderView, QHBoxLayout,
+    QStyledItemDelegate, QComboBox, QStyleOptionViewItem, QMessageBox,
 )
 from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Signal, Slot, Qt
-from PySide6.QtGui import QStandardItemModel, QStandardItem, QFont
+from PySide6.QtGui import QStandardItemModel, QStandardItem
 
+from views.entry_modifier_table_view import EntryModifierTableView
 
 # ---------------------------------------------------------------------------
 # Column index constants — single source of truth for the 8-column layout
@@ -120,7 +121,14 @@ def _is_bold_encap(value: str) -> bool:
 
 
 def _make_encap_item(value: str) -> QStandardItem:
-    """Build the Page/encap cell, rendering it in bold/italic when the encap calls for it."""
+    """
+    Build the Page/encap cell, rendering it in bold/italic when the encap
+    calls for it.
+
+    Range markers ("(" / ")") are made non-editable here — see
+    _is_range_encap's docstring for why the Standard/Bold/Italic combo
+    can't be allowed to touch them.
+    """
     item = QStandardItem(value)
     if _is_bold_encap(value):
         font = item.font()
@@ -130,6 +138,11 @@ def _make_encap_item(value: str) -> QStandardItem:
         font = item.font()
         font.setItalic(True)
         item.setFont(font)
+    elif _is_range_encap(value):
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        item.setToolTip(
+            "Range opener/closer marker — structural, not an editable page style."
+        )
     return item
 
 
@@ -141,12 +154,57 @@ def _is_italic_encap(value: str) -> bool:
     return value.strip().lower() in _ITALIC_ENCAP_VALUES
 
 
+_RANGE_ENCAP_VALUES = frozenset({"(", ")"})
+
+
+def _is_range_encap(value: str) -> bool:
+    """
+    Return True if *value* is a range-opener/closer marker ("(" or ")")
+    rather than a page-style directive.
+
+    Range markers are not a Page/encap style choice — they're structural
+    (they pair this reference with its \\index range partner) and the
+    Standard/Bold/Italic combo has no way to represent or preserve them.
+    Cells holding one are kept read-only (see _make_encap_item and
+    _open_persistent_encap_editor) so a table edit — even one to a
+    completely different column on the same row, since the whole heading
+    is reassembled from the row's current values on every commit — can
+    never silently replace "|(" or "|)" with a Page-style value the combo
+    does understand.
+    """
+    return value.strip() in _RANGE_ENCAP_VALUES
+
+
 # (label, canonical value) — order defines combo box index order
 _PAGE_STYLE_OPTIONS: list[tuple[str, str]] = [
     ("Standard", ""),
     ("Bold", "textbf"),
     ("Italic", "textit"),
 ]
+
+def _fields_from_row_items(row_items: list[QStandardItem | None]) -> dict:
+    """
+    Reads the six heading fields + encap directly off a row's QStandardItem
+    list, in the same shape get_row_field_values returns. Used internally
+    by _on_cell_data_changed so validation and snapshot/restore share one
+    reader instead of duplicating column lookups.
+    """
+    def _text(col: int) -> str:
+        item = row_items[col]
+        return item.text().strip() if item else ""
+
+    encap_item = row_items[COL_ENCAP]
+    encap = encap_item.data(Qt.ItemDataRole.EditRole) if encap_item else ""
+
+    return {
+        "main_disp": _text(COL_MAIN_DISP),
+        "main_sort": _text(COL_MAIN_SORT),
+        "sub1_disp": _text(COL_SUB1_DISP),
+        "sub1_sort": _text(COL_SUB1_SORT),
+        "sub2_disp": _text(COL_SUB2_DISP),
+        "sub2_sort": _text(COL_SUB2_SORT),
+        "encap": encap or "",
+    }
 
 
 class PageStyleDelegate(QStyledItemDelegate):
@@ -198,46 +256,6 @@ class PageStyleDelegate(QStyledItemDelegate):
         editor.setGeometry(option.rect)
 
 
-def _build_canonical_heading(row_items: list[QStandardItem | None]) -> str:
-    """
-    Reconstruct the full LaTeX makeindex string from a row's ``QStandardItem`` list.
-
-    Produces the form::
-
-        main_sort@main_disp!sub1_sort@sub1_disp!sub2_sort@sub2_disp|encap
-
-    Omits ``@display`` when sort key equals display text (no-op sort override).
-    Omits sub-levels when both sort and display are empty.
-    Omits ``|encap`` when encap is empty.
-    """
-    def _text(col: int) -> str:
-        item = row_items[col]
-        return item.text().strip() if item else ""
-
-    def _level_str(sort_key: str, display: str) -> str:
-        if not sort_key and not display:
-            return None  # type: ignore[return-value]  # sentinel: level absent
-        if not sort_key or sort_key == display:
-            return display  # blank/matching sort key — no @ override needed
-        return f"{sort_key}@{display}"
-
-    main  = _level_str(_text(COL_MAIN_SORT), _text(COL_MAIN_DISP))
-    sub1  = _level_str(_text(COL_SUB1_SORT), _text(COL_SUB1_DISP))
-    sub2  = _level_str(_text(COL_SUB2_SORT), _text(COL_SUB2_DISP))
-    encap = _text(COL_ENCAP)
-
-    levels = [main or ""]
-    if sub1 is not None:
-        levels.append(sub1)
-        if sub2 is not None:
-            levels.append(sub2)
-
-    result = "!".join(levels)
-    if encap:
-        result = f"{result}|{encap}"
-    return result
-
-
 class EntryModifierList(QWidget):
     """
     Pure Presentation View Layer with in-memory sorting capabilities.
@@ -260,10 +278,12 @@ class EntryModifierList(QWidget):
     Signals
     -------
     entry_modifier_edit_committed(int, str)
-        Emitted when any editable cell is committed.  Carries ``(entry_id,
-        canonical_heading)`` where *canonical_heading* is the full reconstructed
-        LaTeX makeindex string, backward-compatible with the previous signal
-        signature.
+        Emitted when any editable cell is committed and the row's hierarchy
+        validates. Carries ``(entry_id, "")`` — the str param is now unused;
+        canonical-heading assembly moved to EntryModifierController, which
+        reads current field values via ``get_row_field_values`` instead of
+        trusting this payload. Signature kept as-is to avoid touching the
+        controller's connect/slot signature for an unrelated cleanup.
     entry_row_selected(int)
         Emitted when a row is clicked; carries the ``unique_id_number``.
     """
@@ -294,9 +314,9 @@ class EntryModifierList(QWidget):
         layout.addLayout(search_layout)
 
         # Table view
-        self.entries_table_view = QTableView(self)
-        self.entries_table_view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
-        self.entries_table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectItems)
+        self.entries_table_view = EntryModifierTableView(self)
+        self.entries_table_view.setSelectionMode(EntryModifierTableView.SelectionMode.SingleSelection)
+        self.entries_table_view.setSelectionBehavior(EntryModifierTableView.SelectionBehavior.SelectItems)
         self.entries_table_view.setSortingEnabled(True)
 
         # Base model — 8 columns
@@ -332,9 +352,92 @@ class EntryModifierList(QWidget):
         # Wire edit-commit signal after view is fully constructed
         self.base_model.dataChanged.connect(self._on_cell_data_changed)
 
+        # View-local snapshot of each row's last known-valid field values,
+        # keyed by unique_id_number. Refreshed every time a row passes
+        # hierarchy validation; used to revert a row if an edit would
+        # produce an invalid state (populated sub-level with an empty
+        # parent). Deliberately not the staging model — this is a UI-level
+        # undo mechanism, not session edit-tracking.
+        self._last_valid_row_state: dict[int, dict] = {}
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def get_entry_id_for_row(self, proxy_row: int) -> int | None:
+        """
+        Returns the unique_id_number for the row at proxy_row.
+
+        proxy_row is a row index as seen by the table view / its selection
+        model (``currentRowChanged``, ``edit_completed_no_next_row``) —
+        those are indices into proxy_model, NOT base_model, since
+        ``entries_table_view.setModel(self.proxy_model)``. QSortFilterProxyModel
+        forwards role queries straight through to the source item, so no
+        explicit mapToSource is needed here — querying the proxy index
+        directly is sufficient and correct regardless of current sort order.
+
+        Returns None if proxy_row is out of range (e.g. stale row after a
+        filter/deletion).
+        """
+        proxy_index = self.proxy_model.index(proxy_row, COL_ID)
+        if not proxy_index.isValid():
+            return None
+        return proxy_index.data(Qt.ItemDataRole.DisplayRole)
+    
+    def update_row_from_canonical(self, unique_id: int, canonical_heading: str) -> None:
+        """
+        Rewrites this row's six heading columns + encap from a freshly
+        committed canonical LaTeX heading string.
+
+        Called by EntryModifierController in response to
+        ``IndexEditStagingModel.entry_committed`` — this is what keeps the
+        table in sync when the edit that produced the commit originated in
+        the tree view (or any future non-table source) rather than here.
+        Table-originated commits will already match, so this is a no-op in
+        that case; the equality check below skips the disconnect/rewrite
+        round trip entirely when nothing would actually change.
+
+        No-ops if unique_id isn't currently displayed (row not yet
+        appended, or already removed).
+        """
+        row = self._find_source_row_for_id(unique_id)
+        if row is None:
+            return
+
+        parsed = _parse_heading_raw_text(canonical_heading)
+        row_items = [self.base_model.item(row, c) for c in range(len(_HEADERS))]
+        current = _fields_from_row_items(row_items)
+
+        new_fields = {
+            "main_disp": parsed["main_disp"], "main_sort": parsed["main_sort"],
+            "sub1_disp": parsed["sub1_disp"], "sub1_sort": parsed["sub1_sort"],
+            "sub2_disp": parsed["sub2_disp"], "sub2_sort": parsed["sub2_sort"],
+            "encap": parsed["encap"],
+        }
+        if new_fields == current:
+            return
+
+        self.base_model.dataChanged.disconnect(self._on_cell_data_changed)
+        try:
+            self.base_model.item(row, COL_MAIN_DISP).setText(new_fields["main_disp"])
+            self.base_model.item(row, COL_MAIN_SORT).setText(new_fields["main_sort"])
+            self.base_model.item(row, COL_SUB1_DISP).setText(new_fields["sub1_disp"])
+            self.base_model.item(row, COL_SUB1_SORT).setText(new_fields["sub1_sort"])
+            self.base_model.item(row, COL_SUB2_DISP).setText(new_fields["sub2_disp"])
+            self.base_model.item(row, COL_SUB2_SORT).setText(new_fields["sub2_sort"])
+            encap_item = self.base_model.item(row, COL_ENCAP)
+            if encap_item is not None:
+                encap_item.setText(new_fields["encap"])
+                font = encap_item.font()
+                font.setBold(_is_bold_encap(new_fields["encap"]))
+                font.setItalic(_is_italic_encap(new_fields["encap"]))
+                encap_item.setFont(font)
+        finally:
+            self.base_model.dataChanged.connect(self._on_cell_data_changed)
+
+        self._last_valid_row_state[unique_id] = new_fields
+        if unique_id in self._location_map:
+            self._location_map[unique_id]["encap"] = new_fields["encap"]
 
     def populate_entry_modifier_display(self, references: list[dict]) -> None:
         """
@@ -351,6 +454,7 @@ class EntryModifierList(QWidget):
         self.base_model.clear()
         self.base_model.setHorizontalHeaderLabels(_HEADERS)
         self._location_map: dict[int, dict] = {}
+        self._last_valid_row_state: dict[int, dict] = {}
 
         for ref in references:
             # Range closers are coordinate-only records; only the opener
@@ -403,12 +507,34 @@ class EntryModifierList(QWidget):
                 "seealso_references": ref.get("seealso_references"),
             }
 
+            # Data loaded from the .tex source is assumed hierarchy-valid
+            # (it was already a well-formed \index macro) — seed the
+            # revert stash from it directly.
+            self._last_valid_row_state[unique_id] = {
+                "main_disp": parsed["main_disp"], "main_sort": parsed["main_sort"],
+                "sub1_disp": parsed["sub1_disp"], "sub1_sort": parsed["sub1_sort"],
+                "sub2_disp": parsed["sub2_disp"], "sub2_sort": parsed["sub2_sort"],
+                "encap": stored_encap,
+            }
+
         self.proxy_model.setDynamicSortFilter(True)
         self.base_model.dataChanged.connect(self._on_cell_data_changed)
         self._open_all_persistent_encap_editors()
 
     def _open_persistent_encap_editor(self, source_row: int) -> None:
-        """Open a persistent PageStyleDelegate combo box for one row's Page/encap cell."""
+        """
+        Open a persistent PageStyleDelegate combo box for one row's Page/encap
+        cell — unless that cell holds a range opener/closer marker. Qt's
+        openPersistentEditor opens the editor unconditionally, ignoring item
+        edit flags, so _make_encap_item's non-editable flag alone can't stop
+        this; the check has to happen here too, or a range row would still
+        get a Standard/Bold/Italic combo overlaid on top of "(" / ")" that
+        the user could click and use to clobber it.
+        """
+        source_item = self.base_model.item(source_row, COL_ENCAP)
+        if source_item and _is_range_encap(source_item.text()):
+            return
+
         proxy_index = self.proxy_model.mapFromSource(
             self.base_model.index(source_row, COL_ENCAP)
         )
@@ -465,6 +591,13 @@ class EntryModifierList(QWidget):
             "seealso_references": ref.get("seealso_references"),
         }
 
+        self._last_valid_row_state[unique_id] = {
+            "main_disp": parsed["main_disp"], "main_sort": parsed["main_sort"],
+            "sub1_disp": parsed["sub1_disp"], "sub1_sort": parsed["sub1_sort"],
+            "sub2_disp": parsed["sub2_disp"], "sub2_sort": parsed["sub2_sort"],
+            "encap": stored_encap,
+        }
+
         # Scroll to the new row and reconnect
         new_row = self.base_model.rowCount() - 1
         new_proxy_index = self.proxy_model.mapFromSource(
@@ -474,8 +607,50 @@ class EntryModifierList(QWidget):
         self.base_model.dataChanged.connect(self._on_cell_data_changed)
         self._open_persistent_encap_editor(new_row)
 
+    def remove_entry_row(self, unique_id: int) -> None:
+        """
+        Removes the row for unique_id from the table without a full
+        reload. Safe to call after populate_entry_modifier_display or
+        append_entry_row. No-ops if unique_id isn't currently displayed.
+        """
+        row = self._find_source_row_for_id(unique_id)
+        if row is None:
+            return
+        self.base_model.removeRow(row)
+        self._location_map.pop(unique_id, None)
+        self._last_valid_row_state.pop(unique_id, None)        
+
+    def get_row_field_values(self, unique_id: int) -> dict | None:
+        """
+        Returns the currently-displayed column values for the row matching
+        unique_id, read live from base_model — not a cached copy, so it can
+        never drift from what the user actually sees.
+
+        Returns None if unique_id isn't present (row not yet appended, or
+        already removed).
+        """
+        row = self._find_source_row_for_id(unique_id)
+        if row is None:
+            return None
+        row_items = [self.base_model.item(row, c) for c in range(len(_HEADERS))]
+        return _fields_from_row_items(row_items)
+
+    def _find_source_row_for_id(self, unique_id: int) -> int | None:
+        """
+        Linear scan of column 0 (ID column) in base_model for unique_id.
+        base_model's own row order is insertion order — proxy_model handles
+        display sort/filter separately — so this scans the stable base
+        order, not whatever the view currently shows on screen.
+        """
+        for row in range(self.base_model.rowCount()):
+            id_item = self.base_model.item(row, 0)
+            if id_item and id_item.data(Qt.ItemDataRole.DisplayRole) == unique_id:
+                return row
+        return None
+
+
     @property
-    def table_view(self) -> QTableView:
+    def table_view(self) -> EntryModifierTableView:
         return self.entries_table_view
 
     # ------------------------------------------------------------------
@@ -529,6 +704,47 @@ class EntryModifierList(QWidget):
         if id_item:
             self.entry_row_selected.emit(id_item.data(Qt.ItemDataRole.DisplayRole))
 
+    @staticmethod
+    def _validate_hierarchy(fields: dict) -> str | None:
+        """
+        Returns an error message if the row's field values describe an
+        incomplete heading hierarchy, else None.
+
+        Rules: Main must always be populated. A Sub2 entry requires Sub1 to
+        be populated first. (Sub1 with empty Sub2 is fine — Sub2 is simply
+        absent, not an error.)
+        """
+        if not fields["main_disp"]:
+            return "Main heading cannot be empty — every entry must have a main heading."
+        if fields["sub2_disp"] and not fields["sub1_disp"]:
+            return "A Sub2 entry requires Sub1 to be filled in first."
+        return None
+
+    def _restore_row_from_stash(self, row: int, entry_id: int) -> None:
+        """
+        Writes this row's last known-valid field values back into
+        base_model, undoing whatever edit just made the row invalid.
+        Signal is disconnected for the duration so this doesn't recurse
+        back into _on_cell_data_changed.
+        """
+        stash = self._last_valid_row_state.get(entry_id)
+        if stash is None:
+            return  # nothing to revert to — shouldn't happen post-load, but don't crash
+
+        self.base_model.dataChanged.disconnect(self._on_cell_data_changed)
+        try:
+            self.base_model.item(row, COL_MAIN_DISP).setText(stash["main_disp"])
+            self.base_model.item(row, COL_MAIN_SORT).setText(stash["main_sort"])
+            self.base_model.item(row, COL_SUB1_DISP).setText(stash["sub1_disp"])
+            self.base_model.item(row, COL_SUB1_SORT).setText(stash["sub1_sort"])
+            self.base_model.item(row, COL_SUB2_DISP).setText(stash["sub2_disp"])
+            self.base_model.item(row, COL_SUB2_SORT).setText(stash["sub2_sort"])
+            encap_item = self.base_model.item(row, COL_ENCAP)
+            if encap_item is not None:
+                encap_item.setData(stash["encap"], Qt.ItemDataRole.EditRole)
+        finally:
+            self.base_model.dataChanged.connect(self._on_cell_data_changed)
+
     @Slot(QModelIndex, QModelIndex, list)
     def _on_cell_data_changed(
         self,
@@ -537,8 +753,11 @@ class EntryModifierList(QWidget):
         roles: list,
     ) -> None:
         """
-        Intercept cell edits and emit ``entry_modifier_edit_committed`` with the
-        reconstructed canonical LaTeX heading string.
+        Intercepts cell edits. Validates the row's heading hierarchy is
+        complete (no populated sub-level with an empty parent) before
+        allowing the edit through; reverts and warns if not. On success,
+        refreshes the revert stash and emits ``entry_modifier_edit_committed``
+        so the controller can re-derive the canonical heading itself.
         """
         if Qt.ItemDataRole.EditRole not in roles and Qt.ItemDataRole.DisplayRole not in roles:
             return
@@ -563,6 +782,12 @@ class EntryModifierList(QWidget):
             font.setItalic(_is_italic_encap(encap_item.text()))
             encap_item.setFont(font)
 
-        canonical_heading = _build_canonical_heading(row_items)
+        fields = _fields_from_row_items(row_items)
+        error = self._validate_hierarchy(fields)
+        if error:
+            QMessageBox.information(self, "Incomplete heading", error)
+            self._restore_row_from_stash(row, entry_id)
+            return
 
-        self.entry_modifier_edit_committed.emit(entry_id, canonical_heading)
+        self._last_valid_row_state[entry_id] = fields
+        self.entry_modifier_edit_committed.emit(entry_id, "")

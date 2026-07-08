@@ -147,8 +147,19 @@ class LatexIndexParser:
                     continue
                 clean_path = text[:i].strip()
                 encap_format = text[i+1:].strip()
-                if encap_format in ('(', ')'):
-                    encap_format = "range"
+                # Previously both range markers were collapsed into the
+                # generic string "range", losing which end of the range
+                # this particular reference is. That ambiguous value then
+                # flowed through to EntryModifierList's encap column and
+                # back out through EntryModifierController
+                # ._assemble_canonical_heading on any table edit to that
+                # row (even edits to unrelated fields, since the row's
+                # full heading -- including encap -- is always reassembled
+                # from the currently displayed columns) as a literal
+                # "|range" suffix -- not valid makeindex syntax, silently
+                # corrupting the macro in place of the original "|(" or
+                # "|)". Keeping the raw "(" / ")" here instead lets it
+                # round-trip through table edits unchanged.
                 return clean_path, encap_format
                 
         return text, "standard"

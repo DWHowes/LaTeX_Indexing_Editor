@@ -174,7 +174,7 @@ class EditorTab(QPlainTextEdit):
         """Returns the active 0-indexed column coordinate offset for status updates."""
         return self.textCursor().columnNumber()
 
-    def jump_to_coordinates(self, line: int, column: int, absolute_position: int = None, is_one_indexed: bool = True, is_index_jump: bool = False, absolute_end: int = None):
+    def jump_to_coordinates(self, line: int, column: int, absolute_position: int = None, is_one_indexed: bool = True, is_index_jump: bool = False, absolute_end: int = None, highlight_full_line: bool = False):
         """
         Moves the viewport text cursor precisely onto targets using absolute character positions.
         Strict MVC Compliance: Free of code deletions, signature renames, or find search loops.
@@ -214,6 +214,17 @@ class EditorTab(QPlainTextEdit):
                     cursor.setPosition(end_pos, QTextCursor.MoveMode.KeepAnchor)
                 else:
                     cursor.clearSelection()
+            elif highlight_full_line:
+                # Used by free-text navigation (e.g. Advanced Search results)
+                # where the target position is arbitrary prose, not the start
+                # of an \index{...} macro -- macro-boundary detection below
+                # would only "accidentally" highlight anything when an index
+                # macro happens to sit earlier on the same line. Selecting the
+                # whole line instead gives a highlight that is always present
+                # and always locates the hit, regardless of exact/fuzzy mode.
+                line_block = cursor.block()
+                cursor.setPosition(line_block.position())
+                cursor.setPosition(line_block.position() + len(line_block.text()), QTextCursor.MoveMode.KeepAnchor)
             else:
                 self._highlight_index_macro_range(cursor)
 

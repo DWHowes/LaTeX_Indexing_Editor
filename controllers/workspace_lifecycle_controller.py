@@ -61,9 +61,9 @@ class WorkspaceLifecycleController(QObject):
         # Clean up underlying C++ memory blocks out of the Qt event loop
         editor_tab.deleteLater()
 
-    @Slot(str, int, int, str)
-    def navigate_to_embedded_index_coordinate(self, path: str, line: int, col: int, fallback: str):
-        self.index_navigation.navigate(path, line, col, fallback)
+    @Slot(str, int, int, str, bool)
+    def navigate_to_embedded_index_coordinate(self, path: str, line: int, col: int, fallback: str, highlight_full_line: bool = False):
+        self.index_navigation.navigate(path, line, col, fallback, highlight_full_line=highlight_full_line)
 
     def get_index_navigator(self) -> IndexNavigationHelper:
         return self.index_navigation

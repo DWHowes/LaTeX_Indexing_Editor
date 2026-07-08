@@ -33,11 +33,15 @@ class IndexNavigationHelper(QObject):
     # Public entry point
     # ------------------------------------------------------------------
 
-    def navigate(self, path: str, line: int, col: int, fallback: str = "") -> None:
+    def navigate(self, path: str, line: int, col: int, fallback: str = "", highlight_full_line: bool = False) -> None:
         """
         Opens (or focuses) the file at path, then jumps to line/col.
         fallback is a raw macro string used for fuzzy matching if the
         coordinate lands outside the current document block count.
+        highlight_full_line: select the entire target line instead of
+        detecting/highlighting an \\index{...} macro boundary -- set this for
+        navigation sources (e.g. Advanced Search) whose coordinates point at
+        arbitrary prose rather than the start of an index macro.
         """
         if not path:
             return
@@ -50,7 +54,8 @@ class IndexNavigationHelper(QObject):
             editor=active_tab,
             line_num=line,
             col_offset=col,
-            fallback_search_tag=fallback
+            fallback_search_tag=fallback,
+            highlight_full_line=highlight_full_line
         ))
 
     # ------------------------------------------------------------------
@@ -63,6 +68,7 @@ class IndexNavigationHelper(QObject):
         line_num: int,
         col_offset: int,
         fallback_search_tag: str,
+        highlight_full_line: bool = False,
     ) -> None:
         if not isinstance(editor, EditorTab):
             return
@@ -84,7 +90,8 @@ class IndexNavigationHelper(QObject):
                     column=resolved_col,
                     absolute_position=None,
                     is_one_indexed=True,
-                    is_index_jump=True
+                    is_index_jump=True,
+                    highlight_full_line=highlight_full_line
                 )
                 return
 
@@ -114,5 +121,6 @@ class IndexNavigationHelper(QObject):
             column=fallback_col,
             absolute_position=None,
             is_one_indexed=True,
-            is_index_jump=True
+            is_index_jump=True,
+            highlight_full_line=highlight_full_line
         )

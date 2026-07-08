@@ -34,17 +34,39 @@ class SearchWorker(QObject):
                     for line_num, line in enumerate(f, 1):
                         if self._is_abort_requested:
                             break
+                        # Only strip the trailing newline here -- leading
+                        # whitespace must be preserved for column-offset
+                        # accuracy below. line_clean (fully trimmed) is used
+                        # only for the displayed snippet text, never for
+                        # locating the match within the line.
+                        line_for_match = line.rstrip("\r\n")
                         line_clean = line.strip()
 
                         if self.is_fuzzy:
-                            score = fuzz.token_set_ratio(self.term_lower, line_clean.lower())
+                            # token_set_ratio compares both strings as whole
+                            # documents of comparable scope (ignoring order/
+                            # duplicates) -- for a short search phrase against
+                            # a full prose line, the line's many unrelated
+                            # words drag the score down to roughly 20-30% even
+                            # for an obvious match, well under any sane
+                            # threshold. partial_ratio instead finds the
+                            # best-aligning substring of the line and scores
+                            # based on that, which is what "fuzzy search
+                            # within this line" actually means here.
+                            score = fuzz.partial_ratio(self.term_lower, line_for_match.lower())
                             is_match = score >= self.threshold
                             score_label = f" (Score: {int(score)})"
                             col_num = 1  # column not meaningful for fuzzy matches
                         else:
-                            is_match = self.term_lower in line_clean.lower()
+                            is_match = self.term_lower in line_for_match.lower()
                             score_label = ""
-                            col_idx = line_clean.lower().find(self.term_lower)
+                            # Searching line_for_match (leading whitespace
+                            # intact) rather than line_clean -- find() on the
+                            # stripped line would report a column short by
+                            # however many leading characters were trimmed,
+                            # pointing navigation at the wrong character on
+                            # any indented line.
+                            col_idx = line_for_match.lower().find(self.term_lower)
                             col_num = (col_idx + 1) if col_idx != -1 else 1
 
                         if is_match:

@@ -125,6 +125,52 @@ class DocumentIOController(QObject):
                     return editor
         return None
 
+    def read_macro_span(
+        self,
+        file_path: str,
+        absolute_position: int,
+        absolute_end: int,
+    ) -> str | None:
+        """
+        Read-only counterpart to rewrite_macro_span: returns the current
+        text at absolute_position:absolute_end without modifying anything.
+
+        Used by range-partner syncing (IndexEditController._sync_range_partner)
+        to discover a range partner's own current "|encap" suffix before
+        rewriting its heading -- the partner's own page-style/range-marker
+        must be preserved exactly, and the model's cached fields for it
+        aren't a reliable source (heading_raw_text never includes encap,
+        and the separate encap field's meaning has drifted across the
+        app's history: the regex-fallback scan now stores the literal
+        range marker there since the parser fix, but live-inserted range
+        entries store the page style there instead, never the marker).
+        Reading the actual on-disk/in-buffer text sidesteps that
+        inconsistency entirely.
+
+        Same open-editor-vs-disk branching as rewrite_macro_span, so it
+        sees exactly what a rewrite would be reading. Returns None if the
+        file can't be read.
+        """
+        open_editor = self._find_open_editor(file_path)
+        if open_editor:
+            doc_text = open_editor.document().toPlainText()
+        else:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    doc_text = f.read()
+            except Exception as e:
+                print(f"[IO ERROR] read_macro_span: could not read {file_path}: {e}")
+                return None
+
+        if absolute_end > len(doc_text) or absolute_position < 0:
+            print(
+                f"[IO GUARD] read_macro_span: span {absolute_position}:{absolute_end} "
+                f"out of range for {file_path} (len={len(doc_text)})"
+            )
+            return None
+
+        return doc_text[absolute_position:absolute_end]
+
     def _rewrite_in_document(
         self,
         editor: "EditorTab",
