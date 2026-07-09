@@ -233,3 +233,78 @@ class IndexPrefsConfigModel:
     def get_command_binary(self) -> str:
         """Returns the executable name to invoke for the active engine."""
         return self._data.index_engine
+
+    def generate_preamble_snippet(self) -> str:
+        r"""
+        Builds the \usepackage{...}/\makeindex[...] lines implied by the
+        current preferences, for injection immediately before
+        \begin{document} in the project's base file. Only emits lines for
+        packages the user has actually enabled (use_imakeidx/use_idxlayout/
+        include_hyperref); returns "" if none are enabled.
+        """
+        d = self._data
+        lines: list[str] = []
+
+        if d.use_imakeidx:
+            imakeidx_opts = []
+            if d.imakeidx_noautomatic:
+                imakeidx_opts.append("noautomatic")
+            if d.imakeidx_nonewpage:
+                imakeidx_opts.append("nonewpage")
+            if d.index_engine == "xindy":
+                # Tells imakeidx to shell out to (tex)indy instead of makeindex
+                # when noautomatic isn't set.
+                imakeidx_opts.append("xindy")
+            opts = f"[{','.join(imakeidx_opts)}]" if imakeidx_opts else ""
+            lines.append(f"\\usepackage{opts}{{imakeidx}}")
+
+            style_file = self.get_index_style_filename()
+            if d.index_engine == "xindy":
+                cli_opts = f"-L {d.xindy_language} -C {d.xindy_codepage}"
+            else:
+                cli_flags = []
+                if d.makeindex_compress_blanks:
+                    cli_flags.append("-c")
+                if d.makeindex_ignore_spaces:
+                    cli_flags.append("-p")
+                cli_flags.append(f"-s {style_file}")
+                cli_opts = " ".join(cli_flags)
+            lines.append(f"\\makeindex[columns={d.imakeidx_columns}, options={{{cli_opts}}}]")
+
+        if d.use_idxlayout:
+            idx_opts = []
+            if d.idxlayout_unbalanced:
+                idx_opts.append("unbalanced=true")
+            if d.idxlayout_justified:
+                idx_opts.append("justified=true")
+            opts = f"[{','.join(idx_opts)}]" if idx_opts else ""
+            lines.append(f"\\usepackage{opts}{{idxlayout}}")
+
+        if d.include_hyperref:
+            hy_opts = []
+            if d.hyperref_colorlinks:
+                hy_opts.append("colorlinks")
+                hy_opts.append(f"linkcolor={d.hyperref_linkcolor}")
+            opts = f"[{','.join(hy_opts)}]" if hy_opts else ""
+            lines.append(f"\\usepackage{opts}{{hyperref}}")
+
+        if d.printindex_use_multicols:
+            lines.append("\\usepackage{multicol}")
+
+        return "\n".join(lines)
+
+    def generate_printindex_snippet(self) -> str:
+        r"""
+        Builds the \printindex (or user-configured equivalent) call, for
+        injection immediately before \end{document} in the project's base
+        file. Wrapped in a multicols environment when printindex_use_multicols
+        is set (using the same column count as imakeidx_columns).
+        """
+        d = self._data
+        cmd_name = d.printindex_command.lstrip("\\").strip() or "printindex"
+        command = f"\\{cmd_name}"
+
+        if d.printindex_use_multicols:
+            cols = d.imakeidx_columns if d.use_imakeidx else 2
+            return f"\\begin{{multicols}}{{{cols}}}\n{command}\n\\end{{multicols}}"
+        return command

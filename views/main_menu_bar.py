@@ -15,9 +15,11 @@ class MainMenuBar(QMenuBar):
     toggle_dark_mode_requested = Signal()
     toggle_entry_window_requested = Signal()
     preferences_requested = Signal()
+    insert_latex_settings_requested = Signal()
     add_head_note_requested = Signal()
     create_latex_command_requested = Signal()
     create_rtf_file_requested = Signal()
+    edit_menu_about_to_show = Signal()
 
     def __init__(self, parent_window=None):
         super().__init__(parent_window)
@@ -54,8 +56,22 @@ class MainMenuBar(QMenuBar):
 
         edit_menu.addSeparator()
         prefs_action = edit_menu.addAction("&Preferences...", QKeySequence("Ctrl+,"))
-        prefs_action.triggered.connect(lambda: self.preferences_requested.emit())        
-        
+        prefs_action.triggered.connect(lambda: self.preferences_requested.emit())
+
+        edit_menu.addSeparator()
+        # Injects the configured LaTeX Settings (imakeidx/idxlayout/hyperref
+        # package usage + makeindex/xindy engine config + printindex) into
+        # the project's base document. Only meaningful once a project is
+        # open AND a base/root .tex file has been chosen, so it starts
+        # disabled -- update_menu_item_state() covers the "project open"
+        # half, and edit_menu_about_to_show (below) covers the "base file
+        # chosen" half, which can change independently at any time via the
+        # tree view's "Set as base file" action.
+        self.insert_settings_action = edit_menu.addAction("Insert LaTeX Index &Settings...")
+        self.insert_settings_action.triggered.connect(lambda: self.insert_latex_settings_requested.emit())
+        self.insert_settings_action.setEnabled(False)
+        edit_menu.aboutToShow.connect(lambda: self.edit_menu_about_to_show.emit())
+
         # --- View Menu Dropdowns ---
         view_menu = self.addMenu("&View")
         
@@ -105,4 +121,14 @@ class MainMenuBar(QMenuBar):
     def update_menu_item_state(self, is_enabled: bool):
         """Allows external workspace controllers to toggle menu items on project state changes."""
         self.index_entry_action.setEnabled(is_enabled)
-        self.head_note_action.setEnabled(is_enabled)        
+        self.head_note_action.setEnabled(is_enabled)
+        # Project closing always forces this off immediately. Project opening
+        # only forces it as far as "project is open" -- whether a base file
+        # has ALSO been chosen is re-checked separately whenever the Edit
+        # menu is about to open, via edit_menu_about_to_show.
+        if not is_enabled:
+            self.insert_settings_action.setEnabled(False)
+
+    def set_insert_settings_enabled(self, enabled: bool) -> None:
+        """Public contract for the controller to reflect base-file-chosen state."""
+        self.insert_settings_action.setEnabled(enabled)

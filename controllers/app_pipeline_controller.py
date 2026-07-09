@@ -194,7 +194,9 @@ class AppPipelineController(QObject):
         self.window.menu_bar.close_project_requested.connect(self._execute_project_close_workflow)        
         self.window.menu_bar.find_action_triggered.connect(self.lc_ctrl.route_find_to_active_tab)
         self.window.menu_bar.advanced_search_requested.connect(self._spawn_advanced_search_view)
-        self.window.menu_bar.preferences_requested.connect(self._spawn_preferences_dialog)   
+        self.window.menu_bar.preferences_requested.connect(self._spawn_preferences_dialog)
+        self.window.menu_bar.insert_latex_settings_requested.connect(self._handle_insert_latex_settings)
+        self.window.menu_bar.edit_menu_about_to_show.connect(self._refresh_insert_settings_menu_state)
 
         self.window.menu_bar.add_head_note_requested.connect(self.window.handle_add_head_note_dialog)  
         self.window.menu_bar.create_latex_command_requested.connect(self.create_command_controller.show_create_command_dialog)
@@ -589,6 +591,42 @@ class AppPipelineController(QObject):
     def _spawn_preferences_dialog(self) -> None:
         """Instantiates and executes the preferences configuration flow."""
         self._index_prefs_ctrl.execute_configuration_flow()
+
+    @Slot()
+    def _refresh_insert_settings_menu_state(self) -> None:
+        """
+        Re-evaluates "Insert LaTeX Index Settings..." enabled-state right
+        before the Edit menu opens. update_menu_item_state() already forces
+        this off immediately on project close, but whether a base/root file
+        has been chosen can change independently at any time (via the tree
+        view's "Set as base file" action), so that half is checked lazily
+        here instead of needing a dedicated change-notification signal.
+        """
+        is_project_open = self.scope_ctrl.active_project_name != "Untitled Project"
+        has_root_file = bool(self.scope_ctrl.get_current_project_metadata_value("root_tex_file"))
+        self.window.menu_bar.set_insert_settings_enabled(is_project_open and has_root_file)
+
+    @Slot()
+    def _handle_insert_latex_settings(self) -> None:
+        """
+        Generates the configured LaTeX Settings (imakeidx/idxlayout/hyperref
+        package usage + makeindex/xindy engine config + printindex) from the
+        active IndexPrefsConfigModel and splices them into the project's
+        base document, immediately before \\begin{document}/\\end{document}
+        respectively.
+        """
+        root_tex_file = self.scope_ctrl.get_current_project_metadata_value("root_tex_file")
+        if not root_tex_file:
+            self.window.status_bar.showMessage("No base document has been selected for this project.", 3000)
+            return
+
+        preamble = self._index_prefs_model.generate_preamble_snippet()
+        printindex = self._index_prefs_model.generate_printindex_snippet()
+
+        if self.doc_io.inject_latex_settings(root_tex_file, preamble, printindex):
+            self.window.status_bar.showMessage(
+                f"LaTeX index settings inserted into {os.path.basename(root_tex_file)}.", 4000
+            )
 
     @Slot()
     def _execute_project_close_workflow(self) -> bool:

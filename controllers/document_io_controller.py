@@ -308,6 +308,120 @@ class DocumentIOController(QObject):
         """Public contract for updating the active tab container reference."""
         self.tabs = tabs_widget
 
+    # ------------------------------------------------------------------
+    # Base-document LaTeX settings injection
+    # ------------------------------------------------------------------
+
+    # Marker comments delimiting each auto-managed, idempotently-replaced
+    # block. Kept distinct per block so re-running the "Insert LaTeX Index
+    # Settings" menu action replaces just its own prior output rather than
+    # duplicating content on every run.
+    _PREAMBLE_BLOCK_BEGIN = "% >>> LaTeX Indexing Editor: BEGIN generated preamble settings (auto-managed) <<<"
+    _PREAMBLE_BLOCK_END = "% >>> LaTeX Indexing Editor: END generated preamble settings <<<"
+    _PRINTINDEX_BLOCK_BEGIN = "% >>> LaTeX Indexing Editor: BEGIN generated printindex block (auto-managed) <<<"
+    _PRINTINDEX_BLOCK_END = "% >>> LaTeX Indexing Editor: END generated printindex block <<<"
+
+    def inject_latex_settings(self, file_path: str, preamble_body: str, printindex_body: str) -> bool:
+        r"""
+        Splices preamble_body immediately before \begin{document} and
+        printindex_body immediately before \end{document} in file_path (the
+        project's base/root .tex file). Each is wrapped in its own pair of
+        marker comments and any previously-injected block (found via those
+        markers, wherever it landed) is stripped before the new one is
+        inserted, so repeated use updates in place instead of accumulating
+        duplicate \usepackage/\printindex lines.
+
+        Same open-editor-vs-disk branching as rewrite_macro_span: edits the
+        live QTextDocument if file_path is open in a tab (so the unsaved-
+        changes indicator fires normally), otherwise registers a session
+        backup and rewrites the file directly on disk.
+
+        Returns True on success. On failure (can't find \begin{document}/
+        \end{document}, or a read/write error), emits save_error_encountered
+        and returns False.
+        """
+        open_editor = self._find_open_editor(file_path)
+        if open_editor:
+            original_text = open_editor.document().toPlainText()
+        else:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    original_text = f.read()
+            except Exception as e:
+                self.save_error_encountered.emit("Insert Settings Error", f"Could not read base file:\n{e}")
+                return False
+
+        new_text = self._splice_generated_blocks(original_text, preamble_body, printindex_body)
+        if new_text is None:
+            self.save_error_encountered.emit(
+                "Insert Settings Error",
+                "Could not locate \\begin{document} and \\end{document} in the base file."
+            )
+            return False
+
+        if open_editor:
+            from PySide6.QtGui import QTextCursor
+            cursor = QTextCursor(open_editor.document())
+            cursor.select(QTextCursor.SelectionType.Document)
+            cursor.insertText(new_text)
+            open_editor.document().setModified(True)
+        else:
+            self.backup_manager.register_file_for_session(file_path)
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(new_text)
+            except Exception as e:
+                self.save_error_encountered.emit("Insert Settings Error", f"Could not write base file:\n{e}")
+                return False
+
+        self.operation_status_emitted.emit("LaTeX index settings inserted into base document.")
+        return True
+
+    def _splice_generated_blocks(self, text: str, preamble_body: str, printindex_body: str) -> "str | None":
+        r"""
+        Pure string-manipulation helper for inject_latex_settings(). Returns
+        the updated full document text, or None if \begin{document}/
+        \end{document} can't both be located.
+        """
+        import re
+
+        preamble_re = re.compile(
+            re.escape(self._PREAMBLE_BLOCK_BEGIN) + r".*?" + re.escape(self._PREAMBLE_BLOCK_END) + r"\n?",
+            re.DOTALL,
+        )
+        printindex_re = re.compile(
+            re.escape(self._PRINTINDEX_BLOCK_BEGIN) + r".*?" + re.escape(self._PRINTINDEX_BLOCK_END) + r"\n?",
+            re.DOTALL,
+        )
+
+        # Strip any previously-injected blocks first (wherever they landed)
+        # so re-running this doesn't accumulate duplicates.
+        text = preamble_re.sub("", text)
+        text = printindex_re.sub("", text)
+
+        # \begin{document} must be the FIRST such occurrence (the true start
+        # of the document body), but \end{document} must be the LAST one --
+        # a .tex file can legitimately contain the literal text
+        # "\end{document}" earlier, e.g. inside a \begin{verbatim} block
+        # illustrating example LaTeX usage (as in this app's own sample.tex),
+        # and that illustrative occurrence is indented to match the example
+        # code. Using find() (first match) for both would splice the
+        # printindex block in front of that fake, indented occurrence
+        # instead of the real end of the document.
+        begin_doc_idx = text.find("\\begin{document}")
+        end_doc_idx = text.rfind("\\end{document}")
+        if begin_doc_idx == -1 or end_doc_idx == -1 or end_doc_idx < begin_doc_idx:
+            return None
+
+        preamble_block = f"{self._PREAMBLE_BLOCK_BEGIN}\n{preamble_body}\n{self._PREAMBLE_BLOCK_END}\n"
+        printindex_block = f"{self._PRINTINDEX_BLOCK_BEGIN}\n{printindex_body}\n{self._PRINTINDEX_BLOCK_END}\n"
+
+        text = text[:begin_doc_idx] + preamble_block + text[begin_doc_idx:]
+        end_doc_idx += len(preamble_block)  # shifted by the preamble insertion above
+        text = text[:end_doc_idx] + printindex_block + text[end_doc_idx:]
+
+        return text
+
 # import os
 # from PySide6.QtCore import QObject, Signal, Slot
 # from views.editor_tab import EditorTab
