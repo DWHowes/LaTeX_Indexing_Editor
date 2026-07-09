@@ -21,7 +21,6 @@ from models.index_edit_staging_model import IndexEditStagingModel
 from models.name_inverter import NameInverter
 
 from controllers.index_tree_controller import IndexTreeController
-from controllers.macro_editing_controller import MacroEditingController
 from controllers.context_menu_subsystem import FileTreeContextMenuManager, IndexTreeContextMenuManager, EditEntryContextMenuManager
 from controllers.index_prefs_config_controller import IndexPrefsConfigController
 from controllers.latex_command_controller import CreateCommandController
@@ -111,12 +110,6 @@ class AppPipelineController(QObject):
         starting_id = max_existing_id + 1  # 1 for new project, next available for existing
         # Instantiate isolated macro calculation tracking engines
         self.macro_id_generator = MacroIDGenerator(starting_id)
-
-        self.macro_editing_ctrl = MacroEditingController(
-            id_generator_model=self.macro_id_generator,
-            index_controller=self.idx_ctrl,
-            parent=self
-        )
 
         self._theme_model = ThemeConfigModel()
         self._theme_controller = ThemeConfigController(model=self._theme_model, 
@@ -243,12 +236,7 @@ class AppPipelineController(QObject):
         self._edit_table_context_manager.delete_edit_term_triggered.connect(self._handle_table_deletion_request)
         self._edit_table_context_manager.invert_name_triggered.connect(self._handle_index_name_inversion_request)
 
-        self.macro_editing_ctrl.state_dirty_flag_raised.connect(self._handle_macro_workspace_mutation)
-        
-        # Pure contract invocation on the active view instance
-        self.macro_editing_ctrl.macro_substitution_completed.connect(lambda: self.index_tree_widget.expandAll())
-        
-        self.scope_ctrl.scope_mutated.connect(lambda: self.window.synchronize_window_title(self.scope_ctrl.active_project_name))    
+        self.scope_ctrl.scope_mutated.connect(lambda: self.window.synchronize_window_title(self.scope_ctrl.active_project_name))
 
         self._rewire_undo_redo_signals(self.window.tabs.currentIndex())  # Initial wiring for the first tab
 
@@ -367,9 +355,18 @@ class AppPipelineController(QObject):
         insertions are already permanently committed to the DB (insertion
         commits immediately — see _handle_manual_index_insertion), so
         confirming them is just forgetting the rollback bookkeeping.
+
+        This file's .tex buffer is now durably on disk, so any rename/edit
+        dirty records for entries in this specific file (see
+        EntryModifierModel.mark_dirty, driven by IndexEditController) can
+        also be flushed now — scoped to this file so a still-unsaved
+        rename in a DIFFERENT open tab isn't pushed to the DB ahead of its
+        own save.
         """
         norm_path = os.path.normpath(file_path) if file_path else ""
         self._pending_insertions_by_file.pop(norm_path, None)
+        if norm_path and self.entry_modifier_model:
+            self.entry_modifier_model.flush_dirty_to_db(norm_path)
 
     def _confirm_all_pending_insertions(self) -> None:
         """Called on a whole-project save — every file's pending insertions become permanent."""
@@ -378,14 +375,23 @@ class AppPipelineController(QObject):
     def _discard_pending_insertions(self, file_path: str) -> None:
         """
         Called when a tab's unsaved changes are discarded (single-tab or
-        bulk tab close). Rolls back every \\index entry inserted into this
-        file since it was opened/last saved: removes it from the tree and
-        table views and the in-memory cache, and deletes the
-        project_references/project_headings rows that were committed
-        immediately at insertion time. The .tex macro text itself needs no
-        separate rollback here — WorkspaceLifecycleController.discard_
-        unsaved_changes already restores this file's entire buffer/disk
-        content from its pristine session backup.
+        bulk tab close). Rolls back both kinds of index-editing state this
+        file could have accumulated since it was opened/last saved:
+
+        1. Fresh \\index insertions — removed from the tree and table
+           views and the in-memory cache, with the project_references/
+           project_headings rows deleted (they were committed immediately
+           at insertion time — see _handle_manual_index_insertion).
+        2. Unsaved renames (tree or table edits) — the in-memory cache is
+           reverted to the DB's still-current value and the tree/table
+           views are refreshed to match (see IndexEditController.
+           discard_dirty_edits for why this is safe even though nothing
+           was ever written to the DB for these).
+
+        The .tex macro text itself needs no separate rollback here —
+        WorkspaceLifecycleController.discard_unsaved_changes already
+        restores this file's entire buffer/disk content from its pristine
+        session backup.
         """
         norm_path = os.path.normpath(file_path) if file_path else ""
         pending_ids = self._pending_insertions_by_file.pop(norm_path, [])
@@ -395,6 +401,9 @@ class AppPipelineController(QObject):
             if self.idx_ctrl:
                 self.idx_ctrl.discard_staged_entry(entry_id)
             self._forget_index_undo_entry(entry_id)
+
+        if self.index_edit_ctrl and norm_path:
+            self.index_edit_ctrl.discard_dirty_edits(norm_path)
 
         # _tree_modified is a broader, sticky "something in the tree changed
         # this session" flag also raised by renames, term pruning, and macro
@@ -406,8 +415,17 @@ class AppPipelineController(QObject):
             self._tree_modified = False
 
     def _discard_all_pending_insertions(self) -> None:
-        """Called on whole-app-exit Discard — rolls back every open file's pending insertions."""
-        for file_path in list(self._pending_insertions_by_file.keys()):
+        """
+        Called on whole-app-exit Discard — rolls back every open file's
+        pending insertions AND dirty (unsaved) renames. The two are tracked
+        in separate places (_pending_insertions_by_file here vs.
+        EntryModifierModel._dirty_ids), so a file with only a dirty rename
+        and no insertion wouldn't be visited if this only looped the
+        former — take the union of both.
+        """
+        dirty_files = self.entry_modifier_model.get_dirty_file_paths() if self.entry_modifier_model else set()
+        all_files = set(self._pending_insertions_by_file.keys()) | dirty_files
+        for file_path in all_files:
             self._discard_pending_insertions(file_path)
 
     @Slot(str)
@@ -472,6 +490,14 @@ class AppPipelineController(QObject):
             # Ensure a pristine backup exists before the live file is overwritten
             self.backup_manager.register_file_for_session(target_path)
             self.doc_io.save_tex_file_to_disk(editor_tab, target_path)
+            # Deliberately NOT flushing dirty index records here: this sync
+            # is an ambient, automatic .tex flush (not a user Save/Discard
+            # decision), and its .tex write is safely reversible later via
+            # WorkspaceLifecycleController.discard_unsaved_changes restoring
+            # from the session backup. Flushing renamed headings to the DB
+            # at this same ambient moment would make them stick even if the
+            # user later discards this tab — the same premature-commit
+            # problem already fixed for fresh insertions.
             self.window.status_bar.showMessage("Active canvas buffer synchronized to disk.", 2000)
 
     @Slot()
@@ -749,7 +775,24 @@ class AppPipelineController(QObject):
         """Coordinates synchronization blocks across file buffers and sqlite."""
         self.window.status_bar.set_status_text("Saving project workspace modifications...")
         tex_success = self.doc_io.commit_all_open_buffers() if self.doc_io else False
+
+        # Flushes every rename/edit made this session (tree-side heading
+        # renames and table-side cell edits both call EntryModifierModel.
+        # mark_dirty via IndexEditController) to project_references — this
+        # was previously never wired up anywhere, so renamed headings and
+        # shifted coordinates were silently lost on the next project load
+        # (which reads straight from the DB, not by rescanning .tex files,
+        # whenever the DB already has data).
+        dirty_success, dirty_failures = (
+            self.entry_modifier_model.flush_dirty_to_db() if self.entry_modifier_model else (0, 0)
+        )
+        if dirty_failures:
+            self.window.status_bar.showMessage(
+                f"Warning: {dirty_failures} index edit(s) failed to save — see session log.", 5000
+            )
+
         db_success = self.idx_ctrl.commit_staged_changes_to_db() if self.idx_ctrl else False
+        db_success = db_success or dirty_success > 0
         self._confirm_all_pending_insertions()
 
         if tex_success or db_success:
@@ -801,8 +844,9 @@ class AppPipelineController(QObject):
             
             has_unsaved_tex = bool(self.doc_io.check_unsaved_tex_changes()) if self.doc_io else False
             has_unsaved_db = bool(self.idx_ctrl.has_unsaved_changes()) if self.idx_ctrl else False
+            has_dirty_edits = bool(self.entry_modifier_model.has_dirty_records()) if self.entry_modifier_model else False
 
-            if has_unsaved_tex or has_unsaved_db or self._tree_modified:
+            if has_unsaved_tex or has_unsaved_db or has_dirty_edits or self._tree_modified:
                 box = QMessageBox(self.window)
                 box.setWindowTitle("Unsaved Workspace Changes")
                 box.setText("Your workspace has uncommitted modifications. Save changes before exiting?")
@@ -996,19 +1040,61 @@ class AppPipelineController(QObject):
         else:
             id_carrier.value = 1
 
-    @Slot(dict)
-    def _handle_index_deletion_request(self, payload: dict):
-        if not payload or "path_parts" not in payload:
-            return
-        
-        path_parts = payload["path_parts"]
-        full_path_str = " / ".join(path_parts)
+    @Slot(QModelIndex)
+    def _handle_index_deletion_request(self, target_index: QModelIndex):
+        r"""
+        Handles the tree's "Delete Term" context-menu action: permanently
+        removes a heading node and every \index reference under it
+        (including descendant sub-headings), in the .tex source, the DB,
+        and the tree/table views alike.
 
-        if self.scope_ctrl:
-            self.scope_ctrl.prune_index_term(full_path_str)
+        target_index arrives from IndexTreeContextMenuManager.
+        delete_tree_term_triggered, already normalised to column 0.
+        """
+        if not target_index.isValid() or not self.index_edit_ctrl:
+            return
+
+        item = self.index_tree_widget.base_model.itemFromIndex(target_index)
+        if item is None:
+            return
+
+        display_text = str(target_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        ref_count = self.index_edit_ctrl.count_refs_under_node(item)
+
+        if ref_count == 0:
+            confirm_text = f"Remove empty term '{display_text}' from the index tree?"
+        else:
+            confirm_text = (
+                f"Delete term '{display_text}' and its {ref_count} "
+                f"index reference{'s' if ref_count != 1 else ''}? This removes "
+                "the \\index macro(s) from the .tex source and cannot be undone "
+                "after save."
+            )
+
+        reply = QMessageBox.question(
+            self.window, "Delete Term", confirm_text,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        success_count, failure_count = self.index_edit_ctrl.handle_node_deletion(item)
+
+        if failure_count:
+            QMessageBox.warning(
+                self.window, "Delete failed",
+                f"{failure_count} of {success_count + failure_count} reference(s) "
+                "could not be deleted. See the session log for details."
+            )
 
         self._tree_modified = True
-        self.window.status_bar.set_status_text("Index term safely marked for deletion.")
+        if success_count:
+            self.window.status_bar.set_status_text(
+                f"Deleted term '{display_text}' ({success_count} reference"
+                f"{'s' if success_count != 1 else ''} removed)."
+            )
+        else:
+            self.window.status_bar.set_status_text(f"Removed empty term '{display_text}'.")
 
     def _handle_table_deletion_request(self):
         pass
@@ -1030,11 +1116,6 @@ class AppPipelineController(QObject):
             "in progress.",
             5000,
         )
-
-    @Slot()
-    def _handle_macro_workspace_mutation(self):
-        self._tree_modified = True
-        self.window.status_bar.set_status_text("Macro substitution complete. Unsaved modifications staged.")
 
     @Slot(str, str)
     def _display_document_io_error(self, title: str, message: str):

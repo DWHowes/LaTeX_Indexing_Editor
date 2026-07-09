@@ -559,6 +559,44 @@ class FileTreePersistence:
         # This allows the decoupled SessionLogger to track database unlinking actions
         print("[MODEL PERSISTENCE] Database connections severed. State reset to baseline defaults.")
 
+    def fetch_reference_row(self, entry_id: int) -> dict | None:
+        """
+        Reads a single project_references row back from disk, keyed by
+        unique_id_number. Mirrors fetch_index_manifest's per-row JSON
+        deserialization for see_references/seealso_references.
+
+        Used to revert a dirty (edited-but-never-flushed) in-memory record
+        to the DB's still-current truth when the user discards a tab's
+        unsaved renames — see EntryModifierModel.discard_dirty_records.
+        Returns None if the row doesn't exist or on any DB error.
+        """
+        import json
+        if not self.db_path:
+            return None
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM project_references WHERE unique_id_number = ?;",
+                    (entry_id,)
+                ).fetchone()
+            if row is None:
+                return None
+            r = dict(row)
+            try:
+                r["see_references"] = json.loads(r["see_references"]) if r["see_references"] else None
+            except Exception:
+                r["see_references"] = None
+            try:
+                r["seealso_references"] = json.loads(r["seealso_references"]) if r["seealso_references"] else None
+            except Exception:
+                r["seealso_references"] = None
+            r["has_references"] = bool(r["has_references"])
+            r["is_range_closer"] = bool(r.get("is_range_closer"))
+            return r
+        except sqlite3.Error as e:
+            print(f"[FileTreePersistence] fetch_reference_row error for ID {entry_id}: {e}")
+            return None
+
     def update_reference_field(self, entry_id: int, record: dict) -> bool:
         """
         Persists a single reference record update keyed by unique_id_number.

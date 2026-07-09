@@ -46,8 +46,9 @@ class EntryModifierController(QObject):
         # write for an entry. Table-originated commits already match what's
         # displayed, so update_row_from_canonical no-ops for those; this is
         # what keeps a tree-originated rename from leaving the table stale.
-        self._staging_model.entry_committed.connect(self._on_staged_entry_committed)  
-        self._index_edit_ctrl.entry_deleted.connect(self._on_entry_deleted)      
+        self._staging_model.entry_committed.connect(self._on_staged_entry_committed)
+        self._index_edit_ctrl.entry_deleted.connect(self._on_entry_deleted)
+        self._index_edit_ctrl.entry_reverted.connect(self._on_entry_reverted)
 
     def load_initial_entry_modifier_records(self):
         """Queries model states to initialize layout grid items upon bootstrap."""
@@ -272,4 +273,15 @@ class EntryModifierController(QObject):
         if canonical is None:
             return
         self.view.update_row_from_canonical(entry_id, canonical)
-        
+
+    @Slot(int, str)
+    def _on_entry_reverted(self, entry_id: int, canonical_heading: str):
+        """
+        Fires after IndexEditController.discard_dirty_edits reverts a
+        never-saved rename back to the DB's still-current value. Refreshes
+        this table's row the same way _on_staged_entry_committed does;
+        no-ops for range closers, which never have a row to begin with
+        (update_row_from_canonical no-ops when _find_source_row_for_id
+        can't find one).
+        """
+        self.view.update_row_from_canonical(entry_id, canonical_heading)

@@ -226,13 +226,26 @@ class EntryModifierModel(QObject):
         """Returns True if any records are pending a DB flush."""
         return bool(self._dirty_ids)
 
-    def flush_dirty_to_db(self) -> tuple[int, int]:
+    def flush_dirty_to_db(self, file_path: str | None = None) -> tuple[int, int]:
         """
-        Writes all dirty records to the DB via update_reference_field.
+        Writes dirty records to the DB via update_reference_field.
 
-        Returns (success_count, failure_count).
-        Clears the dirty set on completion regardless of partial failure
-        so a broken record doesn't block future saves.
+        file_path: if given, only flushes dirty records whose cached
+        file_path matches (normalized) — used when a single file's .tex
+        buffer was just durably saved (single-tab Save, or the tab-switch
+        auto-sync flush) so records belonging to OTHER, still-unsaved tabs
+        aren't pushed to the DB ahead of their own .tex write. Doing so
+        would desync the DB from disk if that other tab is later discarded
+        instead of saved — the DB would show a rename that was never
+        actually kept. Pass None only when every open tab's buffer has
+        just been saved together (see AppPipelineController.
+        execute_project_save_workflow), where every dirty record is
+        guaranteed to already match what's on disk.
+
+        Returns (success_count, failure_count). Flushed (or unrecoverable)
+        ids are removed from the dirty set regardless of individual
+        success, so a broken record doesn't block future saves; ids
+        outside file_path's scope are left untouched for a later flush.
         """
         if not self._dirty_ids:
             return 0, 0
@@ -241,10 +254,18 @@ class EntryModifierModel(QObject):
             print("[MODEL STUB] No persistence layer — skipping flush")
             return 0, len(self._dirty_ids)
 
+        norm_target = os.path.normpath(file_path) if file_path else None
+
+        target_ids = [
+            entry_id for entry_id in self._dirty_ids
+            if norm_target is None
+            or os.path.normpath((self._records.get(entry_id) or {}).get("file_path", "")) == norm_target
+        ]
+
         success_count = 0
         failure_count = 0
 
-        for entry_id in list(self._dirty_ids):
+        for entry_id in target_ids:
             record = self._records.get(entry_id)
             if record is None:
                 print(f"[MODEL WARNING] flush_dirty_to_db: ID {entry_id} not in cache — skipping")
@@ -258,13 +279,72 @@ class EntryModifierModel(QObject):
                 print(f"[MODEL WARNING] flush_dirty_to_db: DB write failed for ID {entry_id}")
                 failure_count += 1
 
-        self.clear_dirty()
+        self._dirty_ids.difference_update(target_ids)
 
         print(
-            f"[MODEL] Flushed dirty records: {success_count} succeeded, "
-            f"{failure_count} failed"
+            f"[MODEL] Flushed dirty records"
+            f"{'' if norm_target is None else f' for {os.path.basename(norm_target)}'}: "
+            f"{success_count} succeeded, {failure_count} failed"
         )
         return success_count, failure_count
+
+    def get_dirty_ids_for_file(self, file_path: str) -> list[int]:
+        """Returns dirty entry_ids whose cached record belongs to file_path (normalized)."""
+        norm_target = os.path.normpath(file_path) if file_path else ""
+        return [
+            entry_id for entry_id in self._dirty_ids
+            if os.path.normpath((self._records.get(entry_id) or {}).get("file_path", "")) == norm_target
+        ]
+
+    def get_dirty_file_paths(self) -> set[str]:
+        """Returns the (normalized) set of file paths with at least one dirty record."""
+        return {
+            os.path.normpath((self._records.get(entry_id) or {}).get("file_path", ""))
+            for entry_id in self._dirty_ids
+            if (self._records.get(entry_id) or {}).get("file_path")
+        }
+
+    def revert_dirty_record(self, entry_id: int) -> dict | None:
+        """
+        Overwrites this entry's cached mutable fields with the DB's current
+        row and drops it from the dirty set — used when the user discards a
+        tab whose rename(s) were marked dirty but never reached
+        flush_dirty_to_db, so the in-memory cache (and the tree/table views
+        that read from it) don't keep showing a rename that was discarded
+        everywhere else (the .tex buffer is restored from its session
+        backup, and the DB row was never touched).
+
+        Since a dirty-but-unflushed record is by definition never written
+        to the DB, the DB row is still exactly the pre-edit baseline —
+        no separate snapshot bookkeeping is needed, just read it back.
+
+        Returns the DB row dict (so the caller can refresh the tree/table
+        display), or None if there's no persistence layer or no matching
+        row (e.g. the entry was deleted through some other path).
+        """
+        self._dirty_ids.discard(entry_id)
+
+        if self._persistence is None:
+            return None
+
+        db_row = self._persistence.fetch_reference_row(entry_id)
+        if db_row is None:
+            return None
+
+        record = self._records.get(entry_id)
+        if record is None:
+            return db_row
+
+        mutable_fields = {
+            "heading_raw_text", "heading_id", "file_path", "line_number",
+            "column_offset", "absolute_position", "absolute_end", "encap",
+            "see_references", "seealso_references", "has_references",
+        }
+        for key in mutable_fields:
+            if key in db_row:
+                record[key] = db_row[key]
+
+        return db_row
 
     # ------------------------------------------------------------------
     # Persistence stubs — delegate to FileTreePersistence via scope controller

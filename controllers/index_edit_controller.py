@@ -29,6 +29,7 @@ class IndexEditController(QObject):
     heading_node_orphaned = Signal(int)  # heading_id of the removed node
     entry_deleted = Signal(int)          # entry_id of a deleted reference
     heading_rename_conflict = Signal(str, list)  # old_raw_token, blocking entry ids
+    entry_reverted = Signal(int, str)    # entry_id, reverted canonical heading (discard rollback)
 
     def __init__(
         self,
@@ -636,6 +637,159 @@ class IndexEditController(QObject):
         self._cleanup_deleted_entry(entry_id, heading_text, heading_id)
         return True
 
+    def count_refs_under_node(self, target_item: QStandardItem) -> int:
+        """
+        Public read-only helper for the delete-term confirmation dialog:
+        how many distinct \\index references (openers + their range
+        partners) would handle_node_deletion actually remove.
+        """
+        return len(self._distinct_entry_ids_under_node(target_item))
+
+    def _distinct_entry_ids_under_node(self, target_item: QStandardItem) -> list[int]:
+        """
+        Collects every reference under target_item and its descendants
+        (via _collect_refs_from_node, which only ever holds openers — see
+        its docstring), plus each opener's range partner (closer), which
+        is never in the tree's own ref lists and would otherwise be left
+        behind as an orphaned "|)"-only macro with no matching opener.
+        """
+        entry_ids: list[int] = []
+        seen: set[int] = set()
+        for ref in self._collect_refs_from_node(target_item):
+            uid = int(ref.get("unique_id_number") or ref.get("id") or 0)
+            if not uid or uid in seen:
+                continue
+            seen.add(uid)
+            entry_ids.append(uid)
+
+            record = self._entry_model._records.get(uid)
+            partner_id = record.get("range_partner_id") if record else None
+            if partner_id and partner_id not in seen:
+                seen.add(partner_id)
+                entry_ids.append(partner_id)
+
+        return entry_ids
+
+    def handle_node_deletion(self, target_item: QStandardItem) -> tuple[int, int]:
+        r"""
+        Permanently deletes an entire heading node and everything under
+        it: every \index reference at or below this node (including range
+        partners), their DB rows, and every heading row (this node's own
+        and any descendant's) that ends up with zero references.
+
+        Bulk counterpart to handle_entry_deletion, reusing it per-entry so
+        the .tex rewrite / coordinate-shift / cache-and-view cleanup
+        pipeline for a single reference only exists in one place. Entries
+        can be processed in any order — shift_coordinates_after keeps
+        every other cached record's coordinates correct after each
+        individual deletion, so there's no ordering dependency between
+        them even when several live in the same file.
+
+        Returns (success_count, failure_count) across every reference
+        processed (openers and their range partners).
+        """
+        path = self._collect_node_path(target_item)  # capture before any mutation
+        entry_ids = self._distinct_entry_ids_under_node(target_item)
+
+        success_count = 0
+        failure_count = 0
+        for entry_id in entry_ids:
+            if self.handle_entry_deletion(entry_id):
+                success_count += 1
+            else:
+                failure_count += 1
+
+        self._prune_subtree_and_ancestors(path)
+
+        return success_count, failure_count
+
+    def _collect_node_path(self, item: QStandardItem) -> list[str]:
+        """Collects raw ToolTipRole tokens from the root down to item."""
+        tokens: list[str] = []
+        node = item
+        while node is not None:
+            tokens.insert(0, str(node.data(Qt.ItemDataRole.ToolTipRole) or node.text()).strip())
+            node = node.parent()
+        return tokens
+
+    def _prune_subtree_and_ancestors(self, parts: list[str]) -> None:
+        r"""
+        After a bulk deletion, cleans up two kinds of leftover empty nodes
+        that handle_entry_deletion's own single-level, single-node orphan
+        check can't reach on its own:
+
+        1. Zombie nodes WITHIN the target's own former subtree. That
+           per-entry orphan check only ever inspects the one node it just
+           made referenceless — it refuses to remove it while it still has
+           tree children (correctly, to avoid deleting a live subtree
+           along with it via QStandardItemModel's cascading removeRow),
+           but never comes back to recheck it later. In a bulk delete,
+           processing a node's OWN direct entry before one of its
+           children's entries (a real, common ordering from
+           _collect_refs_from_node's traversal) leaves exactly that node
+           behind: heading-orphaned in the DB already, but still sitting
+           in the tree as a childless-looking parent until this sweep.
+        2. Now-empty ancestors ABOVE the target's own level — e.g. an
+           intermediate heading with no \index macro of its own, only
+           existing as a parent row because resolve_or_insert_heading
+           creates one for every ancestor level of a fresh insertion, so
+           it was never the heading_id any single deleted entry pointed
+           to and _remove_orphaned_heading never ran for it.
+
+        Re-queries the tree by path throughout (rather than holding onto
+        target_item, which may already be a dangling/removed
+        QStandardItem by the time this runs) for both.
+        """
+        node = self._find_tree_node_by_path(parts)
+        if node is not None:
+            self._prune_node_subtree_bottom_up(node)
+
+        engine = self._tree.engine
+        for depth in range(len(parts), 0, -1):
+            sub_parts = parts[:depth]
+            ancestor = self._find_tree_node_by_path(sub_parts)
+            if ancestor is None:
+                continue  # already pruned above, or as a side effect of an entry delete
+
+            if ancestor.rowCount() > 0:
+                break  # still has live children — nothing shallower needs pruning either
+
+            self._prune_single_node(sub_parts, engine)
+
+    def _prune_node_subtree_bottom_up(self, node: QStandardItem) -> None:
+        r"""
+        Recursively removes childless, heading-orphaned descendants of
+        node, post-order (children before parents) — so a node that only
+        became truly empty because ITS OWN child was pruned earlier in
+        this same sweep gets caught too. Safe to run unconditionally
+        across node's whole subtree: by the time handle_node_deletion
+        calls this, every \index reference anywhere under node has
+        already been deleted, so nothing legitimate should be left.
+        """
+        # Snapshot children before recursing — rows shift as siblings are removed.
+        children = [node.child(r, 0) for r in range(node.rowCount())]
+        for child in children:
+            if child is not None:
+                self._prune_node_subtree_bottom_up(child)
+
+        if node.rowCount() > 0:
+            return  # still has live children after the recursive pass below it
+
+        parts = self._collect_node_path(node)
+        self._prune_single_node(parts, self._tree.engine)
+
+    def _prune_single_node(self, parts: list[str], engine) -> None:
+        """Removes exactly one tree node by path plus its heading row, if any."""
+        heading_id = self._find_heading_id_by_text(engine, "!".join(parts))
+        self._remove_tree_node_by_path(parts)
+
+        if heading_id is not None:
+            engine._active_headings = [
+                h for h in engine._active_headings if h.get("id") != heading_id
+            ]
+            self._entry_model.delete_heading_if_orphaned(heading_id)
+            self.heading_node_orphaned.emit(heading_id)
+
     def discard_uncommitted_entry(self, entry_id: int) -> bool:
         r"""
         Rolls back a single \index entry that was inserted earlier in this
@@ -661,6 +815,50 @@ class IndexEditController(QObject):
 
         self._cleanup_deleted_entry(entry_id, heading_text, heading_id)
         return True
+
+    def discard_dirty_edits(self, file_path: str) -> None:
+        r"""
+        Rolls back any unsaved rename made to entries in file_path during
+        this session, when the user discards the tab instead of saving.
+
+        mark_dirty() fires immediately after every successful .tex rewrite
+        (see _rewrite_single_reference / handle_entry_table_edit /
+        _sync_range_partner), independent of Save. The .tex buffer itself
+        is safely deferred — Qt's own document-modified flag, restored by
+        WorkspaceLifecycleController.discard_unsaved_changes on Discard —
+        but until this method, nothing reverted the in-memory cache
+        (EntryModifierModel._records) or the tree/table views that read
+        from it, so a discarded rename kept showing in the UI even after
+        the underlying .tex text and DB row were both back to their
+        original, un-renamed state.
+
+        Only entries never flushed to the DB this session reach here — an
+        already-saved-and-closed tab's dirty ids were already cleared by
+        flush_dirty_to_db at save time, so there's nothing left to revert
+        for them. Since a still-dirty record was by definition never
+        written to the DB, the DB row EntryModifierModel.revert_dirty_record
+        reads back is still exactly the pre-edit baseline.
+        """
+        dirty_ids = self._entry_model.get_dirty_ids_for_file(file_path)
+        for entry_id in dirty_ids:
+            old_heading = self._entry_model.get_heading_text(entry_id)
+            record = self._entry_model._records.get(entry_id) or {}
+            is_closer = bool(record.get("is_range_closer"))
+
+            db_row = self._entry_model.revert_dirty_record(entry_id)
+            if db_row is None:
+                continue
+
+            db_heading = db_row.get("heading_raw_text", "")
+            self._staging_model.register_original(entry_id, db_heading)
+
+            # Closers are never shown in the tree (see
+            # _handle_manual_index_insertion) — reattaching one here would
+            # spuriously make it appear for the first time.
+            if not is_closer and old_heading and db_heading and old_heading != db_heading:
+                self._reconcile_heading_node(entry_id, old_heading, db_heading)
+
+            self.entry_reverted.emit(entry_id, db_heading)
 
     def _cleanup_deleted_entry(self, entry_id: int, heading_text: str, heading_id) -> None:
         """

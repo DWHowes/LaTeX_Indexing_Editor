@@ -165,11 +165,6 @@ class ProjectScopeController(QObject):
     def get_max_unique_id(self) -> int:
         return self.model.get_max_unique_id()
 
-    def prune_index_term(self, full_path_str:str) -> None:
-        """Public contract to route pruning requests for index terms."""
-        self.model.prune_index_record(full_path_str)
-        self.scope_mutated.emit()
-
     def close_active_project(self) -> None:
         """
         Resets all active project state back to a neutral baseline.
