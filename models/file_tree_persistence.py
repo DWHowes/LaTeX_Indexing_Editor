@@ -481,17 +481,20 @@ class FileTreePersistence:
                             str(r.get("encap", "standard")),
                             json.dumps(r.get("see_references")) if isinstance(r.get("see_references"), list) else None,
                             json.dumps(r.get("seealso_references")) if isinstance(r.get("seealso_references"), list) else None,
-                            1 if r.get("has_references") else 0
+                            1 if r.get("has_references") else 0,
+                            r.get("range_partner_id"), # Int or None
+                            1 if r.get("is_range_closer") else 0
                         )
                         for r in references
                     ]
-                    
+
                     cursor.executemany("""
                         INSERT INTO project_references (
-                            heading_id, heading_raw_text, uid, unique_id_number, 
+                            heading_id, heading_raw_text, uid, unique_id_number,
                             file_path, line_number, column_offset, absolute_position, absolute_end,
-                            encap, see_references, seealso_references, has_references
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                            encap, see_references, seealso_references, has_references,
+                            range_partner_id, is_range_closer
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                     """, references_batch)
                     
                 conn.commit()
