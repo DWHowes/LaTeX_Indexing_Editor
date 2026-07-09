@@ -191,7 +191,7 @@ class IndexPrefsConfigDialog(QDialog):
 
         form_rtf = QFormLayout()
         form_rtf.addRow("pdflatex:", pdflatex_row)
-        form_rtf.addRow("makeidx:", makeidx_row)
+        form_rtf.addRow("makeidx/xindy:", makeidx_row)
         vtab_rtf_layout.addLayout(form_rtf)
 
         reset_layout = QHBoxLayout()
