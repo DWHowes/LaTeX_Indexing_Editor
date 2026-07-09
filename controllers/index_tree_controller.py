@@ -7,7 +7,6 @@ class IndexTreeController(QObject):
     and zero explicit font modifications.
     """
     jump_to_coordinate_requested = Signal(dict)
-    subheading_dialog_requested = Signal(list, dict)
     tree_population_requested = Signal(list, list) # Instructs view to repaint
 
     def __init__(self, data_model_engine, parent=None):
@@ -40,15 +39,6 @@ class IndexTreeController(QObject):
         """
         self.model_engine.clear_active_manifests()        
         
-    @Slot(dict)
-    def handle_add_subheading_slot(self, payload: dict):
-        if not payload or "path_parts" not in payload:
-            return
-        self.subheading_dialog_requested.emit(
-            payload["path_parts"], 
-            {"location_record": payload.get("location_record", {})}
-        )
-
     @Slot(dict)
     def direct_coordinate_jump_slot(self, payload: dict):
         if payload:

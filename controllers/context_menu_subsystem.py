@@ -98,14 +98,11 @@ class IndexTreeContextMenuManager(BaseContextMenuManager):
 
         display_text = str(proxy_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
 
-        add_subhead_action = QAction(f"Add Subheading to '{display_text}'", menu_container)
         delete_action = QAction(f"Delete Term '{display_text}'", menu_container)
         delete_action.setData(proxy_index)
 
         delete_action.triggered.connect(self._on_delete_clicked)
 
-        menu_container.addAction(add_subhead_action)
-        menu_container.addSeparator()
         menu_container.addAction(delete_action)
 
     @Slot()
