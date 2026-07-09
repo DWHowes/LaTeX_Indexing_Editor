@@ -89,6 +89,42 @@ class SessionBackupManager:
             
         return success
 
+    def restore_file_from_backup(self, file_path: str) -> bool:
+        """
+        Restores a single file back to its pristine session-backup state
+        (used when the user discards edits to one tab rather than the whole
+        session), then forgets that file's backup entry.
+        Returns False if no backup was ever taken for this file — meaning
+        the on-disk file was never flushed this session and is already pristine.
+        """
+        norm_path = os.path.normpath(file_path)
+        backup_path = self.backup_registry.get(norm_path)
+        if not backup_path or not os.path.exists(backup_path):
+            return False
+
+        try:
+            shutil.copy2(backup_path, norm_path)
+        except Exception as e:
+            print(f"Failed to restore backup for {norm_path}: {e}")
+            return False
+
+        try:
+            os.remove(backup_path)
+        except Exception as e:
+            print(f"Failed to remove temporary file {backup_path}: {e}")
+
+        del self.backup_registry[norm_path]
+        self.session_files.discard(norm_path)
+
+        if self.backup_dir and os.path.exists(self.backup_dir) and not os.listdir(self.backup_dir):
+            try:
+                os.rmdir(self.backup_dir)
+                self.backup_dir = ""
+            except Exception as e:
+                print(f"Failed to clean empty backup directory: {e}")
+
+        return True
+
     def clear_session_backups(self):
         """Deletes orphaned temporary files from storage to save disk space."""
         for backup_path in self.backup_registry.values():

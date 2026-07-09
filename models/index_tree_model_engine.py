@@ -19,6 +19,19 @@ class IndexTreeModelEngine:
     def has_unsaved_changes(self) -> bool:
         return len(self._staged_db_entries) > 0
 
+    def discard_staged_entry(self, unique_id_number: int) -> None:
+        """
+        Removes a single not-yet-saved entry from the staged-for-save list.
+        Used when the user discards a tab's unsaved changes: the entry was
+        inserted this session but never reached an explicit Save, so it
+        must stop being counted by has_unsaved_changes() once its DB row
+        and views have been rolled back elsewhere.
+        """
+        self._staged_db_entries = [
+            rec for rec in self._staged_db_entries
+            if rec.get("unique_id_number") != unique_id_number
+        ]
+
     def clear_staged_entries(self) -> None:
         """Delegates to the full transaction reset for consistency."""
         self.reset_transaction_arrays()

@@ -633,9 +633,48 @@ class IndexEditController(QObject):
             for shifted_id in shifted_ids:
                 self._entry_model.mark_dirty(shifted_id)
 
-        # Cache/staging cleanup before the orphan check below, so a heading
-        # with only this one reference correctly reads as having zero
-        # remaining records.
+        self._cleanup_deleted_entry(entry_id, heading_text, heading_id)
+        return True
+
+    def discard_uncommitted_entry(self, entry_id: int) -> bool:
+        r"""
+        Rolls back a single \index entry that was inserted earlier in this
+        session but never saved — used when the user closes a tab (or the
+        whole app) and chooses Discard.
+
+        Unlike handle_entry_deletion, this does NOT call rewrite_macro_span:
+        the caller is already restoring the file's entire buffer/on-disk
+        content from its pristine session backup (see
+        WorkspaceLifecycleController.discard_unsaved_changes /
+        SessionBackupManager.restore_file_from_backup), so surgically
+        editing the macro span here would be redundant and would race that
+        wholesale restore. Only the DB row, in-memory cache, staging
+        baseline, and tree/table views need cleanup — the same cleanup
+        handle_entry_deletion performs after its own .tex rewrite.
+        """
+        location = self._entry_model.get_location_metadata(entry_id)
+        if location is None:
+            return False
+
+        heading_id = location.get("heading_id")
+        heading_text = self._entry_model.get_heading_text(entry_id)
+
+        self._cleanup_deleted_entry(entry_id, heading_text, heading_id)
+        return True
+
+    def _cleanup_deleted_entry(self, entry_id: int, heading_text: str, heading_id) -> None:
+        """
+        Shared cache/staging/view cleanup for a reference that is going
+        away permanently, whether via an explicit user delete
+        (handle_entry_deletion) or a session-discard rollback
+        (discard_uncommitted_entry). Both callers capture heading_text/
+        heading_id from the model before invoking this, since delete_record
+        below removes the record those lookups depend on.
+
+        Cache/staging cleanup happens before the orphan check below, so a
+        heading with only this one reference correctly reads as having
+        zero remaining records.
+        """
         self._entry_model.delete_record(entry_id)
         self._staging_model.forget(entry_id)
 
@@ -651,7 +690,6 @@ class IndexEditController(QObject):
                     self._remove_orphaned_heading(self._tree.engine, heading_id, heading_text)
 
         self.entry_deleted.emit(entry_id)
-        return True
 
     # ------------------------------------------------------------------
     # Helpers

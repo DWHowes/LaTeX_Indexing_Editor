@@ -1,10 +1,11 @@
 import re
 from pathlib import Path
-from PySide6.QtCore import QObject, QTimer, Slot, Signal
+from PySide6.QtCore import QObject, QTimer, Slot, Signal, QSize
+from PySide6.QtWidgets import QToolButton, QTabBar
 
 from controllers.app_style_configuration import AppStyleConfiguration
 from controllers.index_navigation_helper import IndexNavigationHelper
-from views.editor_tab import EditorTab
+from views.editor_tab import EditorTab, build_tab_close_icon
 
 class WorkspaceLifecycleController(QObject):
     """
@@ -13,12 +14,18 @@ class WorkspaceLifecycleController(QObject):
     """
     advanced_search_window_requested = Signal()
     editor_metrics_updated = Signal(int, int)
+    # Emitted with the file's absolute path when a tab-close dialog is
+    # resolved, so other controllers (e.g. index entry rollback) can react
+    # without WorkspaceLifecycleController needing to know about them.
+    tab_changes_saved = Signal(str)
+    tab_changes_discarded = Signal(str)
 
-    def __init__(self, text_sanitizer, file_watcher, tabs_widget):
+    def __init__(self, text_sanitizer, file_watcher, tabs_widget, doc_io=None):
         super().__init__()
         self.text_sanitizer = text_sanitizer
         self.file_watcher = file_watcher
         self.tabs = tabs_widget
+        self.doc_io = doc_io
 
         self.index_navigation = IndexNavigationHelper(
             tabs=self.tabs,
@@ -45,6 +52,34 @@ class WorkspaceLifecycleController(QObject):
         editor_tab = self.tabs.widget(index)
         if not isinstance(editor_tab, EditorTab):
             return
+
+        if editor_tab.is_modified():
+            self.tabs.setCurrentIndex(index)
+            from PySide6.QtWidgets import QMessageBox
+            box = QMessageBox(self.tabs.window())
+            box.setWindowTitle("Unsaved Changes")
+            file_name = editor_tab.get_absolute_path() or "Untitled"
+            box.setText(f"'{file_name}' has unsaved changes. Save before closing?")
+            save_btn = box.addButton(QMessageBox.StandardButton.Save)
+            discard_btn = box.addButton(QMessageBox.StandardButton.Discard)
+            cancel_btn = box.addButton(QMessageBox.StandardButton.Cancel)
+            box.exec()
+            clicked = box.clickedButton()
+
+            if clicked == cancel_btn:
+                return  # Abort closure — leave the tab open
+            elif clicked == save_btn:
+                path = editor_tab.get_absolute_path()
+                if path and self.doc_io:
+                    self.doc_io.save_tex_file_to_disk(editor_tab, path)
+                if path:
+                    self.tab_changes_saved.emit(path)
+            elif clicked == discard_btn:
+                path = editor_tab.get_absolute_path()
+                if self.doc_io:
+                    self.doc_io.discard_unsaved_changes(editor_tab)
+                if path:
+                    self.tab_changes_discarded.emit(path)
 
         file_path = editor_tab.get_absolute_path()
 
@@ -145,7 +180,23 @@ class WorkspaceLifecycleController(QObject):
         # 4. Append the visual component onto the layout tab manager matrix
         new_index = self.tabs.addTab(editor_tab, display_name)
         self.tabs.setCurrentIndex(new_index)
-        
+
+        # Install a custom close button so its icon can reflect the document's
+        # modified state (white circle instead of white X, both on a red square).
+        close_btn = QToolButton(self.tabs)
+        close_btn.setAutoRaise(True)
+        close_btn.setIcon(build_tab_close_icon(False))
+        close_btn.setIconSize(QSize(14, 14))
+        close_btn.setToolTip("Close")
+        close_btn.clicked.connect(
+            lambda: self.request_tab_closure(self.tabs.indexOf(editor_tab))
+        )
+        self.tabs.tabBar().setTabButton(new_index, QTabBar.ButtonPosition.RightSide, close_btn)
+
+        editor_tab.document().modificationChanged.connect(
+            lambda modified: close_btn.setIcon(build_tab_close_icon(modified))
+        )
+
         # Connect position metrics monitors
         editor_tab.cursorPositionChanged.connect(
             lambda: self.editor_metrics_updated.emit(
@@ -194,6 +245,14 @@ class WorkspaceLifecycleController(QObject):
                     path = tab.get_absolute_path()
                     if path and doc_io:
                         doc_io.save_tex_file_to_disk(tab, path)
+                    if path:
+                        self.tab_changes_saved.emit(path)
+                elif clicked == discard_btn:
+                    path = tab.get_absolute_path()
+                    if doc_io:
+                        doc_io.discard_unsaved_changes(tab)
+                    if path:
+                        self.tab_changes_discarded.emit(path)
 
             file_path = tab.get_absolute_path()
             if self.file_watcher and file_path:

@@ -1,11 +1,46 @@
 import re
 from PySide6.QtWidgets import QPlainTextEdit, QMenu
-from PySide6.QtGui import QPalette, QTextDocument, QTextCursor, QColor, QFont, QAction
-from PySide6.QtCore import QEvent, QTimer, Qt, Signal
+from PySide6.QtGui import QPalette, QTextDocument, QTextCursor, QColor, QFont, QAction, QIcon, QPixmap, QPainter, QBrush, QPen
+from PySide6.QtCore import QEvent, QTimer, Qt, Signal, QPointF
 
 from models.latex_highlighter import LatexHighlighter
 from controllers.app_style_configuration import AppStyleConfiguration
 from views.tab_find_dialog import TabFindDialog
+
+
+def build_tab_close_icon(is_modified: bool, size: int = 14) -> QIcon:
+    """
+    Paints the tab close glyph: a white X inside a red square when the
+    document is clean, or a white circle inside a red square when it has
+    unsaved changes, so modified state is visible without reading tab text.
+    """
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(196, 43, 43)))
+    painter.drawRoundedRect(1, 1, size - 2, size - 2, 2, 2)
+
+    if is_modified:
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(255, 255, 255)))
+        center = size / 2
+        radius = size * 0.16
+        painter.drawEllipse(QPointF(center, center), radius, radius)
+    else:
+        white_pen = QPen(QColor(255, 255, 255))
+        white_pen.setWidthF(1.6)
+        white_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(white_pen)
+        margin = size * 0.32
+        painter.drawLine(QPointF(margin, margin), QPointF(size - margin, size - margin))
+        painter.drawLine(QPointF(size - margin, margin), QPointF(margin, size - margin))
+
+    painter.end()
+    return QIcon(pixmap)
 
 class EditorTab(QPlainTextEdit):
     """

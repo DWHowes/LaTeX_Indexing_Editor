@@ -20,6 +20,10 @@ class IndexTreeController(QObject):
     def commit_staged_changes_to_db(self) -> bool:
         return self.model_engine.commit_staged_changes()
 
+    def discard_staged_entry(self, unique_id_number: int) -> None:
+        """Forgets a single not-yet-saved entry — see IndexTreeModelEngine.discard_staged_entry."""
+        self.model_engine.discard_staged_entry(unique_id_number)
+
     def clear_staged_entries(self) -> None:
         """
         Public routing contract called on project initialization.

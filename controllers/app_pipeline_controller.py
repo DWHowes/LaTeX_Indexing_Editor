@@ -1,6 +1,6 @@
 import os
 from shiboken6 import isValid  # PySide6 C++ lifetime validator
-from collections import deque
+from collections import deque, defaultdict
 from pathlib import Path
 from typing import Optional, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -148,8 +148,18 @@ class AppPipelineController(QObject):
         # Parallel undo/redo stacks for index tree operations
         # Each entry: (parts_list, ref_records)
         self._index_undo_stack = deque()
-        self._index_redo_stack = deque()        
-        self._synchronize_initial_workspace_theme()    
+        self._index_redo_stack = deque()
+
+        # Tracks unique_id_numbers inserted into each file this session that
+        # haven't yet survived an explicit Save. insert_reference/
+        # resolve_or_insert_heading commit to the DB immediately on
+        # insertion (see models/file_tree_persistence.py), so if the user
+        # later discards this file's tab instead of saving, these entries
+        # must be rolled back out of the DB and views rather than just left
+        # in place. Keyed by normalized absolute file path.
+        self._pending_insertions_by_file: dict[str, list[int]] = defaultdict(list)
+
+        self._synchronize_initial_workspace_theme()
 
     def initialize_index_subsystem(self) -> None:
         """Maps pre-instantiated data models directly to controller view components."""
@@ -220,6 +230,8 @@ class AppPipelineController(QObject):
         # --- Sub-Controller Bridges ---
         self.lc_ctrl.editor_metrics_updated.connect(self.window.status_bar.set_status_text)
         self.doc_io.save_error_encountered.connect(self._display_document_io_error)
+        self.lc_ctrl.tab_changes_saved.connect(self._confirm_pending_insertions)
+        self.lc_ctrl.tab_changes_discarded.connect(self._discard_pending_insertions)
 
         self.index_edit_ctrl.heading_rename_conflict.connect(self._handle_heading_rename_conflict)
 
@@ -327,6 +339,76 @@ class AppPipelineController(QObject):
         self.index_tree_widget.reinsert_entry(parts_list, refs)
         self._index_undo_stack.append((parts_list, refs))
         self._tree_modified = True
+
+    def _forget_index_undo_entry(self, entry_id: int) -> None:
+        """
+        Scrubs a rolled-back entry_id out of the index undo/redo stacks.
+
+        Without this, a stale stack entry for a since-discarded insertion
+        could later be replayed by Ctrl+Z/Ctrl+Y: remove_last_entry is a
+        harmless no-op against an already-gone node, but reinsert_entry
+        (redo) only re-adds the *visual* tree node — it never re-inserts
+        into the DB or the entry-modifier model — so a stale redo would
+        resurrect a phantom tree entry with no backing record.
+        """
+        self._index_undo_stack = deque(
+            item for item in self._index_undo_stack
+            if not any(ref.get("unique_id_number") == entry_id for ref in item[1])
+        )
+        self._index_redo_stack = deque(
+            item for item in self._index_redo_stack
+            if not any(ref.get("unique_id_number") == entry_id for ref in item[1])
+        )
+
+    def _confirm_pending_insertions(self, file_path: str) -> None:
+        """
+        Called when a single tab's changes are explicitly saved (the
+        close-tab dialog's Save option). This file's session-pending index
+        insertions are already permanently committed to the DB (insertion
+        commits immediately — see _handle_manual_index_insertion), so
+        confirming them is just forgetting the rollback bookkeeping.
+        """
+        norm_path = os.path.normpath(file_path) if file_path else ""
+        self._pending_insertions_by_file.pop(norm_path, None)
+
+    def _confirm_all_pending_insertions(self) -> None:
+        """Called on a whole-project save — every file's pending insertions become permanent."""
+        self._pending_insertions_by_file.clear()
+
+    def _discard_pending_insertions(self, file_path: str) -> None:
+        """
+        Called when a tab's unsaved changes are discarded (single-tab or
+        bulk tab close). Rolls back every \\index entry inserted into this
+        file since it was opened/last saved: removes it from the tree and
+        table views and the in-memory cache, and deletes the
+        project_references/project_headings rows that were committed
+        immediately at insertion time. The .tex macro text itself needs no
+        separate rollback here — WorkspaceLifecycleController.discard_
+        unsaved_changes already restores this file's entire buffer/disk
+        content from its pristine session backup.
+        """
+        norm_path = os.path.normpath(file_path) if file_path else ""
+        pending_ids = self._pending_insertions_by_file.pop(norm_path, [])
+        for entry_id in pending_ids:
+            if self.index_edit_ctrl:
+                self.index_edit_ctrl.discard_uncommitted_entry(entry_id)
+            if self.idx_ctrl:
+                self.idx_ctrl.discard_staged_entry(entry_id)
+            self._forget_index_undo_entry(entry_id)
+
+        # _tree_modified is a broader, sticky "something in the tree changed
+        # this session" flag also raised by renames, term pruning, and macro
+        # substitution — those paths aren't part of this rollback and aren't
+        # audited here. Only clear it when nothing else is tracked as
+        # pending, so we don't mask a genuinely unsaved change from one of
+        # those other sources.
+        if not self._pending_insertions_by_file and not self._index_undo_stack and not self._index_redo_stack:
+            self._tree_modified = False
+
+    def _discard_all_pending_insertions(self) -> None:
+        """Called on whole-app-exit Discard — rolls back every open file's pending insertions."""
+        for file_path in list(self._pending_insertions_by_file.keys()):
+            self._discard_pending_insertions(file_path)
 
     @Slot(str)
     def handle_file_activation_request(self, file_path: str):
@@ -668,6 +750,7 @@ class AppPipelineController(QObject):
         self.window.status_bar.set_status_text("Saving project workspace modifications...")
         tex_success = self.doc_io.commit_all_open_buffers() if self.doc_io else False
         db_success = self.idx_ctrl.commit_staged_changes_to_db() if self.idx_ctrl else False
+        self._confirm_all_pending_insertions()
 
         if tex_success or db_success:
             self._tree_modified = False
@@ -735,6 +818,7 @@ class AppPipelineController(QObject):
                     self.execute_project_save_workflow()
                     self.safely_terminate_application_lifecycle()
                 elif clicked == discard_btn:
+                    self._discard_all_pending_insertions()
                     if self.backup_manager:
                         self.backup_manager.revert_session_changes()
                     self.safely_terminate_application_lifecycle()
@@ -880,9 +964,17 @@ class AppPipelineController(QObject):
             self._index_redo_stack.clear()
             self._tree_modified = True
 
-        # Both opener and closer go to the entry modifier 
+        # Both opener and closer go to the entry modifier
         # (model caches both; view only shows opener)
         self.entry_modifier_ctrl.handle_new_entry_created(entry_dict)
+
+        # Both opener and closer immediately commit a DB row (register_new_entry
+        # -> insert_reference, and resolve_or_insert_heading above), so both
+        # must be tracked for rollback if this file's tab is later discarded
+        # instead of saved.
+        norm_path = os.path.normpath(entry_dict["file_path"]) if entry_dict.get("file_path") else ""
+        if norm_path:
+            self._pending_insertions_by_file[norm_path].append(entry_dict["unique_id_number"])
 
     @Slot(object, object)
     def _handle_view_save_request(self, editor_tab: EditorTab, save_carrier: ReferenceCarrier) -> None:

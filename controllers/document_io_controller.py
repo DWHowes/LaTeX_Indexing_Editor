@@ -51,6 +51,20 @@ class DocumentIOController(QObject):
             self.save_error_encountered.emit("Save Error", f"Could not save text file:\n{e}")
             return False
 
+    def discard_unsaved_changes(self, editor: EditorTab) -> None:
+        """
+        Reverts a single tab's file to its pristine session-backup state
+        (undoing any disk write made this session, e.g. via the index-sync
+        auto-flush) and clears the document's modified flag. If the file was
+        never flushed to disk this session, the on-disk copy is already
+        pristine, so only the modified flag needs clearing.
+        """
+        file_path = editor.get_absolute_path()
+        if file_path and self.backup_manager:
+            self.backup_manager.restore_file_from_backup(file_path)
+
+        editor.document().setModified(False)
+
     def handle_file_save_as_resolution(self, editor: EditorTab, resolved_file_path: str) -> str:
         """Updates path trackers and triggers a disk flush transaction."""
         if not resolved_file_path or not isinstance(editor, EditorTab):

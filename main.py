@@ -70,9 +70,10 @@ if __name__ == "__main__":
         # This engine watches for external modification of project LaTeX files
         file_watcher_engine = ExternalFileWatcherEngine(editor_window)
         lifecycle_controller = WorkspaceLifecycleController(
-            text_sanitizer=text_sanitizer, 
-            file_watcher=file_watcher_engine, 
-            tabs_widget=editor_window.tabs
+            text_sanitizer=text_sanitizer,
+            file_watcher=file_watcher_engine,
+            tabs_widget=editor_window.tabs,
+            doc_io=doc_controller
         )
 
         # Ask the Model Layer for a safe, cross-platform default search location
