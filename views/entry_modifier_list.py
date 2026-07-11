@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QVBoxLayout, QWidget, QLabel, QHeaderView, QHBoxLayout,
     QStyledItemDelegate, QComboBox, QStyleOptionViewItem, QMessageBox, QMenu,
 )
-from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Signal, Slot, Qt, QPoint
+from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Signal, Slot, Qt, QPoint, QSettings
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 
 from views.entry_modifier_table_view import EntryModifierTableView
@@ -24,6 +24,13 @@ _HEADERS = ["ID", "Main Display", "Main Sort", "Sub1 Display", "Sub1 Sort",
 
 # Columns that must never be edited by the user
 _READ_ONLY_COLS = frozenset({COL_ID})
+
+# Global (QSettings) key for persisted column visibility -- deliberately not
+# routed through IndexPrefsConfigModel/project_metadata: this is a per-user
+# UI preference that should apply the same way across every project, not a
+# per-project setting. Same bare-QSettings() convention used by
+# AdvancedSearchWindow for its own view-local UI state (geometry, splitter).
+_HIDDEN_COLUMNS_SETTINGS_KEY = "EntryModifierTable/HiddenColumns"
 
 
 def _parse_index_level(raw: str) -> tuple[str, str]:
@@ -344,6 +351,11 @@ class EntryModifierList(QWidget):
         header.setSectionResizeMode(COL_ENCAP,      QHeaderView.ResizeMode.ResizeToContents)
         self.entries_table_view.verticalHeader().hide()
 
+        # Right-click the header to show/hide columns via a checkable menu.
+        header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        header.customContextMenuRequested.connect(self._show_header_context_menu)
+        self._apply_persisted_column_visibility()
+
         # Page/encap column uses a Standard/Bold/Italic combo box instead of
         # free text entry.
         self._page_style_delegate = PageStyleDelegate(self.entries_table_view)
@@ -520,6 +532,15 @@ class EntryModifierList(QWidget):
         self.proxy_model.setDynamicSortFilter(True)
         self.base_model.dataChanged.connect(self._on_cell_data_changed)
         self._open_all_persistent_encap_editors()
+
+        # base_model.clear() above removes and recreates every column, which
+        # resets QHeaderView's per-section hidden state to default (visible)
+        # -- Qt discards that bookkeeping whenever columns are structurally
+        # removed/reinserted, not just when their values are cleared. Without
+        # this, a project (re)load silently undoes whatever column
+        # visibility the user had configured, since this method runs on
+        # every project open.
+        self._apply_persisted_column_visibility()
 
     def _open_persistent_encap_editor(self, source_row: int) -> None:
         """
@@ -703,6 +724,45 @@ class EntryModifierList(QWidget):
         id_item = self.base_model.item(source_index.row(), COL_ID)
         if id_item:
             self.entry_row_selected.emit(id_item.data(Qt.ItemDataRole.DisplayRole))
+
+    @Slot(QPoint)
+    def _show_header_context_menu(self, pos: QPoint) -> None:
+        """Right-click menu on the header: one checkable action per column, toggling its visibility."""
+        header = self.entries_table_view.horizontalHeader()
+        menu = QMenu(self)
+        for col, label in enumerate(_HEADERS):
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(not header.isSectionHidden(col))
+            action.toggled.connect(lambda checked, c=col: self._set_column_visibility(c, checked))
+        menu.exec(header.mapToGlobal(pos))
+
+    def _set_column_visibility(self, col: int, visible: bool) -> None:
+        header = self.entries_table_view.horizontalHeader()
+        header.setSectionHidden(col, not visible)
+        self._persist_column_visibility()
+
+    def _persist_column_visibility(self) -> None:
+        """
+        Saves the current hidden-column set to global QSettings (by column
+        label, not index -- see _HIDDEN_COLUMNS_SETTINGS_KEY). Global only,
+        by design: applies uniformly across every project, never written to
+        project_metadata.
+        """
+        header = self.entries_table_view.horizontalHeader()
+        hidden_labels = [_HEADERS[c] for c in range(len(_HEADERS)) if header.isSectionHidden(c)]
+        QSettings().setValue(_HIDDEN_COLUMNS_SETTINGS_KEY, ",".join(hidden_labels))
+
+    def _apply_persisted_column_visibility(self) -> None:
+        """Restores hidden-column state from global QSettings at startup."""
+        raw = str(QSettings().value(_HIDDEN_COLUMNS_SETTINGS_KEY, "") or "")
+        hidden_labels = {label for label in raw.split(",") if label}
+        if not hidden_labels:
+            return
+        header = self.entries_table_view.horizontalHeader()
+        for col, label in enumerate(_HEADERS):
+            if label in hidden_labels:
+                header.setSectionHidden(col, True)
 
     @staticmethod
     def _validate_hierarchy(fields: dict) -> str | None:
