@@ -121,6 +121,21 @@ class FileTreePersistence:
                 );
             """)
 
+            # Partition 5: Per-file content checksums, recorded whenever
+            # project_headings/project_references are known to genuinely
+            # match a file's current content (fresh scan, manual resync, or
+            # auto-heal after an external edit). Compared against each
+            # file's live checksum on project load to detect drift
+            # accumulated while the app wasn't running -- see
+            # AppPipelineController._check_for_external_drift_and_prompt.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS project_file_sync_state (
+                    file_path TEXT PRIMARY KEY NOT NULL,
+                    checksum TEXT NOT NULL,
+                    synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
             default_metadata = [
                 ("schema_version", "1.0.0"),
                 ("project_name", self._pending_project_name),
@@ -503,6 +518,41 @@ class FileTreePersistence:
                 
         except sqlite3.Error as err:
             print(f"[MODEL PERSISTENCE CRITICAL FAILURE] Serialization failed: {err}")
+
+    def get_file_sync_checksums(self) -> dict[str, str]:
+        """Returns {file_path: checksum} for every row in project_file_sync_state."""
+        if not self.db_path:
+            return {}
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("SELECT file_path, checksum FROM project_file_sync_state")
+                return {row["file_path"]: row["checksum"] for row in cursor.fetchall()}
+        except sqlite3.Error as err:
+            print(f"[DB ERROR] Failed to read project_file_sync_state: {err}")
+            return {}
+
+    def replace_file_sync_checksums(self, checksums: dict[str, str]) -> None:
+        """
+        Full wipe-and-rebuild of project_file_sync_state, mirroring
+        serialize_scraped_index_manifest's pattern -- called whenever a
+        fresh scan/resync means the DB is now known to match every
+        currently-tracked file's actual content.
+        """
+        if not self.db_path:
+            return
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM project_file_sync_state;")
+                if checksums:
+                    cursor.executemany(
+                        "INSERT INTO project_file_sync_state (file_path, checksum) VALUES (?, ?);",
+                        list(checksums.items())
+                    )
+                conn.commit()
+        except sqlite3.Error as err:
+            print(f"[DB ERROR] Failed to write project_file_sync_state: {err}")
 
     def fetch_index_manifest(self) -> tuple[list[dict], list[dict]]:
         """

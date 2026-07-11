@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import hashlib
 from pathlib import Path
 from PySide6.QtCore import QObject, Signal, Slot
 from models.latex_index_parser import LatexIndexParser
@@ -234,8 +235,35 @@ class ProjectLoadWorker(QObject):
         self._scan_folder_data(self.project_root_str, file_tree_payload)
         return self.scan_tex_files_for_index_data()
 
+    def get_scanned_tex_file_paths(self) -> list[str]:
+        """
+        Returns the .tex file paths found by the most recent _scan_folder_data
+        walk (populated by process() or force_rescan()). Includes every .tex
+        file regardless of whether it contains any \\index entries -- unlike
+        reading paths back out of the references payload, which would miss
+        files with none.
+        """
+        return list(self._tex_file_paths)
+
+    @staticmethod
+    def compute_file_checksums(file_paths: list[str]) -> dict[str, str]:
+        """
+        SHA-256 content checksum per file path, for drift detection (see
+        FileTreePersistence.project_file_sync_state). A file that can't be
+        read is simply omitted -- callers treat a missing checksum as
+        "drifted" already, so no special-casing is needed here.
+        """
+        checksums: dict[str, str] = {}
+        for path in file_paths:
+            try:
+                with open(path, "rb") as f:
+                    checksums[path] = hashlib.sha256(f.read()).hexdigest()
+            except OSError:
+                continue
+        return checksums
+
     def stop(self) -> None:
-        self._is_abort_requested = True        
+        self._is_abort_requested = True
 
 from PySide6.QtCore import QThread, Qt
 

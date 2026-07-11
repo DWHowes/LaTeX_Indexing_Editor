@@ -628,8 +628,13 @@ class AppPipelineController(QObject):
         # (needs_db_write=False), calling save_scraped_index_data would overwrite
         # correctly-set fields (e.g. range_partner_id, is_range_closer) with
         # incomplete parser-derived records.
-        if needs_db_write and (headings or references):
-            self.scope_ctrl.save_scraped_index_data(headings, references)
+        if needs_db_write:
+            if headings or references:
+                self.scope_ctrl.save_scraped_index_data(headings, references)
+            # A fresh scan means the DB now genuinely matches every tracked
+            # file's content, even ones with zero \index entries -- seed
+            # their checksums too so a later load doesn't wrongly flag them.
+            self._update_file_sync_checksums(file_tree_payload)
 
         if file_tree_payload:
             self.scope_ctrl.persist_project_file_records(file_tree_payload)
@@ -706,8 +711,35 @@ class AppPipelineController(QObject):
         # Force the finished tree hierarchy to expand fully
         self.index_tree_widget.expandAll()
 
+        # Only meaningful when the cached DB was trusted rather than just
+        # freshly (re)written above -- checked last, after every view is
+        # already populated with the (possibly stale) data, since a "yes"
+        # here re-populates everything again via _resync_index_data_from_disk
+        # and would otherwise just get overwritten by the rest of this method.
+        if not needs_db_write:
+            self._check_for_external_drift_and_prompt(file_tree_payload)
+
         if self._load_thread and self._load_thread.isRunning():
             self._load_thread.quit()
+
+    def _collect_tex_file_paths(self, file_tree_payload: list) -> list:
+        """Flattens a file-tree payload into a list of every .tex file's absolute path."""
+        paths: list = []
+
+        def _walk(nodes: list) -> None:
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                if node.get("is_dir") is False:
+                    path = node.get("path")
+                    if isinstance(path, str) and path.lower().endswith(".tex"):
+                        paths.append(path)
+                children = node.get("children")
+                if isinstance(children, list):
+                    _walk(children)
+
+        _walk(file_tree_payload)
+        return paths
 
     def _register_all_project_tex_files(self, file_tree_payload: list) -> None:
         """
@@ -720,20 +752,65 @@ class AppPipelineController(QObject):
         watcher = self.lc_ctrl.file_watcher
         if not watcher:
             return
+        for path in self._collect_tex_file_paths(file_tree_payload):
+            watcher.register_file_path(path)
 
-        def _walk(nodes: list) -> None:
-            for node in nodes:
-                if not isinstance(node, dict):
-                    continue
-                if node.get("is_dir") is False:
-                    path = node.get("path")
-                    if isinstance(path, str) and path.lower().endswith(".tex"):
-                        watcher.register_file_path(path)
-                children = node.get("children")
-                if isinstance(children, list):
-                    _walk(children)
+    def _update_file_sync_checksums(self, file_tree_payload: list) -> None:
+        """
+        Recomputes and stores content checksums for every .tex file in the
+        project, marking the DB as known to match disk as of now. Called
+        after any operation that makes project_headings/project_references
+        genuinely reflect current file content (fresh scan, manual resync,
+        or auto-heal) -- see _check_for_external_drift_and_prompt, which
+        reads these back on a later load to detect drift accumulated while
+        the app wasn't running.
+        """
+        persistence = self.scope_ctrl.get_persistence_model()
+        if not persistence:
+            return
+        tex_paths = self._collect_tex_file_paths(file_tree_payload)
+        checksums = ProjectLoadWorker.compute_file_checksums(tex_paths)
+        persistence.replace_file_sync_checksums(checksums)
 
-        _walk(file_tree_payload)
+    def _check_for_external_drift_and_prompt(self, file_tree_payload: list) -> None:
+        """
+        Runs once per project load, only when the cached DB was trusted
+        (needs_db_write=False) -- ProjectLoadWorker.process() otherwise has
+        no way to know whether a project's .tex files changed while the app
+        wasn't running, and would silently keep serving stale \\index
+        coordinates (the same class of bug _handle_external_file_change
+        heals for edits made while the app IS running). A file with no
+        stored checksum (new file, or a project predating this feature) is
+        conservatively treated as drifted.
+        """
+        persistence = self.scope_ctrl.get_persistence_model()
+        if not persistence:
+            return
+
+        tex_paths = self._collect_tex_file_paths(file_tree_payload)
+        if not tex_paths:
+            return
+
+        current_checksums = ProjectLoadWorker.compute_file_checksums(tex_paths)
+        stored_checksums = persistence.get_file_sync_checksums()
+
+        drifted = [p for p in tex_paths if current_checksums.get(p) != stored_checksums.get(p)]
+        if not drifted:
+            return
+
+        names = ", ".join(os.path.basename(p) for p in drifted[:5])
+        if len(drifted) > 5:
+            names += f", and {len(drifted) - 5} more"
+
+        reply = QMessageBox.question(
+            self.window, "Files Changed Outside the Editor",
+            f"{len(drifted)} file(s) appear to have changed since this project was last opened:\n{names}\n\n"
+            "Resync index data now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._resync_index_data_from_disk()
+            self.window.status_bar.showMessage("Index data resynced from disk.", 3000)
 
     def _is_safe_to_auto_resync(self) -> bool:
         """
@@ -844,6 +921,14 @@ class AppPipelineController(QObject):
         headings, references = worker.force_rescan()
 
         self.scope_ctrl.save_scraped_index_data(headings, references)
+
+        # This rescan is now the source of truth for every tracked file's
+        # content (including files with zero \index entries, which never
+        # show up in `references`) -- seed fresh checksums from the exact
+        # paths force_rescan() just walked so a later load's drift check
+        # doesn't immediately re-flag them.
+        checksums = ProjectLoadWorker.compute_file_checksums(worker.get_scanned_tex_file_paths())
+        persistence.replace_file_sync_checksums(checksums)
 
         if self.idx_ctrl:
             self.idx_ctrl.clear_staged_entries()
