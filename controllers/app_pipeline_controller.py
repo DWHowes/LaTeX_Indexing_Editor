@@ -14,6 +14,7 @@ from models.index_tree_model_engine import IndexTreeModelEngine
 from models.macro_id_generator import MacroIDGenerator
 from models.project_load_worker import SafeProjectLoadThread 
 from models.index_prefs_config_model import IndexPrefsConfigModel
+from models.rtf_export_model import RtfExportMetadata
 from models.latex_command_registry_model import LatexCommandRegistryModel
 from models.theme_config_model import ThemeConfigModel
 from models.entry_modifier_model import EntryModifierModel
@@ -23,6 +24,7 @@ from models.name_inverter import NameInverter
 from controllers.index_tree_controller import IndexTreeController
 from controllers.context_menu_subsystem import FileTreeContextMenuManager, IndexTreeContextMenuManager, EditEntryContextMenuManager
 from controllers.index_prefs_config_controller import IndexPrefsConfigController
+from controllers.rtf_export_controller import IndexExportController
 from controllers.latex_command_controller import CreateCommandController
 from controllers.theme_config_controller import ThemeConfigController
 from controllers.entry_modifier_controller import EntryModifierController
@@ -34,6 +36,7 @@ from views.index_tree_view import IndexTreeView
 from views.project_sidebar_view import ProjectSidebarView
 from views.advanced_search_window import AdvancedSearchWindow
 from views.name_inversion_dialog import NameInversionDialog
+from views.rtf_viewer_dialog import RtfViewerDialog
 
 class AppPipelineController(QObject):
     name_inversion_completed = Signal(QModelIndex, str)
@@ -200,6 +203,7 @@ class AppPipelineController(QObject):
         self.window.menu_bar.preferences_requested.connect(self._spawn_preferences_dialog)
         self.window.menu_bar.insert_latex_settings_requested.connect(self._handle_insert_latex_settings)
         self.window.menu_bar.edit_menu_about_to_show.connect(self._refresh_insert_settings_menu_state)
+        self.window.menu_bar.create_rtf_file_requested.connect(self._handle_create_rtf_file_request)
 
         self.window.menu_bar.add_head_note_requested.connect(self.window.handle_add_head_note_dialog)  
         self.window.menu_bar.create_latex_command_requested.connect(self.create_command_controller.show_create_command_dialog)
@@ -735,6 +739,82 @@ class AppPipelineController(QObject):
             self.window.status_bar.showMessage(
                 f"LaTeX index settings inserted into {os.path.basename(root_tex_file)}.", 4000
             )
+
+    @Slot()
+    def _handle_create_rtf_file_request(self) -> None:
+        """
+        Runs the full RTF export pipeline (single-pass pdflatex draft
+        compile -> makeindex/xindy -> parse .ind -> render RTF) against the
+        project's base document, then optionally launches the read-only
+        RTF viewer per the rtf_display_on_creation preference.
+        """
+        if self.scope_ctrl.active_project_name == "Untitled Project":
+            self.window.status_bar.showMessage("No project is open.", 3000)
+            return
+
+        root_tex_file = self.scope_ctrl.get_current_project_metadata_value("root_tex_file")
+        if not root_tex_file:
+            self.window.status_bar.showMessage("No base document has been selected for this project.", 3000)
+            return
+
+        prefs = self._index_prefs_model.serialize_to_dict()
+        pdflatex_path = prefs.get("pdflatex_path", "")
+        index_binary_path = prefs.get("index_binary_path", "")
+        index_engine = prefs.get("index_engine", "makeindex")
+
+        missing = []
+        if not pdflatex_path or not os.path.isfile(pdflatex_path):
+            missing.append("pdflatex")
+        if not index_binary_path or not os.path.isfile(index_binary_path):
+            missing.append(index_engine)
+        if missing:
+            QMessageBox.warning(
+                self.window, "RTF Export Unavailable",
+                "The following executable path(s) are not configured or don't exist:\n"
+                f"{', '.join(missing)}.\n\nSet them in Preferences → LaTeX Settings."
+            )
+            return
+
+        db_path = self.scope_ctrl.get_active_database_path()
+        if not db_path:
+            self.window.status_bar.showMessage("RTF export failed: no active project database.", 3000)
+            return
+        project_root = os.path.dirname(os.path.normpath(db_path))
+
+        output_directory = self.scope_ctrl.get_current_project_metadata_value("output_directory") or "build"
+
+        metadata = RtfExportMetadata(
+            project_root=project_root,
+            root_tex_file=root_tex_file,
+            pdf_executable=pdflatex_path,
+            index_executable=index_binary_path,
+            index_engine=index_engine,
+            xindy_language=prefs.get("xindy_language", "english"),
+            xindy_codepage=prefs.get("xindy_codepage", "utf8"),
+            xindy_markup=prefs.get("xindy_markup", "latex"),
+            output_directory=output_directory,
+        )
+
+        self.window.status_bar.set_status_text("Exporting RTF index…")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            output_filename = f"{self.scope_ctrl.active_project_name}_index.rtf"
+            success, message, output_path = IndexExportController(metadata).export_project_to_rtf(output_filename)
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        if not success:
+            self.window.status_bar.showMessage("RTF export failed.", 4000)
+            QMessageBox.warning(self.window, "RTF Export Failed", message)
+            return
+
+        self.window.status_bar.showMessage(message, 5000)
+
+        if prefs.get("rtf_display_on_creation", False) and output_path is not None:
+            self._rtf_viewer_dialog = RtfViewerDialog(output_path, parent=self.window)
+            is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
+            self._rtf_viewer_dialog.apply_theme_configuration(is_dark)
+            self._rtf_viewer_dialog.show()
 
     @Slot()
     def _execute_project_close_workflow(self) -> bool:

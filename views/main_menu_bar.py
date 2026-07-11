@@ -108,7 +108,8 @@ class MainMenuBar(QMenuBar):
 
         tools_menu.addSeparator()
 
-        self.create_rtf_file_action = tools_menu.addAction("Create &Rtf File", QKeySequence("Ctrl+B"))
+        # Ctrl+B is already bound to "Focus File Pane" above; use a distinct shortcut.
+        self.create_rtf_file_action = tools_menu.addAction("Create &Rtf File", QKeySequence("Ctrl+Alt+R"))
         self.create_rtf_file_action.triggered.connect(lambda: self.create_rtf_file_requested.emit())
        
         # --- Global Action Container Tracking ---

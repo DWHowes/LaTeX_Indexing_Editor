@@ -50,6 +50,12 @@ class IndexPrefsData:
     fmt_range_delimiter: str = "--"
     printindex_command: str = "printindex"
     printindex_use_multicols: bool = False
+    # Whether to auto-launch the read-only RTF viewer after a successful
+    # Create RTF File export. A plain pref_* field (unlike pdflatex_path/
+    # index_binary_path above) since it's a stylistic preference, not a
+    # machine-specific tool location -- it round-trips through both
+    # QSettings (global) and project_metadata (pref_ namespace) normally.
+    rtf_display_on_creation: bool = False
 
 # A single private constant so the prefix is defined exactly once.
 _PREF_PREFIX = "pref_"

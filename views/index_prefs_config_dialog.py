@@ -200,9 +200,19 @@ class IndexPrefsConfigDialog(QDialog):
         self.horizontal_theme_tabs.addTab(self._light_tab, "Light Theme")
         vthemes_layout.addWidget(self.horizontal_theme_tabs)
 
+        # PRIMARY VERTICAL TAB 3: RTF EXPORT CONFIGURATION
+        self.vtab_rtf_export = QWidget()
+        vtab_rtf_layout = QVBoxLayout(self.vtab_rtf_export)
+        vtab_rtf_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.chk_rtf_display_on_creation = QCheckBox("Display RTF file on creation")
+        vtab_rtf_layout.addWidget(self.chk_rtf_display_on_creation)
+        vtab_rtf_layout.addStretch()
+
         # Mount Primary West View Elements to Root Frame
         self.vertical_tabs.addTab(self.vtab_latex, "LaTeX Settings")
         self.vertical_tabs.addTab(self.vtab_themes, "UI Themes")
+        self.vertical_tabs.addTab(self.vtab_rtf_export, "RTF Export")
         main_layout.addWidget(self.vertical_tabs)
         
         # Dialog Decision Box Base Action Matrix
@@ -305,6 +315,8 @@ class IndexPrefsConfigDialog(QDialog):
         self.txt_printindex_cmd.setText(data.get("printindex_command", "printindex"))
         self.chk_printindex_multi.setChecked(data.get("printindex_use_multicols", False))
 
+        self.chk_rtf_display_on_creation.setChecked(data.get("rtf_display_on_creation", False))
+
     def populate_theme_fields(self, dark_colours: dict, light_colours: dict) -> None:
         """Called by controller before exec() — mirrors populate_fields() pattern."""
         for field, row in self._dark_tab._rows.items():
@@ -356,6 +368,7 @@ class IndexPrefsConfigDialog(QDialog):
             "fmt_range_delimiter": self.txt_ist_rdelim.text(),
             "printindex_command": self.txt_printindex_cmd.text().strip(),
             "printindex_use_multicols": self.chk_printindex_multi.isChecked(),
+            "rtf_display_on_creation": self.chk_rtf_display_on_creation.isChecked(),
         }
 
         dark_colours, light_colours = self.current_theme_colours()

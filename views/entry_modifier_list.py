@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import (
     QLineEdit, QVBoxLayout, QWidget, QLabel, QHeaderView, QHBoxLayout,
-    QStyledItemDelegate, QComboBox, QStyleOptionViewItem, QMessageBox,
+    QStyledItemDelegate, QComboBox, QStyleOptionViewItem, QMessageBox, QMenu,
 )
-from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Signal, Slot, Qt
+from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Signal, Slot, Qt, QPoint
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 
 from views.entry_modifier_table_view import EntryModifierTableView
