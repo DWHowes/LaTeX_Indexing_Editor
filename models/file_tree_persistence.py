@@ -125,7 +125,8 @@ class FileTreePersistence:
                 ("schema_version", "1.0.0"),
                 ("project_name", self._pending_project_name),
                 ("root_tex_file", ""),
-                ("compiler_executable", "pdflatex"),
+                ("compiler_executable", ""),
+                ("index_maker_executable", ""),
                 ("output_directory", "build"),
             ]
             

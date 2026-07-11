@@ -3,6 +3,9 @@ from typing import Dict, Any
 
 @dataclass
 class IndexPrefsData:
+    # Absolute path to the pdflatex executable, selected via the "pdflatex"
+    # sub-tab. Empty string means "not configured / rely on PATH".
+    pdflatex_path: str = ""
     use_imakeidx: bool = True
     imakeidx_noautomatic: bool = True
     imakeidx_nonewpage: bool = True
@@ -18,6 +21,10 @@ class IndexPrefsData:
     # TeX Live distribution. The remaining makeindex_*/xindy_* fields are
     # engine-specific and only one set applies at a time, per index_engine.
     index_engine: str = "makeindex"
+    # Absolute path to the active engine's executable (makeindex.exe or
+    # xindy.exe, depending on index_engine). Cleared whenever index_engine
+    # changes, since a path chosen for one engine isn't valid for the other.
+    index_binary_path: str = ""
     makeindex_compress_blanks: bool = True
     makeindex_ignore_spaces: bool = False
     makeindex_ordering: str = "word"
@@ -63,6 +70,18 @@ LEGACY_INDEX_PREFS_KEY_ALIASES: Dict[str, str] = {
     "ist_range_delimiter": "fmt_range_delimiter",
 }
 
+# pdflatex_path/index_binary_path are absolute, machine-specific tool
+# locations rather than stylistic preferences, so within project_metadata
+# they're stored under their own pre-existing structural columns
+# (compiler_executable, index_maker_executable -- see
+# FileTreePersistence.initialize_database_schema) instead of the generic
+# pref_ namespace every other IndexPrefsData field uses. They still live on
+# IndexPrefsData/QSettings normally for the global (no-project-open) case.
+PROJECT_STRUCTURAL_KEY_MAP: Dict[str, str] = {
+    "pdflatex_path": "compiler_executable",
+    "index_binary_path": "index_maker_executable",
+}
+
 class IndexPrefsConfigModel:
     def __init__(self) -> None:
         self._data = IndexPrefsData()
@@ -99,9 +118,11 @@ class IndexPrefsConfigModel:
         """
         Copies global prefs into project_metadata for any key not already present.
         Keys are stored with the pref_ prefix to keep them visually distinct from
-        structural metadata (project_name, compiler_executable, etc.).
+        structural metadata (project_name, compiler_executable, etc.), except for
+        PROJECT_STRUCTURAL_KEY_MAP fields, which are seeded into their own
+        pre-existing structural columns instead.
         """
-        known_keys = set(asdict(IndexPrefsData()).keys())
+        known_keys = set(asdict(IndexPrefsData()).keys()) - set(PROJECT_STRUCTURAL_KEY_MAP)
         existing = file_persistence.get_all_project_metadata()  # keys already have pref_ if seeded
 
         missing = {
@@ -109,6 +130,15 @@ class IndexPrefsConfigModel:
             for k, v in global_data.items()
             if k in known_keys and f"{_PREF_PREFIX}{k}" not in existing
         }
+
+        # Structural columns always exist (created in initialize_database_schema)
+        # so they're never "missing" -- seed them from the global default only
+        # while the project's own row is still blank.
+        for pref_key, db_key in PROJECT_STRUCTURAL_KEY_MAP.items():
+            global_val = global_data.get(pref_key)
+            if global_val and not existing.get(db_key):
+                missing[db_key] = str(global_val)
+
         if missing:
             file_persistence.upsert_project_metadata(missing)
             print(f"[IndexPrefsConfigModel] Seeded {len(missing)} prefs key(s) into project_metadata.")
@@ -116,11 +146,12 @@ class IndexPrefsConfigModel:
     def load_from_project(self, file_persistence) -> None:
         """
         Reads pref_* keys from project_metadata and hydrates the model,
-        stripping the prefix before passing to update_data().
+        stripping the prefix before passing to update_data(). PROJECT_STRUCTURAL_KEY_MAP
+        fields are read from their own unprefixed structural columns instead.
         """
         self._migrate_legacy_project_metadata_keys(file_persistence)
 
-        known_keys = set(asdict(IndexPrefsData()).keys())
+        known_keys = set(asdict(IndexPrefsData()).keys()) - set(PROJECT_STRUCTURAL_KEY_MAP)
         all_meta = file_persistence.get_all_project_metadata()
 
         prefs_data = {
@@ -128,6 +159,11 @@ class IndexPrefsConfigModel:
             for k, v in all_meta.items()
             if k.startswith(_PREF_PREFIX) and k[len(_PREF_PREFIX):] in known_keys
         }
+
+        for pref_key, db_key in PROJECT_STRUCTURAL_KEY_MAP.items():
+            if db_key in all_meta:
+                prefs_data[pref_key] = all_meta[db_key]
+
         if prefs_data:
             self.update_data(prefs_data)
 
@@ -149,12 +185,27 @@ class IndexPrefsConfigModel:
         rename_fn(key_pairs)
 
     def _prefixed_payload(self) -> Dict[str, str]:
-        """Serializes current state with pref_ keys for DB storage."""
-        return {f"{_PREF_PREFIX}{k}": str(v) for k, v in self.serialize_to_dict().items()}
+        """
+        Serializes current state with pref_ keys for DB storage, excluding
+        PROJECT_STRUCTURAL_KEY_MAP fields (those go to their own structural
+        columns -- see persist_to_project()).
+        """
+        return {
+            f"{_PREF_PREFIX}{k}": str(v)
+            for k, v in self.serialize_to_dict().items()
+            if k not in PROJECT_STRUCTURAL_KEY_MAP
+        }
 
     def persist_to_project(self, file_persistence) -> None:
-        """Writes current model state to project_metadata using pref_ keys."""
-        file_persistence.upsert_project_metadata(self._prefixed_payload())
+        """
+        Writes current model state to project_metadata using pref_ keys, plus
+        pdflatex_path/index_binary_path to their own structural columns
+        (compiler_executable/index_maker_executable).
+        """
+        payload = self._prefixed_payload()
+        for pref_key, db_key in PROJECT_STRUCTURAL_KEY_MAP.items():
+            payload[db_key] = str(getattr(self._data, pref_key))
+        file_persistence.upsert_project_metadata(payload)
 
     def generate_ist_content(self) -> str:
         lines = [

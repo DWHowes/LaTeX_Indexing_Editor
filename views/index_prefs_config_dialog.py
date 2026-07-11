@@ -32,7 +32,26 @@ class IndexPrefsConfigDialog(QDialog):
         
         # Nested Horizontal Tab Array
         self.horizontal_latex_tabs = QTabWidget(self.vtab_latex)
-        
+
+        # --- sub-tab: pdflatex ---
+        self.tab_pdflatex = QWidget()
+        lay_pdflatex = QVBoxLayout(self.tab_pdflatex)
+
+        self.txt_pdflatex_path = QLineEdit()
+        self.btn_pdflatex_browse = QPushButton("Browse")
+        pdflatex_row = QWidget()
+        pdflatex_row_layout = QHBoxLayout(pdflatex_row)
+        pdflatex_row_layout.setContentsMargins(0, 0, 0, 0)
+        pdflatex_row_layout.addWidget(self.txt_pdflatex_path)
+        pdflatex_row_layout.addWidget(self.btn_pdflatex_browse)
+
+        form_pdflatex = QFormLayout()
+        form_pdflatex.addRow("pdflatex:", pdflatex_row)
+        lay_pdflatex.addLayout(form_pdflatex)
+        lay_pdflatex.addStretch()
+
+        self.btn_pdflatex_browse.clicked.connect(self._choose_pdflatex_loc)
+
         # --- sub-tab: imakeidx ---
         self.tab_imakeidx = QWidget()
         lay_imakeidx = QFormLayout(self.tab_imakeidx)
@@ -78,7 +97,19 @@ class IndexPrefsConfigDialog(QDialog):
         self.cmb_index_engine = QComboBox()
         self.cmb_index_engine.addItems(["makeindex", "xindy"])
         engine_form.addRow("Execution Command Binary:", self.cmb_index_engine)
+
+        self.txt_index_binary_path = QLineEdit()
+        self.btn_index_binary_browse = QPushButton("Browse")
+        index_binary_row = QWidget()
+        index_binary_row_layout = QHBoxLayout(index_binary_row)
+        index_binary_row_layout.setContentsMargins(0, 0, 0, 0)
+        index_binary_row_layout.addWidget(self.txt_index_binary_path)
+        index_binary_row_layout.addWidget(self.btn_index_binary_browse)
+        engine_form.addRow("Executable Path:", index_binary_row)
+
         vbox_binary.addLayout(engine_form)
+
+        self.btn_index_binary_browse.clicked.connect(self._choose_index_binary_loc)
 
         # --- engine-specific page: makeindex ---
         self.pg_makeindex = QWidget()
@@ -143,6 +174,7 @@ class IndexPrefsConfigDialog(QDialog):
         lay_printindex.addRow(self.chk_printindex_multi)
         
         # Mount all sub-tabs to nested horizontal framework container
+        self.horizontal_latex_tabs.addTab(self.tab_pdflatex, "pdflatex")
         self.horizontal_latex_tabs.addTab(self.tab_imakeidx, "pkg: imakeidx")
         self.horizontal_latex_tabs.addTab(self.tab_idxlayout, "pkg: idxlayout")
         self.horizontal_latex_tabs.addTab(self.tab_hyperref, "pkg: hyperref")
@@ -168,46 +200,9 @@ class IndexPrefsConfigDialog(QDialog):
         self.horizontal_theme_tabs.addTab(self._light_tab, "Light Theme")
         vthemes_layout.addWidget(self.horizontal_theme_tabs)
 
-        # PRIMARY VERTICAL TAB 3: RTF EXPORT CONFIGURATION
-        self.vtab_rtf_export = QWidget()
-        vtab_rtf_layout = QVBoxLayout(self.vtab_rtf_export)
-        vtab_rtf_layout.setContentsMargins(5, 5, 5, 5)
-
-        self.txt_rtf_pdflatex = QLineEdit()
-        self.btn_rtf_pdflatex_browse = QPushButton("Browse")
-        pdflatex_row = QWidget()
-        pdflatex_row_layout = QHBoxLayout(pdflatex_row)
-        pdflatex_row_layout.setContentsMargins(0, 0, 0, 0)
-        pdflatex_row_layout.addWidget(self.txt_rtf_pdflatex)
-        pdflatex_row_layout.addWidget(self.btn_rtf_pdflatex_browse)
-
-        self.txt_rtf_makeidx = QLineEdit()
-        self.btn_rtf_makeidx_browse = QPushButton("Browse")
-        makeidx_row = QWidget()
-        makeidx_row_layout = QHBoxLayout(makeidx_row)
-        makeidx_row_layout.setContentsMargins(0, 0, 0, 0)
-        makeidx_row_layout.addWidget(self.txt_rtf_makeidx)
-        makeidx_row_layout.addWidget(self.btn_rtf_makeidx_browse)
-
-        form_rtf = QFormLayout()
-        form_rtf.addRow("pdflatex:", pdflatex_row)
-        form_rtf.addRow("makeidx/xindy:", makeidx_row)
-        vtab_rtf_layout.addLayout(form_rtf)
-
-        reset_layout = QHBoxLayout()
-        reset_layout.addStretch()
-        self.btn_rtf_reset = QPushButton("Reset")
-        reset_layout.addWidget(self.btn_rtf_reset)
-        vtab_rtf_layout.addLayout(reset_layout)
-
-        self.btn_rtf_pdflatex_browse.clicked.connect(self._choose_pdflatex_dir)
-        self.btn_rtf_makeidx_browse.clicked.connect(self._choose_makeidx_dir)
-        self.btn_rtf_reset.clicked.connect(self._reset_rtf_export_fields)
-
         # Mount Primary West View Elements to Root Frame
         self.vertical_tabs.addTab(self.vtab_latex, "LaTeX Settings")
         self.vertical_tabs.addTab(self.vtab_themes, "UI Themes")
-        self.vertical_tabs.addTab(self.vtab_rtf_export, "RTF Export")        
         main_layout.addWidget(self.vertical_tabs)
         
         # Dialog Decision Box Base Action Matrix
@@ -222,6 +217,7 @@ class IndexPrefsConfigDialog(QDialog):
         self.chk_hyperref.toggled.connect(self._toggle_hyperref_widgets)
         self.chk_ist_headings.toggled.connect(self.chk_ist_bold.setEnabled)
         self.cmb_index_engine.currentTextChanged.connect(self._toggle_index_engine_widgets)
+        self.cmb_index_engine.currentTextChanged.connect(self._clear_index_binary_path)
 
     def _toggle_imakeidx_widgets(self, state: bool) -> None:
         self.chk_imakeidx_noauto.setEnabled(state)
@@ -241,22 +237,33 @@ class IndexPrefsConfigDialog(QDialog):
         self.pg_makeindex.setVisible(is_makeindex)
         self.pg_xindy.setVisible(not is_makeindex)
 
-    def _choose_pdflatex_dir(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "Select pdflatex directory")
-        if directory:
-            self.txt_rtf_pdflatex.setText(directory)
+    def _clear_index_binary_path(self, engine: str) -> None:
+        # Fired only on user-driven dropdown changes (see wiring below), not
+        # on the programmatic setCurrentText() in populate_fields(), so a
+        # freshly loaded path isn't wiped out when the dialog opens.
+        self.txt_index_binary_path.clear()
 
-    def _choose_makeidx_dir(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "Select makeidx directory")
-        if directory:
-            self.txt_rtf_makeidx.setText(directory)
+    def _choose_pdflatex_loc(self) -> None:
+        file_name = QFileDialog.getOpenFileName(self,
+                                                "Select pdflatex executable",
+                                                "",
+                                                "Executable Files (pdflatex.exe)")
+        if file_name[0]:
+            self.txt_pdflatex_path.setText(file_name[0])
 
-    def _reset_rtf_export_fields(self) -> None:
-        self.txt_rtf_pdflatex.clear()
-        self.txt_rtf_makeidx.clear()
+    def _choose_index_binary_loc(self) -> None:
+        default_name = "makeindex.exe" if self.cmb_index_engine.currentText() == "makeindex" else "xindy.exe"
+        file_name = QFileDialog.getOpenFileName(self,
+                                                "Select Index Constructor (makeindex or xindy)",
+                                                default_name,
+                                                "Executable Files (*.exe)")
+        if file_name[0]:
+            self.txt_index_binary_path.setText(file_name[0])
 
     def populate_fields(self, data: dict) -> None:
         """Concrete mapping initialization layer without hasattr/getattr leaks."""
+        self.txt_pdflatex_path.setText(data.get("pdflatex_path", ""))
+
         self.chk_imakeidx.setChecked(data.get("use_imakeidx", True))
         self.chk_imakeidx_noauto.setChecked(data.get("imakeidx_noautomatic", True))
         self.chk_imakeidx_nonep.setChecked(data.get("imakeidx_nonewpage", True))
@@ -283,6 +290,7 @@ class IndexPrefsConfigDialog(QDialog):
         self.cmb_xindy_markup.setCurrentText(data.get("xindy_markup", "latex"))
         self.chk_xindy_duplicates.setChecked(data.get("xindy_allow_duplicates", True))
         self.txt_xindy_module.setText(data.get("xindy_module", "default.xdy"))
+        self.txt_index_binary_path.setText(data.get("index_binary_path", ""))
         self._toggle_index_engine_widgets(self.cmb_index_engine.currentText())
         
         self.chk_ist_headings.setChecked(data.get("fmt_enable_headings", True))
@@ -317,6 +325,7 @@ class IndexPrefsConfigDialog(QDialog):
 
     def _on_accepted(self) -> None:
         payload = {
+            "pdflatex_path": self.txt_pdflatex_path.text().strip(),
             "use_imakeidx": self.chk_imakeidx.isChecked(),
             "imakeidx_noautomatic": self.chk_imakeidx_noauto.isChecked(),
             "imakeidx_nonewpage": self.chk_imakeidx_nonep.isChecked(),
@@ -332,6 +341,7 @@ class IndexPrefsConfigDialog(QDialog):
             "makeindex_ignore_spaces": self.chk_makeindex_space.isChecked(),
             "makeindex_ordering": self.cmb_makeindex_order.currentText(),
             "makeindex_stylesheet": self.txt_makeindex_style.text().strip(),
+            "index_binary_path": self.txt_index_binary_path.text().strip(),
             "xindy_language": self.cmb_xindy_language.currentText(),
             "xindy_codepage": self.cmb_xindy_codepage.currentText(),
             "xindy_markup": self.cmb_xindy_markup.currentText(),
