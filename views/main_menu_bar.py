@@ -19,6 +19,7 @@ class MainMenuBar(QMenuBar):
     add_head_note_requested = Signal()
     create_latex_command_requested = Signal()
     create_rtf_file_requested = Signal()
+    resync_index_data_requested = Signal()
     edit_menu_about_to_show = Signal()
 
     def __init__(self, parent_window=None):
@@ -111,7 +112,18 @@ class MainMenuBar(QMenuBar):
         # Ctrl+B is already bound to "Focus File Pane" above; use a distinct shortcut.
         self.create_rtf_file_action = tools_menu.addAction("Create &Rtf File", QKeySequence("Ctrl+Alt+R"))
         self.create_rtf_file_action.triggered.connect(lambda: self.create_rtf_file_requested.emit())
-       
+
+        tools_menu.addSeparator()
+
+        # Manual escape hatch for _handle_external_file_change's "unsafe to
+        # auto-resync" case (unsaved changes present when an external edit
+        # was detected), and for healing drift accumulated while the app
+        # wasn't running at all. Starts disabled -- only meaningful with a
+        # project open.
+        self.resync_index_data_action = tools_menu.addAction("Resync Index &Data from Disk")
+        self.resync_index_data_action.triggered.connect(lambda: self.resync_index_data_requested.emit())
+        self.resync_index_data_action.setEnabled(False)
+
         # --- Global Action Container Tracking ---
         # Free-floating action container tracking the dark mode shortcut globally
         self.dark_mode_action = QAction(self)
@@ -123,6 +135,7 @@ class MainMenuBar(QMenuBar):
         """Allows external workspace controllers to toggle menu items on project state changes."""
         self.index_entry_action.setEnabled(is_enabled)
         self.head_note_action.setEnabled(is_enabled)
+        self.resync_index_data_action.setEnabled(is_enabled)
         # Project closing always forces this off immediately. Project opening
         # only forces it as far as "project is open" -- whether a base file
         # has ALSO been chosen is re-checked separately whenever the Edit

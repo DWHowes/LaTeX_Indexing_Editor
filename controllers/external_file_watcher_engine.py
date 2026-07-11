@@ -35,6 +35,12 @@ class ExternalFileWatcherEngine(QObject):
         if norm_path in self._watcher.files():
             self._watcher.removePath(norm_path)
 
+    def unregister_all(self) -> None:
+        """Clears every currently tracked path — called on project close."""
+        tracked = self._watcher.files()
+        if tracked:
+            self._watcher.removePaths(tracked)
+
     @Slot(str)
     def _handle_external_file_modification(self, modified_path: str):
         """Streams raw incoming disk updates out-of-band via data signals."""

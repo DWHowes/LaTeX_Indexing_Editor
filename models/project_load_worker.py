@@ -99,11 +99,22 @@ class ProjectLoadWorker(QObject):
             pass
 
     def _execute_regex_fallback_extraction(self, file_tree_payload: list, fallback_db_path: str):
-        """Harvests indexing macros using standard file scanning regex routines."""
+        """Harvests indexing macros using standard file scanning regex routines (async worker entry point)."""
         self.status_updated.emit("Harvesting index macros via regex fallback engine...")
+        headings_payload, references_payload = self.scan_tex_files_for_index_data()
+        self.status_updated.emit("Macro markers compiled successfully. Synchronizing project states...")
+        self.finished.emit(True, True, headings_payload, references_payload, file_tree_payload, fallback_db_path)
+
+    def scan_tex_files_for_index_data(self) -> tuple[list, list]:
+        """
+        Core regex-scan logic, factored out of _execute_regex_fallback_extraction
+        so it can also be invoked synchronously (see force_rescan()) without
+        going through the async finished-signal path. Requires
+        self._tex_file_paths to already be populated (via _scan_folder_data).
+        """
         headings_payload = []
         references_payload = []
-        
+
         seen_headings = {}
         running_id_pool = 1
         heading_id_counter = 1
@@ -121,16 +132,16 @@ class ProjectLoadWorker(QObject):
         pending_range_opens: dict[str, dict] = {}
 
         for file_path in self._tex_file_paths:
-            if self._is_abort_requested: return
+            if self._is_abort_requested: return headings_payload, references_payload
             norm_target = Path(file_path).resolve().as_posix()
             filename = Path(norm_target).name
             self.status_updated.emit(f"Parsing index definitions: {filename}")
-            
+
             payloads, next_id = LatexIndexParser.parse_file(norm_target, start_id=running_id_pool)
             running_id_pool = next_id
-            
+
             for parts_list, uid_dict in payloads:
-                if self._is_abort_requested: return
+                if self._is_abort_requested: return headings_payload, references_payload
                 if not parts_list or not uid_dict: continue
                     
                 full_heading_path = "!".join(parts_list)
@@ -206,9 +217,22 @@ class ProjectLoadWorker(QObject):
                         entry_dict["is_range_closer"] = True
                         entry_dict["range_partner_id"] = int(opener_entry["unique_id_number"])
                         opener_entry["range_partner_id"] = int(entry_dict["unique_id_number"])
-                
-        self.status_updated.emit("Macro markers compiled successfully. Synchronizing project states...")
-        self.finished.emit(True, True, headings_payload, references_payload, file_tree_payload, fallback_db_path)
+
+        return headings_payload, references_payload
+
+    def force_rescan(self) -> tuple[list, list]:
+        """
+        Synchronously walks the project directory and re-parses every .tex
+        file from scratch via regex, ignoring whatever is currently cached
+        in the DB. Used to heal \\index coordinate drift after an external
+        file edit is detected while the app is running (see
+        AppPipelineController._resync_index_data_from_disk), and by the
+        manual "Resync Index Data from Disk" menu action.
+        """
+        self._tex_file_paths = []
+        file_tree_payload: list = []
+        self._scan_folder_data(self.project_root_str, file_tree_payload)
+        return self.scan_tex_files_for_index_data()
 
     def stop(self) -> None:
         self._is_abort_requested = True        

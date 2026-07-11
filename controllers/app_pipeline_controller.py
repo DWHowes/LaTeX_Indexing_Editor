@@ -12,7 +12,7 @@ from shiboken6 import isValid
 from models.latex_entry_model import ReferenceCarrier
 from models.index_tree_model_engine import IndexTreeModelEngine
 from models.macro_id_generator import MacroIDGenerator
-from models.project_load_worker import SafeProjectLoadThread 
+from models.project_load_worker import SafeProjectLoadThread, ProjectLoadWorker
 from models.index_prefs_config_model import IndexPrefsConfigModel
 from models.rtf_export_model import RtfExportMetadata
 from models.latex_command_registry_model import LatexCommandRegistryModel
@@ -204,8 +204,9 @@ class AppPipelineController(QObject):
         self.window.menu_bar.insert_latex_settings_requested.connect(self._handle_insert_latex_settings)
         self.window.menu_bar.edit_menu_about_to_show.connect(self._refresh_insert_settings_menu_state)
         self.window.menu_bar.create_rtf_file_requested.connect(self._handle_create_rtf_file_request)
+        self.window.menu_bar.resync_index_data_requested.connect(self._handle_manual_resync_request)
 
-        self.window.menu_bar.add_head_note_requested.connect(self.window.handle_add_head_note_dialog)  
+        self.window.menu_bar.add_head_note_requested.connect(self.window.handle_add_head_note_dialog)
         self.window.menu_bar.create_latex_command_requested.connect(self.create_command_controller.show_create_command_dialog)
 
         # Structural Layout Hotkey Configurations
@@ -229,6 +230,10 @@ class AppPipelineController(QObject):
         self.doc_io.save_error_encountered.connect(self._display_document_io_error)
         self.lc_ctrl.tab_changes_saved.connect(self._confirm_pending_insertions)
         self.lc_ctrl.tab_changes_discarded.connect(self._discard_pending_insertions)
+
+        if self.lc_ctrl.file_watcher:
+            self.lc_ctrl.file_watcher.file_reload_completed.connect(self._handle_external_file_change)
+            self.lc_ctrl.file_watcher.file_reload_failed.connect(self._handle_external_file_watch_error)
 
         self.index_edit_ctrl.heading_rename_conflict.connect(self._handle_heading_rename_conflict)
 
@@ -654,6 +659,11 @@ class AppPipelineController(QObject):
 
         # Populate the workspace file tree view
         self.file_tree_widget.populate_file_hierarchy(file_tree_payload, root_tex_file)
+
+        # Track every .tex file in the project for external-edit detection,
+        # not just ones the user happens to have open as a tab (see
+        # _register_all_project_tex_files) -- so drift-healing works project-wide.
+        self._register_all_project_tex_files(file_tree_payload)
         # Populate the workspace reference editor view
         # Drop any leftover staged/original state from a previously open
         # project before load_records reseeds baselines for this one —
@@ -698,6 +708,165 @@ class AppPipelineController(QObject):
 
         if self._load_thread and self._load_thread.isRunning():
             self._load_thread.quit()
+
+    def _register_all_project_tex_files(self, file_tree_payload: list) -> None:
+        """
+        Registers every .tex file in the project (not just ones open as a
+        tab) with the external file watcher, so an edit made outside this
+        app's own tracked rewrite pipeline -- to any project file -- can be
+        detected and its stale \\index coordinates healed. See
+        _handle_external_file_change.
+        """
+        watcher = self.lc_ctrl.file_watcher
+        if not watcher:
+            return
+
+        def _walk(nodes: list) -> None:
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                if node.get("is_dir") is False:
+                    path = node.get("path")
+                    if isinstance(path, str) and path.lower().endswith(".tex"):
+                        watcher.register_file_path(path)
+                children = node.get("children")
+                if isinstance(children, list):
+                    _walk(children)
+
+        _walk(file_tree_payload)
+
+    def _is_safe_to_auto_resync(self) -> bool:
+        """
+        Mirrors the unsaved-state check in coordinate_application_shutdown.
+        A full resync reassigns every reference's unique_id_number from
+        scratch, discarding continuity with whatever the staging model,
+        undo/redo stacks, and dirty-record tracking currently reference --
+        safe only when there's nothing valuable riding on those stale ids.
+        """
+        has_unsaved_tex = bool(self.doc_io.check_unsaved_tex_changes()) if self.doc_io else False
+        has_unsaved_db = bool(self.idx_ctrl.has_unsaved_changes()) if self.idx_ctrl else False
+        has_dirty_edits = bool(self.entry_modifier_model.has_dirty_records()) if self.entry_modifier_model else False
+        return not (has_unsaved_tex or has_unsaved_db or has_dirty_edits or self._tree_modified)
+
+    def _reload_open_tab_if_unmodified(self, absolute_path: str, new_content: str) -> None:
+        """
+        If the externally-changed file is currently open in a tab with no
+        unsaved edits of its own, refreshes the tab's buffer to match disk
+        -- otherwise the coordinates _resync_index_data_from_disk is about
+        to recompute (against the file's new content) would immediately
+        diverge from what the tab is still showing. A tab WITH unsaved
+        edits is left untouched; overwriting it would discard in-progress
+        work, and _is_safe_to_auto_resync will defer the coordinate resync
+        in that case anyway.
+        """
+        if not self.window.tabs:
+            return
+        norm_target = os.path.normpath(absolute_path)
+        for i in range(self.window.tabs.count()):
+            tab = self.window.tabs.widget(i)
+            if not isinstance(tab, EditorTab):
+                continue
+            if os.path.normpath(tab.get_absolute_path() or "") != norm_target:
+                continue
+            if tab.is_modified():
+                return
+            try:
+                sanitized = self.lc_ctrl.text_sanitizer.sanitize(new_content)
+            except Exception:
+                sanitized = new_content
+            tab.load_document_content(sanitized)
+            return
+
+    @Slot(str, str)
+    def _handle_external_file_change(self, absolute_path: str, new_content: str) -> None:
+        """
+        Fires when ExternalFileWatcherEngine detects a registered project
+        file was modified on disk outside this app's own tracked edit/save
+        pipeline (e.g. edited directly in another editor). The project's
+        cached project_references coordinates only stay in sync via
+        DocumentIOController's rewrite path (EntryModifierModel.
+        shift_coordinates_after) -- an out-of-band edit like this silently
+        invalidates them, which is exactly what caused \\index navigation
+        to land at stale positions.
+        """
+        if self.scope_ctrl.active_project_name == "Untitled Project":
+            return
+
+        self._reload_open_tab_if_unmodified(absolute_path, new_content)
+
+        if not self._is_safe_to_auto_resync():
+            self.window.status_bar.showMessage(
+                f"{os.path.basename(absolute_path)} changed outside the editor, and this project has "
+                "unsaved changes. Save or discard them, then use Tools → Resync Index Data from Disk.",
+                6000,
+            )
+            return
+
+        self._resync_index_data_from_disk()
+        self.window.status_bar.showMessage(
+            f"Index data resynced after an external change to {os.path.basename(absolute_path)}.", 4000
+        )
+
+    @Slot(str, str)
+    def _handle_external_file_watch_error(self, absolute_path: str, error_message: str) -> None:
+        self.window.status_bar.showMessage(
+            f"Could not read {os.path.basename(absolute_path)} after an external change: {error_message}", 5000
+        )
+
+    @Slot()
+    def _handle_manual_resync_request(self) -> None:
+        if self.scope_ctrl.active_project_name == "Untitled Project":
+            self.window.status_bar.showMessage("No project is open.", 3000)
+            return
+        self._resync_index_data_from_disk()
+        self.window.status_bar.showMessage("Index data resynced from disk.", 3000)
+
+    def _resync_index_data_from_disk(self) -> None:
+        """
+        Fully re-scans every .tex file in the project from disk and
+        rebuilds project_headings/project_references, then refreshes every
+        view and piece of in-memory state that depends on them -- the same
+        reset _execute_project_close_workflow performs, just followed
+        immediately by a fresh load instead of leaving everything empty.
+
+        Reassigns every reference's unique_id_number from scratch, so
+        callers must only reach this when _is_safe_to_auto_resync() is
+        true, or the user explicitly requested it via the manual action
+        (accepting that trade-off themselves).
+        """
+        persistence = self.scope_ctrl.get_persistence_model()
+        db_path = self.scope_ctrl.get_active_database_path()
+        if not db_path:
+            return
+        project_root = os.path.dirname(os.path.normpath(db_path))
+
+        worker = ProjectLoadWorker(db_persistence=persistence, project_root=project_root)
+        headings, references = worker.force_rescan()
+
+        self.scope_ctrl.save_scraped_index_data(headings, references)
+
+        if self.idx_ctrl:
+            self.idx_ctrl.clear_staged_entries()
+            self.idx_ctrl.clear_active_manifests()
+        self.index_edit_staging_model.clear()
+        self.index_tree_widget.reset_tree_model()
+
+        if self.idx_ctrl:
+            self.idx_ctrl.sync_loaded_project_data(files=[], categories=headings, indices=references)
+            self.idx_ctrl.clear_staged_entries()
+
+        self.entry_modifier_model.load_records(references)
+        self.entry_table_widget.populate_entry_modifier_display(references)
+
+        self._index_undo_stack.clear()
+        self._index_redo_stack.clear()
+        self._pending_insertions_by_file.clear()
+        self._tree_modified = False
+
+        max_existing_id = self.scope_ctrl.get_max_unique_id()
+        self.macro_id_generator.reset(starting_id=max_existing_id + 1)
+
+        self.index_tree_widget.expandAll()
 
     @Slot()
     def _spawn_preferences_dialog(self) -> None:
@@ -830,6 +999,13 @@ class AppPipelineController(QObject):
         if self.idx_ctrl:
             self.idx_ctrl.clear_staged_entries()
             self.idx_ctrl.clear_active_manifests()
+
+        # close_all_tabs() above already unregistered each individually-open
+        # tab's path; this catches the rest -- every other project .tex file
+        # registered by _register_all_project_tex_files() at load time that
+        # was never opened as a tab.
+        if self.lc_ctrl.file_watcher:
+            self.lc_ctrl.file_watcher.unregister_all()
 
         self.index_edit_staging_model.clear()
 
