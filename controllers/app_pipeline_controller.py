@@ -838,6 +838,9 @@ class AppPipelineController(QObject):
         # self.index_tree_widget.model().clear()
         self.index_tree_widget.reset_tree_model()
         self.file_tree_widget.model().sourceModel().clear()
+        # "Edit Entries" tab — mirrors the empty-project state the same way
+        # a fresh project load populates it, just with no records.
+        self.entry_table_widget.populate_entry_modifier_display([])
 
         self.scope_ctrl.close_active_project()
         self._index_prefs_ctrl.set_active_project(None, None)
