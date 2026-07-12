@@ -16,8 +16,10 @@ class MainMenuBar(QMenuBar):
     toggle_entry_window_requested = Signal()
     preferences_requested = Signal()
     insert_latex_settings_requested = Signal()
+    insert_project_commands_requested = Signal()
     add_head_note_requested = Signal()
     create_latex_command_requested = Signal()
+    manage_project_commands_requested = Signal()
     create_rtf_file_requested = Signal()
     resync_index_data_requested = Signal()
     edit_menu_about_to_show = Signal()
@@ -66,6 +68,16 @@ class MainMenuBar(QMenuBar):
         self.insert_settings_action = edit_menu.addAction("Insert LaTeX Index &Settings...")
         self.insert_settings_action.triggered.connect(lambda: self.insert_latex_settings_requested.emit())
         self.insert_settings_action.setEnabled(False)
+
+        # Splices the project's adopted custom LaTeX commands (see the
+        # "Manage Project Commands..." Tools menu action / project_custom_commands
+        # table) into the base document's preamble. Same gating as
+        # insert_settings_action -- only meaningful once a project is open AND
+        # a base/root .tex file has been chosen.
+        self.insert_project_commands_action = edit_menu.addAction("Insert Project &Custom Commands...")
+        self.insert_project_commands_action.triggered.connect(lambda: self.insert_project_commands_requested.emit())
+        self.insert_project_commands_action.setEnabled(False)
+
         edit_menu.aboutToShow.connect(lambda: self.edit_menu_about_to_show.emit())
 
         edit_menu.addSeparator()
@@ -106,6 +118,11 @@ class MainMenuBar(QMenuBar):
         self.create_latex_command_action = tools_menu.addAction("Create &LaTeX Command...", QKeySequence("Ctrl+Alt+C"))
         self.create_latex_command_action.triggered.connect(lambda: self.create_latex_command_requested.emit())
 
+        self.manage_project_commands_action = tools_menu.addAction("Manage Project &Commands...", QKeySequence("Ctrl+Alt+M"))
+        self.manage_project_commands_action.triggered.connect(lambda: self.manage_project_commands_requested.emit())
+        # Disable it by default on application startup (since no project is open yet)
+        self.manage_project_commands_action.setEnabled(False)
+
         tools_menu.addSeparator()
 
         # Ctrl+B is already bound to "Focus File Pane" above; use a distinct shortcut.
@@ -136,13 +153,16 @@ class MainMenuBar(QMenuBar):
         self.index_entry_action.setEnabled(is_enabled)
         self.head_note_action.setEnabled(is_enabled)
         self.resync_index_data_action.setEnabled(is_enabled)
+        self.manage_project_commands_action.setEnabled(is_enabled)
         # Project closing always forces this off immediately. Project opening
         # only forces it as far as "project is open" -- whether a base file
         # has ALSO been chosen is re-checked separately whenever the Edit
         # menu is about to open, via edit_menu_about_to_show.
         if not is_enabled:
             self.insert_settings_action.setEnabled(False)
+            self.insert_project_commands_action.setEnabled(False)
 
     def set_insert_settings_enabled(self, enabled: bool) -> None:
         """Public contract for the controller to reflect base-file-chosen state."""
         self.insert_settings_action.setEnabled(enabled)
+        self.insert_project_commands_action.setEnabled(enabled)

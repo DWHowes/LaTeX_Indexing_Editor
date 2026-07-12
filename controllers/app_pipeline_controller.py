@@ -26,6 +26,7 @@ from controllers.context_menu_subsystem import FileTreeContextMenuManager, Index
 from controllers.index_prefs_config_controller import IndexPrefsConfigController
 from controllers.rtf_export_controller import IndexExportController
 from controllers.latex_command_controller import CreateCommandController
+from controllers.project_command_manager_controller import ProjectCommandManagerController
 from controllers.theme_config_controller import ThemeConfigController
 from controllers.entry_modifier_controller import EntryModifierController
 from controllers.index_edit_controller import IndexEditController
@@ -133,7 +134,10 @@ class AppPipelineController(QObject):
         self._edit_table_context_manager = EditEntryContextMenuManager(self.entry_table_widget.table_view)
 
         self.command_registry = LatexCommandRegistryModel()
-        self.create_command_controller = CreateCommandController(window=self.window, 
+        self.create_command_controller = CreateCommandController(window=self.window,
+                                                                 command_registry=self.command_registry
+                                                                 )
+        self.project_command_controller = ProjectCommandManagerController(window=self.window,
                                                                  command_registry=self.command_registry
                                                                  )
 
@@ -202,12 +206,14 @@ class AppPipelineController(QObject):
         self.window.menu_bar.advanced_search_requested.connect(self._spawn_advanced_search_view)
         self.window.menu_bar.preferences_requested.connect(self._spawn_preferences_dialog)
         self.window.menu_bar.insert_latex_settings_requested.connect(self._handle_insert_latex_settings)
+        self.window.menu_bar.insert_project_commands_requested.connect(self._handle_insert_project_commands)
         self.window.menu_bar.edit_menu_about_to_show.connect(self._refresh_insert_settings_menu_state)
         self.window.menu_bar.create_rtf_file_requested.connect(self._handle_create_rtf_file_request)
         self.window.menu_bar.resync_index_data_requested.connect(self._handle_manual_resync_request)
 
         self.window.menu_bar.add_head_note_requested.connect(self.window.handle_add_head_note_dialog)
         self.window.menu_bar.create_latex_command_requested.connect(self.create_command_controller.show_create_command_dialog)
+        self.window.menu_bar.manage_project_commands_requested.connect(self.project_command_controller.show_manage_commands_dialog)
 
         # Structural Layout Hotkey Configurations
         self.window.menu_bar.toggle_file_sidebar_requested.connect(lambda: self._orchestrate_sidebar_focus(0))
@@ -693,7 +699,10 @@ class AppPipelineController(QObject):
         self._index_prefs_ctrl.set_active_project(project_name=project_name, 
                                                   file_persistence=self.scope_ctrl.get_persistence_model()
                                                   )
-        self._theme_controller.set_active_project(project_name=project_name, 
+        self._theme_controller.set_active_project(project_name=project_name,
+                                                  file_persistence=self.scope_ctrl.get_persistence_model()
+                                                  )
+        self.project_command_controller.set_active_project(project_name=project_name,
                                                   file_persistence=self.scope_ctrl.get_persistence_model()
                                                   )
         self.window.status_bar.showMessage(f"Project '{project_name}' loaded successfully.", 3000)
@@ -995,6 +1004,31 @@ class AppPipelineController(QObject):
             )
 
     @Slot()
+    def _handle_insert_project_commands(self) -> None:
+        """
+        Joins every custom LaTeX command adopted by this project (see the
+        "Manage Project Commands..." feature / project_custom_commands
+        table) and splices them into the project's base document,
+        immediately before \\begin{document}.
+        """
+        root_tex_file = self.scope_ctrl.get_current_project_metadata_value("root_tex_file")
+        if not root_tex_file:
+            self.window.status_bar.showMessage("No base document has been selected for this project.", 3000)
+            return
+
+        commands = self.scope_ctrl.get_persistence_model().fetch_project_custom_commands()
+        if not commands:
+            self.window.status_bar.showMessage("No custom commands have been added to this project.", 3000)
+            return
+
+        commands_body = "\n".join(command["body"] for command in commands)
+
+        if self.doc_io.inject_project_commands(root_tex_file, commands_body):
+            self.window.status_bar.showMessage(
+                f"Project custom commands inserted into {os.path.basename(root_tex_file)}.", 4000
+            )
+
+    @Slot()
     def _handle_create_rtf_file_request(self) -> None:
         """
         Runs the full RTF export pipeline (single-pass pdflatex draft
@@ -1106,6 +1140,7 @@ class AppPipelineController(QObject):
         self.scope_ctrl.close_active_project()
         self._index_prefs_ctrl.set_active_project(None, None)
         self._theme_controller.set_active_project(None, None)
+        self.project_command_controller.set_active_project(None, None)
 
         self._tree_modified = False
         self.window.synchronize_window_title(None)

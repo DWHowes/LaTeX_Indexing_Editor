@@ -136,6 +136,18 @@ class FileTreePersistence:
                 );
             """)
 
+            # Partition 6: Custom LaTeX commands added to this project from the
+            # global command registry (see LatexCommandRegistryModel / QSettings).
+            # Stores an independent name+body snapshot at add-time, decoupled
+            # from the global registry entry it was copied from.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS project_custom_commands (
+                    name TEXT PRIMARY KEY NOT NULL,
+                    body TEXT NOT NULL,
+                    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
             default_metadata = [
                 ("schema_version", "1.0.0"),
                 ("project_name", self._pending_project_name),
@@ -220,6 +232,64 @@ class FileTreePersistence:
             print(f"[DB CRITICAL FAILURE] Failed to execute deletion statement: {db_err}")
             return False
     
+    def fetch_project_custom_commands(self) -> List[Dict[str, str]]:
+        """Returns every custom LaTeX command added to this project, name-sorted."""
+        if not self.db_path:
+            return []
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "SELECT name, body FROM project_custom_commands ORDER BY name"
+                )
+                return [{"name": row["name"], "body": row["body"]} for row in cursor.fetchall()]
+        except sqlite3.Error as e:
+            print(f"[DB ERROR] Failed to read project custom commands: {e}")
+            return []
+
+    def add_project_custom_command(self, name: str, body: str) -> None:
+        """Atomic upsert transaction to associate a custom command with this project."""
+        if not self.db_path:
+            return
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO project_custom_commands (name, body)
+                    VALUES (?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        body = excluded.body
+                    """,
+                    (name, body)
+                )
+                conn.commit()
+        except sqlite3.Error as e:
+            print(f"[DB ERROR] Failed to add project custom command '{name}': {e}")
+
+    def remove_project_custom_command(self, name: str) -> bool:
+        """Removes a project's custom command record. Transaction is staged; caller commits."""
+        if not self.db_path:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM project_custom_commands WHERE name = ?;",
+                    (name,)
+                )
+                rows_affected = cursor.rowcount
+                if rows_affected > 0:
+                    print(f"[DB TRACE] Row cleared for custom command target: '{name}'. Transaction staged.")
+                    return True
+                else:
+                    print(f"[DB TRACE] Custom command target '{name}' not found in database schema records.")
+                    return False
+        except Exception as db_err:
+            print(f"[DB CRITICAL FAILURE] Failed to execute deletion statement: {db_err}")
+            return False
+
     def update_active_database_connection(self, new_db_path: str) -> None:
         """
         Updates the system state pointing to the underlying SQLite database partition.

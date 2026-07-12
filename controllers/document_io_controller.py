@@ -334,6 +334,8 @@ class DocumentIOController(QObject):
     _PREAMBLE_BLOCK_END = "% >>> LaTeX Indexing Editor: END generated preamble settings <<<"
     _PRINTINDEX_BLOCK_BEGIN = "% >>> LaTeX Indexing Editor: BEGIN generated printindex block (auto-managed) <<<"
     _PRINTINDEX_BLOCK_END = "% >>> LaTeX Indexing Editor: END generated printindex block <<<"
+    _CUSTOM_COMMANDS_BLOCK_BEGIN = "% >>> LaTeX Indexing Editor: BEGIN generated custom commands (auto-managed) <<<"
+    _CUSTOM_COMMANDS_BLOCK_END = "% >>> LaTeX Indexing Editor: END generated custom commands <<<"
 
     def inject_latex_settings(self, file_path: str, preamble_body: str, printindex_body: str) -> bool:
         r"""
@@ -435,6 +437,85 @@ class DocumentIOController(QObject):
         text = text[:end_doc_idx] + printindex_block + text[end_doc_idx:]
 
         return text
+
+    def inject_project_commands(self, file_path: str, commands_body: str) -> bool:
+        r"""
+        Splices commands_body immediately before \begin{document} in
+        file_path (the project's base/root .tex file), wrapped in its own
+        pair of marker comments. Any previously-injected block (found via
+        those markers, wherever it landed) is stripped before the new one
+        is inserted, so repeated use updates in place instead of
+        accumulating duplicate command definitions.
+
+        Same open-editor-vs-disk branching as inject_latex_settings: edits
+        the live QTextDocument if file_path is open in a tab (so the
+        unsaved-changes indicator fires normally), otherwise registers a
+        session backup and rewrites the file directly on disk.
+
+        Returns True on success. On failure (can't find \begin{document},
+        or a read/write error), emits save_error_encountered and returns
+        False.
+        """
+        open_editor = self._find_open_editor(file_path)
+        if open_editor:
+            original_text = open_editor.document().toPlainText()
+        else:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    original_text = f.read()
+            except Exception as e:
+                self.save_error_encountered.emit("Insert Commands Error", f"Could not read base file:\n{e}")
+                return False
+
+        new_text = self._splice_commands_block(original_text, commands_body)
+        if new_text is None:
+            self.save_error_encountered.emit(
+                "Insert Commands Error",
+                "Could not locate \\begin{document} in the base file."
+            )
+            return False
+
+        if open_editor:
+            from PySide6.QtGui import QTextCursor
+            cursor = QTextCursor(open_editor.document())
+            cursor.select(QTextCursor.SelectionType.Document)
+            cursor.insertText(new_text)
+            open_editor.document().setModified(True)
+        else:
+            self.backup_manager.register_file_for_session(file_path)
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(new_text)
+            except Exception as e:
+                self.save_error_encountered.emit("Insert Commands Error", f"Could not write base file:\n{e}")
+                return False
+
+        self.operation_status_emitted.emit("Project custom commands inserted into base document.")
+        return True
+
+    def _splice_commands_block(self, text: str, commands_body: str) -> "str | None":
+        r"""
+        Pure string-manipulation helper for inject_project_commands().
+        Returns the updated full document text, or None if
+        \begin{document} can't be located.
+        """
+        import re
+
+        commands_re = re.compile(
+            re.escape(self._CUSTOM_COMMANDS_BLOCK_BEGIN) + r".*?" + re.escape(self._CUSTOM_COMMANDS_BLOCK_END) + r"\n?",
+            re.DOTALL,
+        )
+
+        # Strip any previously-injected block first (wherever it landed) so
+        # re-running this doesn't accumulate duplicate command definitions.
+        text = commands_re.sub("", text)
+
+        begin_doc_idx = text.find("\\begin{document}")
+        if begin_doc_idx == -1:
+            return None
+
+        commands_block = f"{self._CUSTOM_COMMANDS_BLOCK_BEGIN}\n{commands_body}\n{self._CUSTOM_COMMANDS_BLOCK_END}\n"
+        return text[:begin_doc_idx] + commands_block + text[begin_doc_idx:]
 
 # import os
 # from PySide6.QtCore import QObject, Signal, Slot
