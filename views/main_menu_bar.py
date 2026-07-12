@@ -49,29 +49,28 @@ class MainMenuBar(QMenuBar):
 
         # --- Edit Menu Dropdowns ---
         edit_menu = self.addMenu("&Edit")
-        find_action = edit_menu.addAction("&Find...", QKeySequence.StandardKey.Find)
-        find_action.triggered.connect(lambda: self.find_action_triggered.emit())
+        self.find_action = edit_menu.addAction("&Find...", QKeySequence.StandardKey.Find)
+        self.find_action.triggered.connect(lambda: self.find_action_triggered.emit())
+        self.find_action.setEnabled(False)  # Disabled by default; only meaningful with a project open
         
         adv_search_action = edit_menu.addAction("Advanced Search...", QKeySequence("Ctrl+Shift+F"))
         adv_search_action.triggered.connect(lambda: self.advanced_search_requested.emit())
 
         edit_menu.addSeparator()
-        prefs_action = edit_menu.addAction("&Preferences...", QKeySequence("Ctrl+,"))
-        prefs_action.triggered.connect(lambda: self.preferences_requested.emit())
-
-        edit_menu.addSeparator()
         # Injects the configured LaTeX Settings (imakeidx/idxlayout/hyperref
-        # package usage + makeindex/xindy engine config + printindex) into
-        # the project's base document. Only meaningful once a project is
-        # open AND a base/root .tex file has been chosen, so it starts
-        # disabled -- update_menu_item_state() covers the "project open"
-        # half, and edit_menu_about_to_show (below) covers the "base file
-        # chosen" half, which can change independently at any time via the
+        # package usage + makeindex/xindy engine config + printindex) into the project's base document. 
+        # Only meaningful once a project is open AND a base/root .tex file has been chosen, so it starts
+        # disabled -- update_menu_item_state() covers the "project open" half, and edit_menu_about_to_show
+        # (below) covers the "base file chosen" half, which can change independently at any time via the
         # tree view's "Set as base file" action.
         self.insert_settings_action = edit_menu.addAction("Insert LaTeX Index &Settings...")
         self.insert_settings_action.triggered.connect(lambda: self.insert_latex_settings_requested.emit())
         self.insert_settings_action.setEnabled(False)
         edit_menu.aboutToShow.connect(lambda: self.edit_menu_about_to_show.emit())
+
+        edit_menu.addSeparator()
+        prefs_action = edit_menu.addAction("&Preferences...", QKeySequence("Ctrl+,"))
+        prefs_action.triggered.connect(lambda: self.preferences_requested.emit())
 
         # --- View Menu Dropdowns ---
         view_menu = self.addMenu("&View")
@@ -133,6 +132,7 @@ class MainMenuBar(QMenuBar):
 
     def update_menu_item_state(self, is_enabled: bool):
         """Allows external workspace controllers to toggle menu items on project state changes."""
+        self.find_action.setEnabled(is_enabled)
         self.index_entry_action.setEnabled(is_enabled)
         self.head_note_action.setEnabled(is_enabled)
         self.resync_index_data_action.setEnabled(is_enabled)
