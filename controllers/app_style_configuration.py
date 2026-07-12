@@ -170,6 +170,15 @@ class AppStyleConfiguration:
                 color: {colours.text};
                 border: 1px solid {colours.tree_header_border};
             }}
+            QListWidget {{
+                background-color: {colours.base};
+                color: {colours.text};
+                border: 1px solid {colours.tree_header_border};
+            }}
+            QListWidget::item:selected {{
+                background-color: {colours.highlight};
+                color: {colours.highlight_text};
+            }}
             QCheckBox {{
                 color: {colours.window_text};
             }}
