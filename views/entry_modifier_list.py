@@ -517,6 +517,7 @@ class EntryModifierList(QWidget):
                 "heading_id":         ref.get("heading_id"),
                 "see_references":     ref.get("see_references"),
                 "seealso_references": ref.get("seealso_references"),
+                "macro_command":      ref.get("macro_command", "index"),
             }
 
             # Data loaded from the .tex source is assumed hierarchy-valid
@@ -610,6 +611,7 @@ class EntryModifierList(QWidget):
             "heading_id":         ref.get("heading_id"),
             "see_references":     ref.get("see_references"),
             "seealso_references": ref.get("seealso_references"),
+            "macro_command":      ref.get("macro_command", "index"),
         }
 
         self._last_valid_row_state[unique_id] = {
