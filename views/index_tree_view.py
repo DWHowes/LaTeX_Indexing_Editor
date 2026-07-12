@@ -79,7 +79,8 @@ class IndexTreeView(QTreeView):
     UserRoles, and direct SQLite serialization loops.
     """
     locationRequested = Signal(str, int, int)
-    coordinate_navigation_requested = Signal(str, int, int, str)
+    # path, line, col, fallback_label, absolute_position, absolute_end, macro_command
+    coordinate_navigation_requested = Signal(str, int, int, str, object, object, str)
 
     def __init__(self, model_engine, parent=None):
         super().__init__(parent)
@@ -159,9 +160,16 @@ class IndexTreeView(QTreeView):
         # Retain the identifier token string if available
         match_text = str(record_payload.get("fallback_label") or "")
 
+        absolute_position = record_payload.get("absolute_position")
+        absolute_end = record_payload.get("absolute_end")
+        macro_command = str(record_payload.get("macro_command") or "index")
+
         if file_path:
             # Emit type-safe parameters across the architectural boundary
-            self.coordinate_navigation_requested.emit(file_path, line_num, column_num, match_text)
+            self.coordinate_navigation_requested.emit(
+                file_path, line_num, column_num, match_text,
+                absolute_position, absolute_end, macro_command,
+            )
 
     def _process_embedded_metrics_click(self, index):
         """Processes double-clicks, unpacks matching data structures, and emits explicit types."""
@@ -397,7 +405,10 @@ class IndexTreeView(QTreeView):
                         "file_path": str(r.get("file_path") or ""),
                         "line_number": int(r.get("line_number") or 0),
                         "column_offset": int(r.get("column_offset") or 0),
-                        "fallback_label": os.path.basename(file_path) if file_path else ""
+                        "fallback_label": os.path.basename(file_path) if file_path else "",
+                        "absolute_position": r.get("absolute_position"),
+                        "absolute_end": r.get("absolute_end"),
+                        "macro_command": r.get("macro_command", "index"),
                     })
 
                     # Track hierarchy keys to build back-end transaction tokens

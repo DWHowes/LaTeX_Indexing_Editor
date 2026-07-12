@@ -1603,10 +1603,24 @@ class AppPipelineController(QObject):
         print(f"Project Loading Failure: {err_msg}")
         QMessageBox.critical(self.window, "Project Loading Failure", f"An out-of-thread error occurred:\n{err_msg}")
 
-    @Slot(str, int, int, str)
-    def handle_index_navigation(self, path: str, line: int, col: int, fallback: str):
+    @Slot(str, int, int, str, object, object, str)
+    def handle_index_navigation(
+        self,
+        path: str,
+        line: int,
+        col: int,
+        fallback: str,
+        absolute_position=None,
+        absolute_end=None,
+        macro_command: str = "index",
+    ):
         if self.lc_ctrl:
-            self.lc_ctrl.navigate_to_embedded_index_coordinate(path, line, col, fallback)
+            self.lc_ctrl.navigate_to_embedded_index_coordinate(
+                path, line, col, fallback,
+                absolute_position=absolute_position,
+                absolute_end=absolute_end,
+                macro_command=macro_command,
+            )
 
     @Slot()
     def _handle_index_entry_window_toggle(self):

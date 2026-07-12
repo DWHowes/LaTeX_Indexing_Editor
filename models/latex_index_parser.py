@@ -5,11 +5,33 @@ from pathlib import Path
 class LatexIndexParser:
     """Scans raw LaTeX text streams to extract structural index macro parameters cleanly."""
     
-    INDEX_PATTERN = re.compile(r'\\index\b')
+    INDEX_PATTERN = re.compile(r'\\(index)\b')
     MACRO_START_PATTERN = re.compile(r'\\(newcommand|renewcommand|providecommand|DeclareRobustCommand|def)(?=\b|\\)')
 
     @classmethod
-    def parse_file(cls, file_path: str, start_id: int = 1) -> tuple[list[tuple[list, dict]], int]:
+    def build_index_pattern(cls, extra_command_names: list[str] | None = None) -> re.Pattern:
+        """
+        Builds an INDEX_PATTERN-shaped regex that also matches a project's
+        adopted custom indexing commands (e.g. \\isidx) alongside plain
+        \\index, so parse_file can recognize entries written with either.
+        The matched command name (without backslash) is always available
+        via match.group(1), same as the plain INDEX_PATTERN.
+        """
+        names = ["index"]
+        for name in (extra_command_names or []):
+            bare = name.lstrip("\\")
+            if bare and bare not in names:
+                names.append(bare)
+        alternation = "|".join(re.escape(name) for name in names)
+        return re.compile(rf'\\({alternation})\b')
+
+    @classmethod
+    def parse_file(
+        cls,
+        file_path: str,
+        start_id: int = 1,
+        index_pattern: "re.Pattern | None" = None,
+    ) -> tuple[list[tuple[list, dict]], int]:
         extracted_payloads = []
         path_obj = Path(file_path).resolve()
         norm_path_str = path_obj.as_posix()
@@ -27,8 +49,10 @@ class LatexIndexParser:
         line_offsets = cls._build_line_offset_map(full_content)
         working_content = cls._scrub_macro_definitions(full_content)
         running_id = start_id
+        active_pattern = index_pattern or cls.INDEX_PATTERN
 
-        for match in cls.INDEX_PATTERN.finditer(working_content):
+        for match in active_pattern.finditer(working_content):
+            matched_command = match.group(1)
             absolute_index = match.start()
             line_idx, col_idx = cls._compute_coordinates(absolute_index, line_offsets)
 
@@ -80,9 +104,10 @@ class LatexIndexParser:
                 "absolute_index": absolute_index,
                 "end_absolute_index": end_abs - 1,
                 "encap": safe_encap,
-                "see": see_payload["see"],           
-                "seealso": see_payload["seealso"],   
-                "has_references": see_payload["has_references"]  
+                "see": see_payload["see"],
+                "seealso": see_payload["seealso"],
+                "has_references": see_payload["has_references"],
+                "macro_command": matched_command,
             }
             
             extracted_payloads.append((parts_list, uid_dict))
@@ -216,8 +241,16 @@ class LatexIndexParser:
         return idx
 
     @classmethod
-    def _scrub_macro_definitions(cls, text: str) -> str:
-        working_chars = list(text)
+    def _iter_macro_definitions(cls, text: str):
+        """
+        Shared brace-walking scan for every \\newcommand/\\renewcommand/
+        \\providecommand/\\DeclareRobustCommand/\\def definition in text.
+        Yields (start_macro_idx, command_name, body_open, body_close) per
+        definition found. Used by both _scrub_macro_definitions (blanks
+        each span so an \\index call *inside* a definition's own body isn't
+        mistaken for a real entry) and extract_command_definitions
+        (captures name/body pairs instead) -- same traversal, two uses.
+        """
         text_len = len(text)
         DEF_STYLE_KEYWORDS = {'def'}
 
@@ -225,6 +258,7 @@ class LatexIndexParser:
             keyword = match.group(1)
             start_macro_idx = match.start()
             idx = match.end()
+            command_name = None
 
             if keyword in DEF_STYLE_KEYWORDS:
                 while idx < text_len and text[idx] in (' ', '\t'):
@@ -233,12 +267,14 @@ class LatexIndexParser:
                 if idx >= text_len or text[idx] != '\\':
                     continue
 
+                name_start = idx
                 idx += 1
                 if idx < text_len and text[idx].isalpha():
                     while idx < text_len and text[idx].isalpha():
                         idx += 1
                 elif idx < text_len:
                     idx += 1
+                command_name = text[name_start:idx]
 
                 while idx < text_len and (text[idx] in (' ', '\t') or text[idx] == '#' or text[idx].isdigit()):
                     idx += 1
@@ -251,6 +287,7 @@ class LatexIndexParser:
                 name_close = cls._find_closing_brace_index(text, name_open)
                 if name_close == -1:
                     continue
+                command_name = text[name_open + 1:name_close].strip()
 
                 idx = name_close + 1
                 idx = cls._skip_optional_args(text, idx)
@@ -263,11 +300,39 @@ class LatexIndexParser:
             if body_close == -1:
                 continue
 
+            yield start_macro_idx, command_name, body_open, body_close
+
+    @classmethod
+    def _scrub_macro_definitions(cls, text: str) -> str:
+        working_chars = list(text)
+
+        for start_macro_idx, _command_name, _body_open, body_close in cls._iter_macro_definitions(text):
             for fill_idx in range(start_macro_idx, body_close + 1):
                 if working_chars[fill_idx] not in ('\n', '\r'):
                     working_chars[fill_idx] = ' '
 
         return "".join(working_chars)
+
+    @classmethod
+    def extract_command_definitions(cls, text: str) -> list[dict]:
+        """
+        Scans raw (unscrubbed) LaTeX text for \\newcommand/\\renewcommand/
+        \\providecommand/\\DeclareRobustCommand/\\def definitions and
+        returns each as {"name": "\\cmdname", "body": "<verbatim full
+        declaration text>"} -- the same shape as
+        LatexCommandRegistryModel.list_commands() /
+        FileTreePersistence.fetch_project_custom_commands(), so the result
+        feeds straight into LatexCommandRegistryModel.filter_indexing_newcommands()
+        and FileTreePersistence.add_project_custom_command().
+        """
+        definitions = []
+        for start_macro_idx, command_name, _body_open, body_close in cls._iter_macro_definitions(text):
+            if command_name:
+                definitions.append({
+                    "name": command_name,
+                    "body": text[start_macro_idx:body_close + 1],
+                })
+        return definitions
 
     @classmethod
     def _find_closing_brace_index(cls, text: str, start_brace_pos: int) -> int:

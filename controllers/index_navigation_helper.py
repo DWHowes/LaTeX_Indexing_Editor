@@ -33,7 +33,17 @@ class IndexNavigationHelper(QObject):
     # Public entry point
     # ------------------------------------------------------------------
 
-    def navigate(self, path: str, line: int, col: int, fallback: str = "", highlight_full_line: bool = False) -> None:
+    def navigate(
+        self,
+        path: str,
+        line: int,
+        col: int,
+        fallback: str = "",
+        highlight_full_line: bool = False,
+        absolute_position: int | None = None,
+        absolute_end: int | None = None,
+        macro_command: str = "index",
+    ) -> None:
         """
         Opens (or focuses) the file at path, then jumps to line/col.
         fallback is a raw macro string used for fuzzy matching if the
@@ -42,6 +52,13 @@ class IndexNavigationHelper(QObject):
         detecting/highlighting an \\index{...} macro boundary -- set this for
         navigation sources (e.g. Advanced Search) whose coordinates point at
         arbitrary prose rather than the start of an index macro.
+
+        absolute_position/absolute_end, when known, let EditorTab select the
+        exact stored macro span instead of re-detecting its boundary from
+        line/col text -- required for entries created with a custom
+        indexing command (macro_command), since boundary re-detection only
+        ever recognizes literal \\index unless macro_command is also passed
+        through for that fallback path.
         """
         if not path:
             return
@@ -55,7 +72,10 @@ class IndexNavigationHelper(QObject):
             line_num=line,
             col_offset=col,
             fallback_search_tag=fallback,
-            highlight_full_line=highlight_full_line
+            highlight_full_line=highlight_full_line,
+            absolute_position=absolute_position,
+            absolute_end=absolute_end,
+            macro_command=macro_command,
         ))
 
     # ------------------------------------------------------------------
@@ -69,6 +89,9 @@ class IndexNavigationHelper(QObject):
         col_offset: int,
         fallback_search_tag: str,
         highlight_full_line: bool = False,
+        absolute_position: int | None = None,
+        absolute_end: int | None = None,
+        macro_command: str = "index",
     ) -> None:
         if not isinstance(editor, EditorTab):
             return
@@ -88,10 +111,12 @@ class IndexNavigationHelper(QObject):
                 editor.jump_to_coordinates(
                     line=resolved_line,
                     column=resolved_col,
-                    absolute_position=None,
+                    absolute_position=absolute_position,
                     is_one_indexed=True,
                     is_index_jump=True,
-                    highlight_full_line=highlight_full_line
+                    absolute_end=absolute_end,
+                    highlight_full_line=highlight_full_line,
+                    macro_command=macro_command,
                 )
                 return
 
@@ -122,5 +147,6 @@ class IndexNavigationHelper(QObject):
             absolute_position=None,
             is_one_indexed=True,
             is_index_jump=True,
-            highlight_full_line=highlight_full_line
+            highlight_full_line=highlight_full_line,
+            macro_command=macro_command,
         )

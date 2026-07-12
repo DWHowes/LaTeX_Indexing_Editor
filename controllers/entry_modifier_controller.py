@@ -247,7 +247,10 @@ class EntryModifierController(QObject):
             path=location.get("file_path", ""),
             line=location.get("line_number", 1),
             col=location.get("column_offset", 0),
-            fallback=self.model.get_display_label(entry_id)
+            fallback=self.model.get_display_label(entry_id),
+            absolute_position=location.get("absolute_position"),
+            absolute_end=location.get("absolute_end"),
+            macro_command=location.get("macro_command", "index"),
         )
 
     @Slot(int, bool)

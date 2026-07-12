@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 from PySide6.QtCore import QObject, Signal, Slot
 from models.latex_index_parser import LatexIndexParser
+from models.latex_command_registry_model import LatexCommandRegistryModel
 
 class ProjectLoadWorker(QObject):
     """
@@ -132,13 +133,44 @@ class ProjectLoadWorker(QObject):
         # fresh scan rather than an already-populated DB.
         pending_range_opens: dict[str, dict] = {}
 
+        # Discovery pass: find every custom indexing command already
+        # defined anywhere in the project (e.g. a \newcommand{\isidx}...
+        # wrapper around \index, hand-authored before this app ever
+        # touched the project) so the entry-scanning pass below can
+        # recognize entries written with it, not just plain \index, and so
+        # it shows up in the "Manage Project Commands..." dropdown without
+        # the user having to re-declare it. Idempotent -- safe to re-run
+        # on every resync.
+        discovered_definitions: dict[str, str] = {}
+        for file_path in self._tex_file_paths:
+            if self._is_abort_requested: return headings_payload, references_payload
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    raw_content = f.read()
+            except OSError:
+                continue
+            for definition in LatexIndexParser.extract_command_definitions(raw_content):
+                discovered_definitions[definition["name"]] = definition["body"]
+
+        indexing_commands = LatexCommandRegistryModel.filter_indexing_newcommands(
+            [{"name": name, "body": body} for name, body in discovered_definitions.items()]
+        )
+        for command in indexing_commands:
+            self.db_persist.add_project_custom_command(command["name"], command["body"])
+
+        index_pattern = LatexIndexParser.build_index_pattern(
+            [command["name"] for command in indexing_commands]
+        )
+
         for file_path in self._tex_file_paths:
             if self._is_abort_requested: return headings_payload, references_payload
             norm_target = Path(file_path).resolve().as_posix()
             filename = Path(norm_target).name
             self.status_updated.emit(f"Parsing index definitions: {filename}")
 
-            payloads, next_id = LatexIndexParser.parse_file(norm_target, start_id=running_id_pool)
+            payloads, next_id = LatexIndexParser.parse_file(
+                norm_target, start_id=running_id_pool, index_pattern=index_pattern
+            )
             running_id_pool = next_id
 
             for parts_list, uid_dict in payloads:
@@ -200,6 +232,7 @@ class ProjectLoadWorker(QObject):
                     "seealso_references": uid_dict.get("seealso"), "has_references": uid_dict.get("has_references"),
                     "range_partner_id": None,
                     "is_range_closer": False,
+                    "macro_command": uid_dict.get("macro_command", "index"),
                 }
                 references_payload.append(entry_dict)
 

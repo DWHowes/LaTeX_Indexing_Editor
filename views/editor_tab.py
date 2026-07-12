@@ -209,7 +209,7 @@ class EditorTab(QPlainTextEdit):
         """Returns the active 0-indexed column coordinate offset for status updates."""
         return self.textCursor().columnNumber()
 
-    def jump_to_coordinates(self, line: int, column: int, absolute_position: int = None, is_one_indexed: bool = True, is_index_jump: bool = False, absolute_end: int = None, highlight_full_line: bool = False):
+    def jump_to_coordinates(self, line: int, column: int, absolute_position: int = None, is_one_indexed: bool = True, is_index_jump: bool = False, absolute_end: int = None, highlight_full_line: bool = False, macro_command: str = "index"):
         """
         Moves the viewport text cursor precisely onto targets using absolute character positions.
         Strict MVC Compliance: Free of code deletions, signature renames, or find search loops.
@@ -261,17 +261,23 @@ class EditorTab(QPlainTextEdit):
                 cursor.setPosition(line_block.position())
                 cursor.setPosition(line_block.position() + len(line_block.text()), QTextCursor.MoveMode.KeepAnchor)
             else:
-                self._highlight_index_macro_range(cursor)
+                self._highlight_index_macro_range(cursor, macro_command)
 
         self.setTextCursor(cursor)
         self.ensureCursorVisible()
         self.centerCursor()
 
-    def _highlight_index_macro_range(self, cursor: QTextCursor):
+    def _highlight_index_macro_range(self, cursor: QTextCursor, macro_command: str = "index"):
         r"""
         Fallback highlight when an absolute end is not available.
-        Highlights the balanced \index{...} range starting at the current cursor.
+        Highlights the balanced \<macro_command>{...} range starting at the
+        current cursor. macro_command is the entry's own stored command
+        name (e.g. "index" or a custom indexing command like "isidx") --
+        hardcoding "index" here would find the nearest *plain* \index{...}
+        macro instead of the intended entry whenever the actual macro at
+        this position uses a different command.
         """
+        macro_token = f"\\{macro_command}"
         start_pos = cursor.position()
         doc = self.document()
         text = doc.toPlainText()
@@ -279,14 +285,14 @@ class EditorTab(QPlainTextEdit):
         if start_pos < 0 or start_pos >= length:
             return
 
-        # If not on backslash, rewind to nearest \index on this line
-        if not text.startswith("\\index", start_pos):
+        # If not on the macro token, rewind to nearest occurrence on this line
+        if not text.startswith(macro_token, start_pos):
             block = cursor.block()
             block_start = block.position()
             line_text = block.text()
             rel_pos = start_pos - block_start
             # Search the full line up to and including rel_pos
-            idx = line_text.rfind("\\index", 0, rel_pos + 7)  # +7 = len("\index{")
+            idx = line_text.rfind(macro_token, 0, rel_pos + len(macro_token) + 1)  # +1 = len("{")
             if idx == -1:
                 return
             start_pos = block_start + idx
@@ -296,7 +302,7 @@ class EditorTab(QPlainTextEdit):
         in_macro = False
         while end_pos < length:
             c = text[end_pos]
-            if text.startswith("\\index", end_pos) and not in_macro:
+            if text.startswith(macro_token, end_pos) and not in_macro:
                 in_macro = True
             if in_macro:
                 if c == "{":

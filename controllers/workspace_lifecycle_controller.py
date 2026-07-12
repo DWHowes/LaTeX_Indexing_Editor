@@ -97,8 +97,24 @@ class WorkspaceLifecycleController(QObject):
         editor_tab.deleteLater()
 
     @Slot(str, int, int, str, bool)
-    def navigate_to_embedded_index_coordinate(self, path: str, line: int, col: int, fallback: str, highlight_full_line: bool = False):
-        self.index_navigation.navigate(path, line, col, fallback, highlight_full_line=highlight_full_line)
+    def navigate_to_embedded_index_coordinate(
+        self,
+        path: str,
+        line: int,
+        col: int,
+        fallback: str,
+        highlight_full_line: bool = False,
+        absolute_position: int | None = None,
+        absolute_end: int | None = None,
+        macro_command: str = "index",
+    ):
+        self.index_navigation.navigate(
+            path, line, col, fallback,
+            highlight_full_line=highlight_full_line,
+            absolute_position=absolute_position,
+            absolute_end=absolute_end,
+            macro_command=macro_command,
+        )
 
     def get_index_navigator(self) -> IndexNavigationHelper:
         return self.index_navigation

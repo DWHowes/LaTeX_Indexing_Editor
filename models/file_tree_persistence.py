@@ -589,7 +589,8 @@ class FileTreePersistence:
                             json.dumps(r.get("seealso_references")) if isinstance(r.get("seealso_references"), list) else None,
                             1 if r.get("has_references") else 0,
                             r.get("range_partner_id"), # Int or None
-                            1 if r.get("is_range_closer") else 0
+                            1 if r.get("is_range_closer") else 0,
+                            str(r.get("macro_command") or "index")
                         )
                         for r in references
                     ]
@@ -599,8 +600,8 @@ class FileTreePersistence:
                             heading_id, heading_raw_text, uid, unique_id_number,
                             file_path, line_number, column_offset, absolute_position, absolute_end,
                             encap, see_references, seealso_references, has_references,
-                            range_partner_id, is_range_closer
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                            range_partner_id, is_range_closer, macro_command
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                     """, references_batch)
                     
                 conn.commit()

@@ -379,6 +379,7 @@ class EntryModifierModel(QObject):
             "heading_id":         record.get("heading_id"),
             "see_references":     record.get("see_references"),
             "seealso_references": record.get("seealso_references"),
+            "macro_command":      record.get("macro_command", "index"),
         }
     
     # ------------------------------------------------------------------
