@@ -14,6 +14,7 @@ class DarkThemeColours:
     button_text:      str = "#ffffff"
     highlight:        str = "#2a82da"
     highlight_text:   str = "#000000"
+    placeholder_text: str = "#a0a0a0"
     # Per-widget stylesheet overrides
     tree_background:  str = "#191919"
     tree_header_bg:   str = "#353535"
@@ -34,6 +35,7 @@ class LightThemeColours:
     button_text:      str = "#000000"
     highlight:        str = "#0078d7"
     highlight_text:   str = "#ffffff"
+    placeholder_text: str = "#767676"
     # Per-widget stylesheet overrides
     tree_background:  str = "#ffffff"
     tree_header_bg:   str = "#f0f0f0"
@@ -54,6 +56,7 @@ THEME_FIELD_LABELS: Dict[str, str] = {
     "button_text":        "Button Text",
     "highlight":          "Selection / Highlight",
     "highlight_text":     "Selected Text",
+    "placeholder_text":   "Placeholder Text",
     # Stylesheet
     "tree_background":    "Tree View Background",
     "tree_header_bg":     "Tree Header Background",
@@ -67,6 +70,7 @@ THEME_FIELD_GROUPS: Dict[str, list] = {
     "Palette Colours": [
         "window", "window_text", "base", "alternate_base",
         "text", "button", "button_text", "highlight", "highlight_text",
+        "placeholder_text",
     ],
     "Widget Stylesheet Overrides": [
         "tree_background", "tree_header_bg", "tree_header_border",

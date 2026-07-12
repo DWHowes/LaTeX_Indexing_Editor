@@ -121,6 +121,7 @@ class AppStyleConfiguration:
         palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.ButtonText,      qc(colours.button_text))
         palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Highlight,       qc(colours.highlight))
         palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.HighlightedText, qc(colours.highlight_text))
+        palette.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.PlaceholderText, qc(colours.placeholder_text))
 
         app.setPalette(palette)
         AppStyleConfiguration.event_broker().theme_mutated.emit(is_dark_mode)
