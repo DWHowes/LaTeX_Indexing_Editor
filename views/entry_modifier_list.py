@@ -322,8 +322,8 @@ class EntryModifierList(QWidget):
 
         # Table view
         self.entries_table_view = EntryModifierTableView(self)
-        self.entries_table_view.setSelectionMode(EntryModifierTableView.SelectionMode.SingleSelection)
-        self.entries_table_view.setSelectionBehavior(EntryModifierTableView.SelectionBehavior.SelectItems)
+        self.entries_table_view.setSelectionMode(EntryModifierTableView.SelectionMode.ExtendedSelection)
+        self.entries_table_view.setSelectionBehavior(EntryModifierTableView.SelectionBehavior.SelectRows)
         self.entries_table_view.setSortingEnabled(True)
 
         # Base model — 8 columns

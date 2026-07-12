@@ -249,8 +249,10 @@ class AppPipelineController(QObject):
             # self._index_context_manager.invert_tree_name_triggered.connect(self._handle_index_name_inversion_request)            
             self.idx_ctrl.tree_population_requested.connect(self.index_tree_widget.populate_hierarchy_tree)
 
-        self._edit_table_context_manager.delete_edit_term_triggered.connect(self._handle_table_deletion_request)
+        self._edit_table_context_manager.delete_references_triggered.connect(self.entry_modifier_ctrl.handle_context_menu_delete_request)
         self._edit_table_context_manager.invert_name_triggered.connect(self._handle_index_name_inversion_request)
+        self._edit_table_context_manager.duplicate_references_triggered.connect(self._handle_duplicate_references_request)
+        self._edit_table_context_manager.invert_headings_triggered.connect(self._handle_invert_headings_request)
 
         self.scope_ctrl.scope_mutated.connect(lambda: self.window.synchronize_window_title(self.scope_ctrl.active_project_name))
 
@@ -288,8 +290,7 @@ class AppPipelineController(QObject):
             # Cache if the user changed the auto-resolved value
             original_auto = inversion_result.authority_term or inversion_result.rule_suggestion or ""
             if final_value.strip() != original_auto.strip():
-                # self.name_inverter.cache_resolved_heading(source_name, final_value)
-                self._name_inverter.cache_resolved_heading(source_name, final_value, reason=reason, user_edited=True)                
+                self.name_inverter.cache_resolved_heading(source_name, final_value, reason=reason, user_edited=True)
 
             self._apply_inverted_name(target_index, final_value)
 
@@ -1426,6 +1427,226 @@ class AppPipelineController(QObject):
         if norm_path:
             self._pending_insertions_by_file[norm_path].append(entry_dict["unique_id_number"])
 
+    # ------------------------------------------------------------------
+    # "Duplicate references" — reference table bulk action
+    # ------------------------------------------------------------------
+
+    @Slot(list)
+    def _handle_duplicate_references_request(self, entry_ids: list) -> None:
+        """
+        Splices an exact copy of each selected entry's current macro text
+        into the .tex source immediately after the original, with a fresh
+        unique ID, so the user can then manually retype the copy's
+        heading in the table (e.g. to cross-post it under a different
+        topic). Same "new entry" registration pipeline as
+        _handle_manual_index_insertion -- just fed from a copy of
+        existing text instead of a live cursor insert.
+
+        Range-paired entries duplicate as a linked pair (both the opener
+        and its table-invisible closer), so the duplicate is a valid,
+        balanced range rather than an orphaned marker.
+        """
+        persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+        if not entry_ids or persistence is None:
+            return
+
+        duplicated_count = 0
+        skipped_count = 0
+        for entry_id in entry_ids:
+            original = self.entry_modifier_ctrl.model._records.get(entry_id)
+            if not original or original.get("is_range_closer"):
+                skipped_count += 1
+                continue
+
+            partner_id = original.get("range_partner_id")
+            if partner_id is not None:
+                ok = self._duplicate_range_pair(original, partner_id, persistence)
+            else:
+                ok = self._duplicate_standalone_entry(original, persistence)
+
+            if ok:
+                duplicated_count += 1
+            else:
+                skipped_count += 1
+
+        if duplicated_count:
+            message = (
+                f"Duplicated {duplicated_count} reference{'s' if duplicated_count != 1 else ''}. "
+                "Edit the new row(s) to update their heading."
+            )
+            if skipped_count:
+                message += f" ({skipped_count} skipped.)"
+            self.window.status_bar.showMessage(message, 5000)
+        elif skipped_count:
+            self.window.status_bar.showMessage("Could not duplicate the selected reference(s).", 4000)
+
+    def _duplicate_standalone_entry(self, original: dict, persistence) -> bool:
+        """Duplicates a single, non-range entry. Returns True on success."""
+        file_path = original.get("file_path")
+        abs_pos = original.get("absolute_position")
+        abs_end = original.get("absolute_end")
+        if not file_path or abs_pos is None or abs_end is None:
+            return False
+
+        macro_text = self.doc_io.read_macro_span(file_path, abs_pos, abs_end)
+        if not macro_text:
+            return False
+
+        coords = self.doc_io.insert_macro_at_position(file_path, abs_end, macro_text)
+        if coords is None:
+            return False
+
+        shifted_ids = self.entry_modifier_ctrl.model.shift_coordinates_after(file_path, abs_pos, len(macro_text))
+        for shifted_id in shifted_ids:
+            self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
+
+        new_entry = self._build_duplicate_entry_dict(original, coords, self.macro_id_generator.get_and_increment_id())
+        self._resolve_and_register_new_entry(new_entry, persistence, add_to_tree=True)
+        return True
+
+    def _duplicate_range_pair(self, opener: dict, partner_id: int, persistence) -> bool:
+        """
+        Duplicates a range opener and its closer together, cross-linked
+        via range_partner_id exactly like a live range insert. Returns
+        True on success.
+        """
+        closer = self.entry_modifier_ctrl.model._records.get(partner_id)
+        if not closer:
+            return False
+
+        file_path = opener.get("file_path")
+        opener_pos = opener.get("absolute_position")
+        opener_end = opener.get("absolute_end")
+        closer_pos = closer.get("absolute_position")
+        closer_end = closer.get("absolute_end")
+        if not file_path or None in (opener_pos, opener_end, closer_pos, closer_end):
+            return False
+
+        opener_text = self.doc_io.read_macro_span(file_path, opener_pos, opener_end)
+        closer_text = self.doc_io.read_macro_span(file_path, closer_pos, closer_end)
+        if not opener_text or not closer_text:
+            return False
+
+        # Insert the opener's copy first, then re-read the closer's
+        # location before touching it -- the opener-copy insert may have
+        # shifted it, since the closer always sits later in the file.
+        new_opener_coords = self.doc_io.insert_macro_at_position(file_path, opener_end, opener_text)
+        if new_opener_coords is None:
+            return False
+        shifted = self.entry_modifier_ctrl.model.shift_coordinates_after(file_path, opener_pos, len(opener_text))
+        for shifted_id in shifted:
+            self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
+
+        closer_now = self.entry_modifier_ctrl.model._records.get(partner_id)
+        closer_pos_now = closer_now.get("absolute_position")
+        closer_end_now = closer_now.get("absolute_end")
+
+        new_closer_coords = self.doc_io.insert_macro_at_position(file_path, closer_end_now, closer_text)
+        if new_closer_coords is None:
+            return False
+        shifted2 = self.entry_modifier_ctrl.model.shift_coordinates_after(file_path, closer_pos_now, len(closer_text))
+        for shifted_id in shifted2:
+            self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
+
+        new_opener_id = self.macro_id_generator.get_and_increment_id()
+        new_closer_id = self.macro_id_generator.get_and_increment_id()
+
+        new_opener_dict = self._build_duplicate_entry_dict(opener, new_opener_coords, new_opener_id)
+        new_opener_dict["range_partner_id"] = new_closer_id
+
+        new_closer_dict = self._build_duplicate_entry_dict(closer, new_closer_coords, new_closer_id)
+        new_closer_dict["range_partner_id"] = new_opener_id
+        new_closer_dict["is_range_closer"] = True
+
+        self._resolve_and_register_new_entry(new_opener_dict, persistence, add_to_tree=True)
+        self._resolve_and_register_new_entry(
+            new_closer_dict, persistence, add_to_tree=False,
+            heading_id_override=new_opener_dict["heading_id"],
+        )
+        return True
+
+    @staticmethod
+    def _build_duplicate_entry_dict(original: dict, coords: dict, new_id: int) -> dict:
+        """Builds a fresh entry_dict copying original's content fields onto a new ID/location."""
+        file_path = original.get("file_path", "")
+        return {
+            "unique_id_number":   new_id,
+            "heading_raw_text":   original.get("heading_raw_text", ""),
+            "file_path":          file_path,
+            "line_number":        coords["line_number"],
+            "column_offset":      coords["column_offset"],
+            "absolute_position":  coords["absolute_position"],
+            "absolute_end":       coords["absolute_end"],
+            "encap":              original.get("encap", "standard"),
+            "uid":                f"{file_path}:{coords['line_number']}:{coords['column_offset']}",
+            "see_references":     original.get("see_references"),
+            "seealso_references": original.get("seealso_references"),
+            "has_references":     original.get("has_references", True),
+            "range_partner_id":   None,
+            "is_range_closer":    False,
+            "macro_command":      original.get("macro_command", "index"),
+        }
+
+    def _resolve_and_register_new_entry(
+        self, entry_dict: dict, persistence, add_to_tree: bool, heading_id_override: int | None = None,
+    ) -> None:
+        """
+        Shared tail for a brand-new entry_dict: resolves/attaches
+        heading_id, optionally registers it with the tree/undo stack
+        (openers only), registers it with the entry-modifier model/DB,
+        and tracks it for save/discard rollback. Mirrors
+        _handle_manual_index_insertion's own tail.
+        """
+        if heading_id_override is not None:
+            entry_dict["heading_id"] = heading_id_override
+        else:
+            heading_text = entry_dict["heading_raw_text"]
+            depth = heading_text.count("!")
+            parent_id = None
+            if depth > 0:
+                parent_text = "!".join(heading_text.split("|")[0].split("!")[:-1])
+                parent_id = persistence.resolve_or_insert_heading(
+                    heading_text=parent_text, name=parent_text, depth=depth - 1, parent_id=None
+                )
+            entry_dict["heading_id"] = persistence.resolve_or_insert_heading(
+                heading_text=heading_text, name=heading_text, depth=depth, parent_id=parent_id
+            )
+
+        parts_list = entry_dict["heading_raw_text"].split("|")[0].split("!")
+
+        if add_to_tree:
+            self.window.latex_index_window.add_completion_entry(parts_list)
+            self.index_tree_widget.append_entry(parts_list, [entry_dict])
+            self._index_undo_stack.append((parts_list, [entry_dict]))
+            self._index_redo_stack.clear()
+            self._tree_modified = True
+
+        self.entry_modifier_ctrl.handle_new_entry_created(entry_dict)
+
+        norm_path = os.path.normpath(entry_dict["file_path"]) if entry_dict.get("file_path") else ""
+        if norm_path:
+            self._pending_insertions_by_file[norm_path].append(entry_dict["unique_id_number"])
+
+    # ------------------------------------------------------------------
+    # "Invert headings" — reference table bulk action
+    # ------------------------------------------------------------------
+
+    @Slot(list)
+    def _handle_invert_headings_request(self, entry_ids: list) -> None:
+        succeeded, attempted = self.entry_modifier_ctrl.invert_headings_for_selected(entry_ids)
+        if attempted == 0:
+            return
+        if succeeded == attempted:
+            self.window.status_bar.showMessage(
+                f"Inverted heading{'s' if succeeded != 1 else ''} for {succeeded} reference{'s' if succeeded != 1 else ''}.",
+                4000,
+            )
+        else:
+            self.window.status_bar.showMessage(
+                f"Inverted {succeeded} of {attempted} selected reference{'s' if attempted != 1 else ''}.",
+                5000,
+            )
+
     @Slot(object, object)
     def _handle_view_save_request(self, editor_tab: EditorTab, save_carrier: ReferenceCarrier) -> None:
         """
@@ -1501,9 +1722,6 @@ class AppPipelineController(QObject):
             )
         else:
             self.window.status_bar.set_status_text(f"Removed empty term '{display_text}'.")
-
-    def _handle_table_deletion_request(self):
-        pass
 
     @Slot(str, list)
     def _handle_heading_rename_conflict(self, old_raw_token: str, conflict_ids: list) -> None:

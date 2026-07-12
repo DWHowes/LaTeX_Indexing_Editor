@@ -140,7 +140,13 @@ class EntryModifierController(QObject):
 
         result = "!".join(levels)
         encap = fields.get("encap", "")
-        if encap:
+        # "standard" is the literal placeholder value plain entries carry
+        # (see IndexEntryModel.metadata()/the DB column default) -- it is
+        # not a real LaTeX suffix and must not be appended, unlike an
+        # actual directive (textbf/textit/see/seealso/range marker).
+        # Without this guard, editing ANY cell of a plain entry silently
+        # appended a bogus "|standard" to its heading on every commit.
+        if encap and encap != "standard":
             result = f"{result}|{encap}"
         return result
 
@@ -165,24 +171,98 @@ class EntryModifierController(QObject):
         self._staging_model.commit(entry_id)
         self.model.entry_modifier_updated.emit(entry_id, True)
 
-    # EntryModifierController — table row deletion
-    def _on_delete_row_requested(self, row):
-        entry_id = self._entry_id_for_row(row)
-        if entry_id is None:
+    def handle_context_menu_delete_request(self, entry_ids: list) -> None:
+        """
+        Entry point for the reference table's "Delete reference" context
+        menu action. entry_ids is the resolved row set from
+        EditEntryContextMenuManager (the full multi-selection if the
+        right-click landed inside it, otherwise just the clicked row) --
+        one confirmation dialog covers the whole batch.
+        """
+        entry_ids = [eid for eid in (entry_ids or []) if eid is not None]
+        if not entry_ids:
             return
 
+        count = len(entry_ids)
+        message = (
+            "Delete this index reference? This cannot be undone after save."
+            if count == 1 else
+            f"Delete these {count} index references? This cannot be undone after save."
+        )
         reply = QMessageBox.question(
-            self.view, "Delete entry",
-            "Delete this index reference? This cannot be undone after save.",
+            self.view, "Delete reference", message,
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
             return
 
-        if self._staging_model.is_dirty(entry_id):
-            self._staging_model.discard(entry_id)   # dumb primitive, no confirmation logic inside
+        for entry_id in entry_ids:
+            if self._staging_model.is_dirty(entry_id):
+                self._staging_model.discard(entry_id)   # dumb primitive, no confirmation logic inside
+            self._perform_row_deletion(entry_id)         # separate pipeline, not handle_entry_table_edit
 
-        self._perform_row_deletion(entry_id)         # separate pipeline, not handle_entry_table_edit
+    def invert_headings_for_selected(self, entry_ids: list) -> tuple[int, int]:
+        """
+        Swaps Main and Sub1 for each of the given entries -- e.g. turns a
+        batch of "Topic > term" entries into "term > Topic" for
+        cross-posting under a different heading. The context menu already
+        disables this action whenever any selected row has Sub2 content;
+        re-checked here defensively since callers shouldn't be trusted
+        blindly.
+
+        Reuses the exact level/encap-suffix assembly rules from
+        _assemble_canonical_heading (just with main/sub1 swapped) and the
+        same stage -> rewrite -> commit/discard sequence _finalize_row_edit
+        already uses, so the table refreshes via the existing
+        entry_committed signal chain and range partners stay in sync via
+        handle_entry_table_edit's own _sync_range_partner call.
+
+        Returns (succeeded_count, attempted_count).
+        """
+        def _level(disp: str, sort: str) -> str:
+            disp = disp.strip()
+            sort = sort.strip()
+            if not disp:
+                return ""
+            if sort and sort.lower() != disp.lower():
+                return f"{sort}@{disp}"
+            return disp
+
+        attempted = 0
+        succeeded = 0
+        for entry_id in (entry_ids or []):
+            fields = self.view.get_row_field_values(entry_id)
+            if fields is None or fields.get("sub2_disp", "").strip():
+                continue
+
+            levels = [
+                _level(fields["sub1_disp"], fields["sub1_sort"]),
+                _level(fields["main_disp"], fields["main_sort"]),
+            ]
+            levels = [lvl for lvl in levels if lvl]
+            if not levels:
+                continue
+
+            new_canonical = "!".join(levels)
+            encap = fields.get("encap", "")
+            # "standard" is the literal placeholder value plain entries carry
+            # (see IndexEntryModel.metadata()/the DB column default) -- it is
+            # not a real LaTeX suffix and must not be appended, unlike an
+            # actual directive (textbf/textit/see/seealso/range marker).
+            if encap and encap != "standard":
+                new_canonical = f"{new_canonical}|{encap}"
+
+            attempted += 1
+            self._staging_model.stage_edit(entry_id, new_canonical)
+            success = self._index_edit_ctrl.handle_entry_table_edit(entry_id, new_canonical)
+            if success:
+                self._staging_model.commit(entry_id)
+                self.model.entry_modifier_updated.emit(entry_id, True)
+                succeeded += 1
+            else:
+                self._staging_model.discard(entry_id)
+
+        return succeeded, attempted
 
     def _entry_id_for_row(self, row: int) -> int | None:
         """

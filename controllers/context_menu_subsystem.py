@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QMenu
 from PySide6.QtGui import QAction
 
 from controllers.app_style_configuration import AppStyleConfiguration
+from views.entry_modifier_list import COL_ID, COL_MAIN_DISP, COL_SUB2_DISP
 
 class BaseContextMenuManager(QObject):
     """
@@ -172,25 +173,89 @@ class FileTreeContextMenuManager(BaseContextMenuManager):
 class EditEntryContextMenuManager(BaseContextMenuManager):
     """
     Subclass: Index Table Context Actions.
-    Pure Interface: Relies entirely on raw model indices.
+    "Invert name" always targets the row's Main heading regardless of
+    which cell was clicked; "Delete reference", "Duplicate references",
+    and "Invert headings" operate on the resolved row set -- the current
+    multi-selection if the click landed inside it, otherwise just the
+    clicked row (standard desktop-app convention, since a bare right-click
+    doesn't itself change the selection).
     """
-    delete_edit_term_triggered = Signal(QModelIndex)
     invert_name_triggered = Signal(QModelIndex)
+    delete_references_triggered = Signal(list)      # list of entry IDs
+    duplicate_references_triggered = Signal(list)   # list of entry IDs
+    invert_headings_triggered = Signal(list)         # list of entry IDs
 
     def populate_menu_actions(self, menu_container: QMenu, proxy_index: QModelIndex):
-        display_text = str(proxy_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        main_index = proxy_index.siblingAtColumn(COL_MAIN_DISP)
 
-        invert_name_action = QAction(f"Invert Name for '{display_text}'", menu_container)
-        invert_name_action.setData(proxy_index)
-        delete_action = QAction(f"Delete Term '{display_text}'", menu_container)
-        delete_action.setData(proxy_index) 
-
+        invert_name_action = QAction("Invert name", menu_container)
+        invert_name_action.setData(main_index)
         invert_name_action.triggered.connect(self._on_invert_name_clicked)
-        delete_action.triggered.connect(self._on_delete_clicked)
-
         menu_container.addAction(invert_name_action)
+
         menu_container.addSeparator()
+
+        entry_ids = self._resolve_target_entry_ids(proxy_index)
+
+        delete_action = QAction("Delete reference", menu_container)
+        delete_action.setData(entry_ids)
+        delete_action.triggered.connect(self._on_delete_clicked)
         menu_container.addAction(delete_action)
+
+        menu_container.addSeparator()
+
+        duplicate_action = QAction("Duplicate references", menu_container)
+        duplicate_action.setData(entry_ids)
+        duplicate_action.triggered.connect(self._on_duplicate_clicked)
+        menu_container.addAction(duplicate_action)
+
+        invert_headings_action = QAction("Invert headings", menu_container)
+        invert_headings_action.setData(entry_ids)
+        invert_headings_action.setEnabled(not self._any_row_has_sub2(entry_ids))
+        invert_headings_action.triggered.connect(self._on_invert_headings_clicked)
+        menu_container.addAction(invert_headings_action)
+
+    # ------------------------------------------------------------------
+    # Selection resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_target_entry_ids(self, proxy_index: QModelIndex) -> list:
+        """
+        Returns the entry IDs the bulk actions should target: the full
+        current multi-selection if the right-clicked row is part of it,
+        otherwise just the clicked row.
+        """
+        selection_model = self.view_widget.selectionModel() if self.view_widget else None
+        if selection_model is not None:
+            selected_rows = {idx.row() for idx in selection_model.selectedRows()}
+            if proxy_index.row() in selected_rows:
+                id_indexes = selection_model.selectedRows(COL_ID)
+                return [idx.data(Qt.ItemDataRole.DisplayRole) for idx in id_indexes if idx.isValid()]
+
+        clicked_id = proxy_index.siblingAtColumn(COL_ID).data(Qt.ItemDataRole.DisplayRole)
+        return [clicked_id] if clicked_id is not None else []
+
+    def _any_row_has_sub2(self, entry_ids: list) -> bool:
+        """True if any row in entry_ids has non-empty Sub2 content -- in
+        that case a Main/Sub1 swap doesn't have a sensible target shape,
+        so "Invert headings" is disabled."""
+        if not entry_ids or not self.view_widget:
+            return False
+        model = self.view_widget.model()
+        if model is None:
+            return False
+        entry_id_set = set(entry_ids)
+        for row in range(model.rowCount()):
+            row_id = model.index(row, COL_ID).data(Qt.ItemDataRole.DisplayRole)
+            if row_id in entry_id_set:
+                sub2_text = str(model.index(row, COL_SUB2_DISP).data(Qt.ItemDataRole.DisplayRole) or "").strip()
+                if sub2_text:
+                    return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Action handlers
+    # ------------------------------------------------------------------
 
     @Slot()
     def _on_invert_name_clicked(self):
@@ -199,11 +264,28 @@ class EditEntryContextMenuManager(BaseContextMenuManager):
             target_index = action.data()
             if isinstance(target_index, QModelIndex) and target_index.isValid():
                 self.invert_name_triggered.emit(target_index)
+
     @Slot()
     def _on_delete_clicked(self):
         action = self.sender()
         if action and isinstance(action, QAction):
-            target_index = action.data()
-            if isinstance(target_index, QModelIndex) and target_index.isValid():
-                self.delete_edit_term_triggered.emit(target_index)
+            entry_ids = action.data()
+            if entry_ids:
+                self.delete_references_triggered.emit(entry_ids)
+
+    @Slot()
+    def _on_duplicate_clicked(self):
+        action = self.sender()
+        if action and isinstance(action, QAction):
+            entry_ids = action.data()
+            if entry_ids:
+                self.duplicate_references_triggered.emit(entry_ids)
+
+    @Slot()
+    def _on_invert_headings_clicked(self):
+        action = self.sender()
+        if action and isinstance(action, QAction):
+            entry_ids = action.data()
+            if entry_ids:
+                self.invert_headings_triggered.emit(entry_ids)
 

@@ -135,6 +135,84 @@ class DocumentIOController(QObject):
             file_path, absolute_position, absolute_end, new_macro_text, expected_macro_name
         )
 
+    def insert_macro_at_position(
+        self,
+        file_path: str,
+        absolute_position: int,
+        macro_text: str,
+    ) -> dict | None:
+        """
+        Inserts macro_text at absolute_position in file_path -- a pure
+        insertion, nothing is replaced or deleted. Used by "Duplicate
+        references" to splice a copied macro span in immediately after
+        the entry it was copied from.
+
+        Same open-editor-vs-disk branching as rewrite_macro_span. Unlike
+        rewrite_macro_span there is no "does the existing span look
+        right" guard, since there is no existing span to check -- callers
+        are responsible for keeping every OTHER entry in the same file in
+        sync afterward via EntryModifierModel.shift_coordinates_after.
+
+        Returns {"absolute_position", "absolute_end", "line_number",
+        "column_offset"} for the newly-inserted span, or None on failure
+        (out-of-range position, or a read/write error).
+        """
+        open_editor = self._find_open_editor(file_path)
+        if open_editor:
+            doc = open_editor.document()
+            doc_length = len(doc.toPlainText())
+            if absolute_position < 0 or absolute_position > doc_length:
+                print(
+                    f"[IO GUARD] insert_macro_at_position: position {absolute_position} "
+                    f"out of range (len={doc_length}) for {file_path} — aborting insert"
+                )
+                return None
+
+            from PySide6.QtGui import QTextCursor
+            cursor = QTextCursor(doc)
+            cursor.setPosition(absolute_position)
+            cursor.insertText(macro_text)
+            open_editor.setTextCursor(cursor)
+            open_editor.document().setModified(True)
+
+            block = doc.findBlock(absolute_position)
+            line_number = block.blockNumber() + 1
+            column_offset = absolute_position - block.position()
+        else:
+            self.backup_manager.register_file_for_session(file_path)
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception as e:
+                self.save_error_encountered.emit("Duplicate Reference Error", f"Could not read file:\n{e}")
+                return None
+
+            if absolute_position < 0 or absolute_position > len(content):
+                print(
+                    f"[IO GUARD] insert_macro_at_position: position {absolute_position} "
+                    f"out of range (len={len(content)}) for {file_path} — aborting insert"
+                )
+                return None
+
+            new_content = content[:absolute_position] + macro_text + content[absolute_position:]
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+            except Exception as e:
+                self.save_error_encountered.emit("Duplicate Reference Error", f"Could not write file:\n{e}")
+                return None
+
+            line_number = content.count("\n", 0, absolute_position) + 1
+            line_start = content.rfind("\n", 0, absolute_position) + 1
+            column_offset = absolute_position - line_start
+
+        return {
+            "absolute_position": absolute_position,
+            "absolute_end": absolute_position + len(macro_text),
+            "line_number": line_number,
+            "column_offset": column_offset,
+        }
+
     def _find_open_editor(self, file_path: str) -> "EditorTab | None":
         """Returns the open EditorTab for file_path, or None if not open."""
         if not self.tabs:
