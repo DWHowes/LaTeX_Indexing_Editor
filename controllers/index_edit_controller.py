@@ -309,13 +309,16 @@ class IndexEditController(QObject):
         if new_heading == current_heading:
             return False
 
+        record = self._entry_model._records.get(uid)
+        command_name = record.get("macro_command", "index") if record else "index"
+
         # Record the intended value before attempting the .tex write, so the
         # staging model reflects "what the controller currently believes
         # this entry's heading is" even while the write is in flight.
         self._staging_model.stage_edit(uid, new_heading)
 
-        new_macro = f"\\index{{{new_heading}}}"
-        delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro)
+        new_macro = f"\\{command_name}{{{new_heading}}}"
+        delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro, expected_macro_name=command_name)
         if delta is None:
             # Write did not happen — revert the staged value so it doesn't
             # drift out of sync with what's actually on the .tex source.
@@ -325,7 +328,6 @@ class IndexEditController(QObject):
         self._entry_model.update_entry_coordinates(uid, abs_pos, abs_pos + len(new_macro))
         self._entry_model.mark_dirty(uid)
 
-        record = self._entry_model._records.get(uid)
         if record:
             record["heading_raw_text"] = new_heading
 
@@ -488,10 +490,14 @@ class IndexEditController(QObject):
             print(f"[CONTROLLER WARNING] _sync_range_partner: incomplete coordinates for partner {partner_id}")
             return False
 
+        partner_record = self._entry_model._records.get(partner_id)
+        partner_command = partner_record.get("macro_command", "index") if partner_record else "index"
+        partner_prefix = f"\\{partner_command}{{"
+
         current_partner_macro = self._doc_io.read_macro_span(partner_file, partner_pos, partner_end)
         if (
             current_partner_macro is None
-            or not current_partner_macro.startswith("\\index{")
+            or not current_partner_macro.startswith(partner_prefix)
             or not current_partner_macro.endswith("}")
         ):
             print(
@@ -500,7 +506,7 @@ class IndexEditController(QObject):
             )
             return False
 
-        partner_inner = current_partner_macro[len("\\index{"):-1]
+        partner_inner = current_partner_macro[len(partner_prefix):-1]
         partner_heading_only = self._strip_encap_suffix(partner_inner)
         partner_encap = (
             partner_inner[len(partner_heading_only) + 1:]
@@ -514,8 +520,8 @@ class IndexEditController(QObject):
         if new_partner_heading == partner_inner:
             return True  # already in sync — nothing to do
 
-        new_partner_macro = f"\\index{{{new_partner_heading}}}"
-        delta = self._doc_io.rewrite_macro_span(partner_file, partner_pos, partner_end, new_partner_macro)
+        new_partner_macro = f"\\{partner_command}{{{new_partner_heading}}}"
+        delta = self._doc_io.rewrite_macro_span(partner_file, partner_pos, partner_end, new_partner_macro, expected_macro_name=partner_command)
         if delta is None:
             print(f"[CONTROLLER WARNING] _sync_range_partner: rewrite rejected for partner {partner_id}")
             return False
@@ -523,7 +529,6 @@ class IndexEditController(QObject):
         self._entry_model.update_entry_coordinates(partner_id, partner_pos, partner_pos + len(new_partner_macro))
         self._entry_model.mark_dirty(partner_id)
 
-        partner_record = self._entry_model._records.get(partner_id)
         if partner_record:
             partner_record["heading_raw_text"] = new_heading_no_encap
 
@@ -561,8 +566,11 @@ class IndexEditController(QObject):
         if new_canonical_heading == old_heading:
             return True
 
-        new_macro = f"\\index{{{new_canonical_heading}}}"
-        delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro)
+        record = self._entry_model._records.get(entry_id)
+        command_name = record.get("macro_command", "index") if record else "index"
+
+        new_macro = f"\\{command_name}{{{new_canonical_heading}}}"
+        delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro, expected_macro_name=command_name)
         if delta is None:
             return False
 
@@ -571,7 +579,6 @@ class IndexEditController(QObject):
         )
         self._entry_model.mark_dirty(entry_id)                     # NEW
 
-        record = self._entry_model._records.get(entry_id)
         if record:
             record["heading_raw_text"] = new_canonical_heading
 
@@ -625,7 +632,10 @@ class IndexEditController(QObject):
 
         heading_text = self._entry_model.get_heading_text(entry_id)
 
-        delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, "")
+        record = self._entry_model._records.get(entry_id)
+        command_name = record.get("macro_command", "index") if record else "index"
+
+        delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, "", expected_macro_name=command_name)
         if delta is None:
             return False
 

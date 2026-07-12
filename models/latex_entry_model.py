@@ -16,6 +16,7 @@ class IndexEntryModel:
     xref_type: str = "see"
     xref_target: str = ""
     page_style: Optional[str] = None
+    command_name: str = "index"
 
     @staticmethod
     def process_field(value: str) -> Optional[str]:
@@ -58,6 +59,7 @@ class IndexEntryModel:
             "has_references": True,
             "range_partner_id": None,
             "is_range_closer": False,
+            "command_name": self.command_name,
         }
         if self.xref_enabled:
             uid_dict["encap"] = f"{self.xref_type}{{{self.xref_target}}}"

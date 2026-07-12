@@ -214,6 +214,7 @@ class AppPipelineController(QObject):
         self.window.menu_bar.add_head_note_requested.connect(self.window.handle_add_head_note_dialog)
         self.window.menu_bar.create_latex_command_requested.connect(self.create_command_controller.show_create_command_dialog)
         self.window.menu_bar.manage_project_commands_requested.connect(self.project_command_controller.show_manage_commands_dialog)
+        self.project_command_controller.commands_changed.connect(self._refresh_index_command_options)
 
         # Structural Layout Hotkey Configurations
         self.window.menu_bar.toggle_file_sidebar_requested.connect(lambda: self._orchestrate_sidebar_focus(0))
@@ -713,6 +714,10 @@ class AppPipelineController(QObject):
         # Set up autocompletion for the index entry window
         self.window.latex_index_window.setup_autocompletion(references)
 
+        # Populate the entry window's command-selector dropdown with this
+        # project's adopted custom indexing commands
+        self._refresh_index_command_options()
+
         # Re-seed the ID generator from the actual project data
         max_existing_id = self.scope_ctrl.get_max_unique_id()
         self.macro_id_generator.reset(starting_id=max_existing_id + 1)
@@ -1141,6 +1146,7 @@ class AppPipelineController(QObject):
         self._index_prefs_ctrl.set_active_project(None, None)
         self._theme_controller.set_active_project(None, None)
         self.project_command_controller.set_active_project(None, None)
+        self._refresh_index_command_options()
 
         self._tree_modified = False
         self.window.synchronize_window_title(None)
@@ -1327,6 +1333,26 @@ class AppPipelineController(QObject):
         self.window.close()
         QApplication.quit()  # ensures the event loop actually exits
 
+    @Slot()
+    def _refresh_index_command_options(self) -> None:
+        """
+        Repopulates the entry window's command-selector dropdown from this
+        project's adopted custom indexing commands (project_custom_commands,
+        filtered to \\newcommand wrappers around \\index -- see
+        LatexCommandRegistryModel.filter_indexing_newcommands). Called on
+        project open/close and whenever ProjectCommandManagerController
+        reports the project's command set changed, so the dropdown never
+        needs a project reopen to reflect a just-added command.
+        """
+        persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+        if persistence is None:
+            self.window.latex_index_window.set_available_commands([])
+            return
+
+        project_commands = persistence.fetch_project_custom_commands()
+        indexing_commands = LatexCommandRegistryModel.filter_indexing_newcommands(project_commands)
+        self.window.latex_index_window.set_available_commands(indexing_commands)
+
     @Slot(list, dict)
     def _handle_manual_index_insertion(self, parts_list: list, metadata: dict):
         entry_dict = {
@@ -1344,6 +1370,7 @@ class AppPipelineController(QObject):
             "has_references":     True,
             "range_partner_id":   metadata.get("range_partner_id"),
             "is_range_closer":    metadata.get("is_range_closer", False),
+            "macro_command":      metadata.get("command_name", "index"),
         }
 
         # Resolve or create heading — skip for range closers, 

@@ -104,6 +104,7 @@ class DocumentIOController(QObject):
         absolute_position: int,
         absolute_end: int,
         new_macro_text: str,
+        expected_macro_name: str = "index",
     ) -> int | None:
         """
         Replaces the macro span at absolute_position:absolute_end with
@@ -114,6 +115,13 @@ class DocumentIOController(QObject):
         Otherwise registers the file for session backup, then rewrites
         directly on disk.
 
+        expected_macro_name is the bare command name (no leading
+        backslash, e.g. "index" or a custom indexing command like "isidx")
+        the existing span is expected to start with -- callers editing an
+        entry created with a custom command must pass that entry's own
+        stored macro_command here, or the guard below will reject the
+        rewrite as misaligned.
+
         Returns the length delta (positive = macro grew, negative = macro
         shrank, zero = same length), or None if the span guard check fails
         (stale or misaligned coordinates).
@@ -121,10 +129,10 @@ class DocumentIOController(QObject):
         open_editor = self._find_open_editor(file_path)
         if open_editor:
             return self._rewrite_in_document(
-                open_editor, absolute_position, absolute_end, new_macro_text
+                open_editor, absolute_position, absolute_end, new_macro_text, expected_macro_name
             )
         return self._rewrite_on_disk(
-            file_path, absolute_position, absolute_end, new_macro_text
+            file_path, absolute_position, absolute_end, new_macro_text, expected_macro_name
         )
 
     def _find_open_editor(self, file_path: str) -> "EditorTab | None":
@@ -191,6 +199,7 @@ class DocumentIOController(QObject):
         absolute_position: int,
         absolute_end: int,
         new_macro_text: str,
+        expected_macro_name: str = "index",
     ) -> int | None:
         """
         Rewrites a macro span in a live QTextDocument via QTextCursor.
@@ -211,11 +220,12 @@ class DocumentIOController(QObject):
         cursor.setPosition(absolute_position)
         cursor.setPosition(absolute_end, QTextCursor.MoveMode.KeepAnchor)
 
+        expected_prefix = f"\\{expected_macro_name}{{"
         existing = cursor.selectedText()
-        if not existing.startswith("\\index{"):
+        if not existing.startswith(expected_prefix):
             print(
                 f"[IO GUARD] Span at {absolute_position}:{absolute_end} "
-                f"is {existing[:30]!r} — does not look like \\index macro, "
+                f"is {existing[:30]!r} — does not look like a \\{expected_macro_name} macro, "
                 f"aborting rewrite"
             )
             return None
@@ -232,6 +242,7 @@ class DocumentIOController(QObject):
         absolute_position: int,
         absolute_end: int,
         new_macro_text: str,
+        expected_macro_name: str = "index",
     ) -> int | None:
         """
         Registers a session backup for file_path (no-op if already registered),
@@ -253,11 +264,12 @@ class DocumentIOController(QObject):
             )
             return None
 
+        expected_prefix = f"\\{expected_macro_name}{{"
         existing_span = content[absolute_position:absolute_end]
-        if not existing_span.startswith("\\index{"):
+        if not existing_span.startswith(expected_prefix):
             print(
                 f"[IO GUARD] Span at {absolute_position}:{absolute_end} "
-                f"is {existing_span[:30]!r} — does not look like \\index macro, "
+                f"is {existing_span[:30]!r} — does not look like a \\{expected_macro_name} macro, "
                 f"aborting rewrite"
             )
             return None

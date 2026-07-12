@@ -84,7 +84,7 @@ class LatexIndexController(QObject):
             absolute_start = cursor.position()
             target_term = entry.xref_target.strip()
             mode = entry.xref_type
-            macro_tag = f"\\index{{{chain}|{mode}{{{target_term}}}}}"
+            macro_tag = f"\\{entry.command_name}{{{chain}|{mode}{{{target_term}}}}}"
             cursor.insertText(macro_tag)
             absolute_end = cursor.position()
             editor.setTextCursor(cursor)
@@ -104,8 +104,8 @@ class LatexIndexController(QObject):
             selected_text = cursor.selectedText()
             start_format = f"|{entry.page_style}|(" if entry.page_style else "|("
             end_format   = f"|{entry.page_style}|)" if entry.page_style else "|)"
-            start_tag = f"\\index{{{chain}{start_format}}}"
-            end_tag   = f"\\index{{{chain}{end_format}}}"
+            start_tag = f"\\{entry.command_name}{{{chain}{start_format}}}"
+            end_tag   = f"\\{entry.command_name}{{{chain}{end_format}}}"
 
             # Selection start/end, independent of drag direction. cursor.position()
             # returns the "moving" end of the selection (left-to-right drags land
@@ -158,8 +158,8 @@ class LatexIndexController(QObject):
         else:
             # Standard single macro
             absolute_start = cursor.position()
-            macro_tag = (f"\\index{{{chain}|{entry.page_style}}}" 
-                        if entry.page_style else f"\\index{{{chain}}}")
+            macro_tag = (f"\\{entry.command_name}{{{chain}|{entry.page_style}}}"
+                        if entry.page_style else f"\\{entry.command_name}{{{chain}}}")
             cursor.insertText(macro_tag)
             absolute_end = cursor.position()
             editor.setTextCursor(cursor)

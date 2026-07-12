@@ -1,4 +1,4 @@
-from PySide6.QtCore import QObject, Slot
+from PySide6.QtCore import QObject, Signal, Slot
 
 from models.latex_command_registry_model import LatexCommandRegistryModel
 from views.project_command_manager_dialog import ProjectCommandManagerDialog
@@ -6,6 +6,12 @@ from controllers.app_style_configuration import AppStyleConfiguration
 
 
 class ProjectCommandManagerController(QObject):
+    # Emitted after a command is added to or removed from the project, so
+    # other project-scoped consumers of project_custom_commands (e.g. the
+    # entry window's command dropdown) can refresh live without needing a
+    # project reopen.
+    commands_changed = Signal()
+
     def __init__(self, window, command_registry: LatexCommandRegistryModel):
         super().__init__(window)
         self.window = window
@@ -47,6 +53,7 @@ class ProjectCommandManagerController(QObject):
         self._file_persistence.add_project_custom_command(command["name"], command["body"])
         if self.dialog:
             self.dialog.add_project_command(command)
+        self.commands_changed.emit()
 
     @Slot(str)
     def _on_remove_requested(self, name: str):
@@ -55,6 +62,8 @@ class ProjectCommandManagerController(QObject):
         removed = self._file_persistence.remove_project_custom_command(name)
         if removed and self.dialog:
             self.dialog.remove_project_command(name)
+        if removed:
+            self.commands_changed.emit()
 
     @Slot(bool)
     def _on_theme_changed(self, is_dark_mode: bool) -> None:

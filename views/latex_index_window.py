@@ -134,6 +134,21 @@ class LatexIndexWindow(QDockWidget):
         self.layout = QVBoxLayout(self.container)
         self.layout.setContentsMargins(5, 5, 5, 5)
 
+        self.command_layout = QHBoxLayout()
+        self.command_label = QLabel("Command:")
+        self.command_selector = QComboBox()
+        self.command_selector.addItem("index")
+        self.command_selector.setFixedWidth(120)
+        self.command_selector.setToolTip(
+            "Which LaTeX command wraps this index entry -- \"index\" is the "
+            "plain default; other options are custom indexing commands "
+            "adopted into this project (see \"Manage Project Commands...\")."
+        )
+        self.command_layout.addWidget(self.command_label)
+        self.command_layout.addWidget(self.command_selector)
+        self.command_layout.addStretch()
+        self.layout.addLayout(self.command_layout)
+
         self.input_layout = QGridLayout()
         self.main_label = QLabel("Main:")
         self.main_entry = QLineEdit(placeholderText="Main Entry")
@@ -369,7 +384,34 @@ class LatexIndexWindow(QDockWidget):
             "xref_type": self.xref_type.currentText(),
             "xref_target": self.xref_target.text(),
             "page_style": "bold" if self.bold_ref.isChecked() else "italic" if self.italic_ref.isChecked() else None,
+            "command_name": self.command_selector.currentText(),
         }
+
+    def set_available_commands(self, commands: list[dict]) -> None:
+        """
+        Repopulates the command-selector dropdown: "index" first (always
+        available, the LaTeX default), followed by each of the project's
+        adopted custom indexing commands (already filtered to \\newcommand
+        wrappers around \\index -- see
+        LatexCommandRegistryModel.filter_indexing_newcommands). Called by
+        the controller on project open/close and whenever the project's
+        custom command set changes.
+
+        Preserves the current selection if it's still present in the new
+        list, so an in-progress choice doesn't silently reset every time
+        this refreshes; falls back to "index" otherwise.
+        """
+        previous_selection = self.command_selector.currentText()
+
+        self.command_selector.blockSignals(True)
+        self.command_selector.clear()
+        self.command_selector.addItem("index")
+        for command in commands:
+            self.command_selector.addItem(command["name"].lstrip("\\"))
+
+        restored_index = self.command_selector.findText(previous_selection)
+        self.command_selector.setCurrentIndex(restored_index if restored_index >= 0 else 0)
+        self.command_selector.blockSignals(False)
 
     def reset_ui(self):
         self.main_entry.clear()

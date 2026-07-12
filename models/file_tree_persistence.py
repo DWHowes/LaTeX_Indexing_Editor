@@ -59,6 +59,18 @@ class FileTreePersistence:
         conn.row_factory = sqlite3.Row
         return conn
 
+    @staticmethod
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl_type: str) -> None:
+        """
+        Additive schema migration: adds `column` to `table` if it isn't
+        already there. Existing rows backfill via ddl_type's DEFAULT.
+        Table/column names are only ever passed as string literals from
+        this file, never user input, so f-string interpolation here is safe.
+        """
+        existing_columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing_columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+
     def initialize_database_schema(self) -> None:
         """Enforces relational integrity constraints matching the worker keys at cold boot."""
         if not self.db_path:
@@ -117,9 +129,17 @@ class FileTreePersistence:
                     has_references INTEGER DEFAULT 0,
                     range_partner_id INTEGER DEFAULT NULL,
                     is_range_closer INTEGER DEFAULT 0,
+                    macro_command TEXT NOT NULL DEFAULT 'index',
                     FOREIGN KEY(heading_id) REFERENCES project_headings(id) ON DELETE SET NULL
                 );
             """)
+
+            # Self-heals project DB files created before macro_command existed --
+            # CREATE TABLE IF NOT EXISTS above only affects brand-new tables, so
+            # any pre-existing project_references table needs the column added
+            # explicitly. Runs every time this method does (project open/switch),
+            # so it's a one-time no-op after the first open post-upgrade.
+            self._ensure_column(conn, "project_references", "macro_command", "TEXT NOT NULL DEFAULT 'index'")
 
             # Partition 5: Per-file content checksums, recorded whenever
             # project_headings/project_references are known to genuinely
@@ -863,14 +883,14 @@ class FileTreePersistence:
                         absolute_position, absolute_end,
                         encap, heading_id,
                         see_references, seealso_references, has_references,
-                        range_partner_id, is_range_closer
+                        range_partner_id, is_range_closer, macro_command
                     ) VALUES (
                         :unique_id_number, :heading_raw_text, :uid,
                         :file_path, :line_number, :column_offset,
                         :absolute_position, :absolute_end,
                         :encap, :heading_id,
                         :see_references, :seealso_references, :has_references,
-                        :range_partner_id, :is_range_closer
+                        :range_partner_id, :is_range_closer, :macro_command
                     )
                 """, {
                     **entry_dict,
@@ -879,6 +899,7 @@ class FileTreePersistence:
                     "has_references": 1 if entry_dict.get("has_references", True) else 0,
                     "range_partner_id": entry_dict.get("range_partner_id"),
                     "is_range_closer": 1 if entry_dict.get("is_range_closer", False) else 0,
+                    "macro_command": entry_dict.get("macro_command") or "index",
                 })
             return True
         except Exception as e:
