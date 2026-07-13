@@ -1,0 +1,51 @@
+[
+  {
+    "title": "Getting Started",
+    "children": [
+      {"title": "Opening and Creating a Project", "file": "getting_started/opening_a_project.md"},
+      {"title": "Saving and Closing", "file": "getting_started/saving_and_closing.md"}
+    ]
+  },
+  {
+    "title": "The Index Tree",
+    "children": [
+      {"title": "Viewing and Navigating", "file": "index_tree/navigating.md"},
+      {"title": "Inserting Entries", "file": "index_tree/inserting_entries.md"},
+      {"title": "Editing and Deleting Entries", "file": "index_tree/editing_deleting.md"},
+      {"title": "Range References", "file": "index_tree/range_references.md"},
+      {"title": "Cross-References (See / See Also)", "file": "index_tree/cross_references.md"}
+    ]
+  },
+  {
+    "title": "The Entry Table",
+    "children": [
+      {"title": "Editing Entries", "file": "entry_table/editing.md"},
+      {"title": "Duplicate References", "file": "entry_table/duplicate_references.md"}
+    ]
+  },
+  {
+    "title": "Custom LaTeX Commands",
+    "children": [
+      {"title": "Creating a Command", "file": "custom_commands/creating.md"},
+      {"title": "Managing Project Commands", "file": "custom_commands/managing.md"}
+    ]
+  },
+  {
+    "title": "Tools",
+    "children": [
+      {"title": "Index Statistics", "file": "tools/index_statistics.md"},
+      {"title": "Range Consistency Check", "file": "tools/range_consistency.md"},
+      {"title": "Resyncing Index Data from Disk", "file": "tools/resync.md"}
+    ]
+  },
+  {
+    "title": "Additional Features",
+    "children": [
+      {"title": "Head Notes", "file": "additional/head_notes.md"},
+      {"title": "RTF Export", "file": "additional/rtf_export.md"},
+      {"title": "Advanced Search", "file": "additional/advanced_search.md"},
+      {"title": "Name Inversion", "file": "additional/name_inversion.md"}
+    ]
+  },
+  {"title": "Preferences", "file": "preferences.md"}
+]

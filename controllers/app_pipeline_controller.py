@@ -31,6 +31,7 @@ from controllers.theme_config_controller import ThemeConfigController
 from controllers.entry_modifier_controller import EntryModifierController
 from controllers.index_edit_controller import IndexEditController
 from controllers.range_consistency_controller import RangeConsistencyController
+from controllers.help_controller import HelpController
 
 from controllers.app_style_configuration import AppStyleConfiguration
 from views.editor_tab import EditorTab
@@ -118,6 +119,8 @@ class AppPipelineController(QObject):
             index_edit_ctrl=self.index_edit_ctrl,
             parent=self,
         )
+
+        self.help_ctrl = HelpController(window=self.window, parent=self)
 
         max_existing_id = self.scope_ctrl.get_max_unique_id()
         starting_id = max_existing_id + 1  # 1 for new project, next available for existing
@@ -225,6 +228,7 @@ class AppPipelineController(QObject):
         self.window.menu_bar.manage_project_commands_requested.connect(self.project_command_controller.show_manage_commands_dialog)
         self.window.menu_bar.index_statistics_requested.connect(self._handle_index_statistics_request)
         self.window.menu_bar.range_consistency_check_requested.connect(self.range_consistency_ctrl.run_check)
+        self.window.menu_bar.help_contents_requested.connect(self.help_ctrl.show_help)
         self.project_command_controller.commands_changed.connect(self._refresh_index_command_options)
 
         # Structural Layout Hotkey Configurations

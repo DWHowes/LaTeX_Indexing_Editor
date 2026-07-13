@@ -24,6 +24,7 @@ class MainMenuBar(QMenuBar):
     resync_index_data_requested = Signal()
     index_statistics_requested = Signal()
     range_consistency_check_requested = Signal()
+    help_contents_requested = Signal()
     edit_menu_about_to_show = Signal()
 
     def __init__(self, parent_window=None):
@@ -149,6 +150,14 @@ class MainMenuBar(QMenuBar):
         self.range_consistency_check_action = tools_menu.addAction("Check Range &Consistency...")
         self.range_consistency_check_action.triggered.connect(lambda: self.range_consistency_check_requested.emit())
         self.range_consistency_check_action.setEnabled(False)
+
+        # --- Help Menu ---
+        # Not gated behind an active project (unlike the Tools actions
+        # above) -- help content is fixed relative to the app's own
+        # install location, so it's available with no project open.
+        help_menu = self.addMenu("&Help")
+        self.help_contents_action = help_menu.addAction("&Contents...", QKeySequence("F1"))
+        self.help_contents_action.triggered.connect(lambda: self.help_contents_requested.emit())
 
         # --- Global Action Container Tracking ---
         # Free-floating action container tracking the dark mode shortcut globally
