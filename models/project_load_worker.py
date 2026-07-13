@@ -132,14 +132,21 @@ class ProjectLoadWorker(QObject):
         # whenever range_partner_id is missing) for any project loaded
         # through a fresh scan rather than an already-populated DB.
         #
-        # A list (LIFO stack) per path_key, not a single dict slot -- a
+        # A list (FIFO queue) per path_key, not a single dict slot -- a
         # single slot meant a second "(" for the same heading path before
         # its first range closed silently overwrote the first opener's
         # entry, orphaning that first range's eventual ")" (nothing left
         # to pop, so it fell through with is_range_closer left False and
         # got counted as an ordinary reference instead of excluded). The
-        # stack lets each "(" push independently and each ")" pop the
-        # most recently opened, still-unclosed range for that path.
+        # queue lets each "(" enqueue independently and each ")" dequeue
+        # the OLDEST still-unclosed range for that path -- FIFO, not LIFO,
+        # since makeindex/imakeidx ranges for a single key never nest (a
+        # key can only have one range "in progress" at a time); a stray
+        # extra "(" before the first range's ")" is source-order noise to
+        # resolve sequentially, not a deliberately nested range. FIFO also
+        # matches how a human would describe two ranges for the same term
+        # as "the first reference" / "the second reference" in document
+        # order.
         pending_range_opens: dict[str, list[dict]] = {}
 
         # Discovery pass: find every custom indexing command already
@@ -247,21 +254,21 @@ class ProjectLoadWorker(QObject):
 
                 # Pair this entry with its range partner, if any. A "("
                 # opens a range for this heading path; the next ")" seen
-                # for that same path closes the most recently opened,
-                # still-unclosed range for it (LIFO), so a heading whose
-                # range is reopened before the first one closes still
-                # pairs both correctly instead of orphaning the first.
-                # Entries between them for *other* heading paths don't
-                # interfere, since pairing is tracked per path_key rather
-                # than by pure document order. A ")" with no matching
-                # pending "(" (malformed source) is left unlinked rather
-                # than guessed at.
+                # for that same path closes the OLDEST still-unclosed
+                # range for it (FIFO), so a heading whose range is
+                # reopened before the first one closes still pairs both
+                # correctly instead of orphaning the first. Entries
+                # between them for *other* heading paths don't interfere,
+                # since pairing is tracked per path_key rather than by
+                # pure document order. A ")" with no matching pending "("
+                # (malformed source) is left unlinked rather than guessed
+                # at.
                 if encap_value == "(":
                     pending_range_opens.setdefault(path_key, []).append(entry_dict)
                 elif encap_value == ")":
-                    open_stack = pending_range_opens.get(path_key)
-                    opener_entry = open_stack.pop() if open_stack else None
-                    if open_stack is not None and not open_stack:
+                    open_queue = pending_range_opens.get(path_key)
+                    opener_entry = open_queue.pop(0) if open_queue else None
+                    if open_queue is not None and not open_queue:
                         del pending_range_opens[path_key]
                     if opener_entry is not None:
                         entry_dict["is_range_closer"] = True

@@ -757,6 +757,54 @@ class FileTreePersistence:
 
         return stats
 
+    def fetch_range_consistency_candidates(self) -> list:
+        """
+        Raw rows for the Range Consistency Check tool (RangeConsistencyController
+        / models/range_consistency_model.py): every project_references row
+        that could participate in a range-pairing problem -- i.e.
+        everything except cross-references (encap "see{...}"/"seealso{...}"),
+        which carry no page number and so can't meaningfully overlap or
+        enclose a page range.
+
+        Reads directly from the DB rather than the in-memory
+        EntryModifierModel cache, matching fetch_index_statistics's own
+        DB-direct approach. Same caveat applies: a rename made this session
+        but not yet saved can shift absolute_position/line_number in the
+        live cache before it's flushed to the DB (see EntryModifierModel.
+        flush_dirty_to_db), so this can lag a few positions behind the
+        in-memory truth for anything after a mid-session rename. It never
+        lags on which rows exist, though -- inserts and deletes both write
+        through to the DB immediately (see EntryModifierModel.
+        register_new_entry / delete_record), only renames are deferred.
+        Whatever issues this produces are re-validated against the live
+        cache anyway at fix-apply time (IndexEditController.
+        handle_entry_deletion always reads current coordinates from
+        EntryModifierModel, never from this query), so a stale position
+        here can at worst misjudge which of two ranges opened first, not
+        corrupt the actual .tex rewrite.
+
+        Returns a list of dicts with unique_id_number, heading_id,
+        file_path, line_number, column_offset, absolute_position, and
+        encap -- exactly the fields find_range_consistency_issues needs.
+        """
+        if not self.db_path:
+            return []
+
+        rows: list = []
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "SELECT unique_id_number, heading_id, file_path, line_number, "
+                    "column_offset, absolute_position, encap FROM project_references "
+                    "WHERE NOT (encap LIKE 'see{%' OR encap LIKE 'seealso{%') "
+                    "ORDER BY file_path, heading_id, absolute_position"
+                )
+                rows = [dict(row) for row in cursor.fetchall()]
+        except sqlite3.Error as e:
+            print(f"[DB ERROR] fetch_range_consistency_candidates failed: {e}")
+
+        return rows
+
     def reset_to_default_state(self) -> None:
         """
         Public Model Contract.
@@ -828,7 +876,8 @@ class FileTreePersistence:
             "heading_raw_text", "heading_id",
             "file_path", "line_number", "column_offset",
             "absolute_position", "absolute_end", "encap",
-            "see_references", "seealso_references", "has_references"
+            "see_references", "seealso_references", "has_references",
+            "range_partner_id",
         }
 
         fields_to_write = {k: v for k, v in record.items() if k in MUTABLE_COLUMNS}

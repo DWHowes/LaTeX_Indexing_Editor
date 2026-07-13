@@ -30,6 +30,7 @@ from controllers.project_command_manager_controller import ProjectCommandManager
 from controllers.theme_config_controller import ThemeConfigController
 from controllers.entry_modifier_controller import EntryModifierController
 from controllers.index_edit_controller import IndexEditController
+from controllers.range_consistency_controller import RangeConsistencyController
 
 from controllers.app_style_configuration import AppStyleConfiguration
 from views.editor_tab import EditorTab
@@ -109,6 +110,13 @@ class AppPipelineController(QObject):
             index_edit_ctrl=self.index_edit_ctrl,
             staging_model=self.index_edit_staging_model,
             parent=self
+        )
+
+        self.range_consistency_ctrl = RangeConsistencyController(
+            window=self.window,
+            entry_modifier_model=self.entry_modifier_model,
+            index_edit_ctrl=self.index_edit_ctrl,
+            parent=self,
         )
 
         max_existing_id = self.scope_ctrl.get_max_unique_id()
@@ -216,6 +224,7 @@ class AppPipelineController(QObject):
         self.window.menu_bar.create_latex_command_requested.connect(self.create_command_controller.show_create_command_dialog)
         self.window.menu_bar.manage_project_commands_requested.connect(self.project_command_controller.show_manage_commands_dialog)
         self.window.menu_bar.index_statistics_requested.connect(self._handle_index_statistics_request)
+        self.window.menu_bar.range_consistency_check_requested.connect(self.range_consistency_ctrl.run_check)
         self.project_command_controller.commands_changed.connect(self._refresh_index_command_options)
 
         # Structural Layout Hotkey Configurations
@@ -709,6 +718,7 @@ class AppPipelineController(QObject):
         self.project_command_controller.set_active_project(project_name=project_name,
                                                   file_persistence=self.scope_ctrl.get_persistence_model()
                                                   )
+        self.range_consistency_ctrl.set_active_project(self.scope_ctrl.get_persistence_model())
         self.window.status_bar.showMessage(f"Project '{project_name}' loaded successfully.", 3000)
 
         # Enable menu items that are gated behind an active project context
@@ -1161,6 +1171,7 @@ class AppPipelineController(QObject):
         self._index_prefs_ctrl.set_active_project(None, None)
         self._theme_controller.set_active_project(None, None)
         self.project_command_controller.set_active_project(None, None)
+        self.range_consistency_ctrl.set_active_project(None)
         self._refresh_index_command_options()
 
         self._tree_modified = False

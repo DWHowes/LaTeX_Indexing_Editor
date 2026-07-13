@@ -23,6 +23,7 @@ class MainMenuBar(QMenuBar):
     create_rtf_file_requested = Signal()
     resync_index_data_requested = Signal()
     index_statistics_requested = Signal()
+    range_consistency_check_requested = Signal()
     edit_menu_about_to_show = Signal()
 
     def __init__(self, parent_window=None):
@@ -145,6 +146,10 @@ class MainMenuBar(QMenuBar):
         self.index_statistics_action.triggered.connect(lambda: self.index_statistics_requested.emit())
         self.index_statistics_action.setEnabled(False)
 
+        self.range_consistency_check_action = tools_menu.addAction("Check Range &Consistency...")
+        self.range_consistency_check_action.triggered.connect(lambda: self.range_consistency_check_requested.emit())
+        self.range_consistency_check_action.setEnabled(False)
+
         # --- Global Action Container Tracking ---
         # Free-floating action container tracking the dark mode shortcut globally
         self.dark_mode_action = QAction(self)
@@ -160,6 +165,7 @@ class MainMenuBar(QMenuBar):
         self.resync_index_data_action.setEnabled(is_enabled)
         self.manage_project_commands_action.setEnabled(is_enabled)
         self.index_statistics_action.setEnabled(is_enabled)
+        self.range_consistency_check_action.setEnabled(is_enabled)
         # Project closing always forces this off immediately. Project opening
         # only forces it as far as "project is open" -- whether a base file
         # has ALSO been chosen is re-checked separately whenever the Edit

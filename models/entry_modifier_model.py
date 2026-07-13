@@ -414,6 +414,36 @@ class EntryModifierModel(QObject):
 
         self.entry_modifier_updated.emit(entry_id, True)    
 
+    def relink_range_partner(self, entry_id: int, new_partner_id: int | None) -> None:
+        """
+        Re-points entry_id's range_partner_id to new_partner_id, in the
+        cache and immediately in the DB -- used by the range-consistency
+        checker's "overlapping ranges" merge fix, where the old partner
+        (the interior opener/closer being deleted) is replaced by the
+        surviving entry at the other end of the newly merged range.
+
+        Persisted immediately (like delete_record's delete_reference
+        call), not deferred via mark_dirty/flush_dirty_to_db: this isn't a
+        staged user edit awaiting Save, it's a correction that must stay
+        consistent with the .tex deletions the caller performs in the same
+        operation.
+        """
+        record = self._records.get(entry_id)
+        if record is None:
+            print(f"[MODEL WARNING] relink_range_partner: ID {entry_id} not in cache")
+            return
+
+        record["range_partner_id"] = new_partner_id
+
+        if self._persistence is not None:
+            success = self._persistence.update_reference_field(
+                entry_id, {"range_partner_id": new_partner_id}
+            )
+            if not success:
+                print(f"[MODEL WARNING] relink_range_partner: DB write failed for ID {entry_id}")
+        else:
+            print(f"[MODEL STUB] No persistence layer — skipping relink for ID {entry_id}")
+
     def delete_heading_if_orphaned(self, heading_id: int) -> None:
         """
         Delegates to the persistence layer to remove a project_headings
