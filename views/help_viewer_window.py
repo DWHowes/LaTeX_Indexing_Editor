@@ -21,21 +21,39 @@ from models.help_content_model import load_toc, render_topic_html
 class MarkdownTextBrowser(QTextBrowser):
     r"""
     QTextBrowser subclass that treats its "source" URLs as paths relative
-    to help_root (or relative to whichever topic is currently displayed,
-    for an in-content link -- Qt resolves that automatically against the
-    current source() before loadResource ever sees it, standard relative-
-    link semantics) and serves them by converting the matching .md file to
+    to help_root and serves them by converting the matching .md file to
     HTML on the fly. Everything else -- setSource, back/forward history,
     anchorClicked-driven navigation between topics, in-page #anchor
     scrolling -- works through Qt's own built-in machinery once this one
     hook is in place; no manual history stack or link-click handling
     needed.
+
+    IMPORTANT, confirmed by simulating a real QTest.mouseClick (not just
+    computing what QUrl.resolved() *should* produce): when the user clicks
+    an in-content link, Qt does NOT resolve its href against the
+    previously displayed topic before calling loadResource() -- it hands
+    over the raw, unresolved href exactly as written in the Markdown
+    source (e.g. "../tools/foo.md"), same as it hands over source() being
+    that same raw, unresolved string. Resolution has to happen inside
+    loadResource() itself, against a base *we* track independently
+    (self._current_topic_path) -- self.source() can't be used for that
+    base since Qt has already overwritten it with the very (unresolved)
+    url being resolved by the time loadResource runs.
+
+    Callers that already have a correct, root-relative path (HelpViewerWindow's
+    own setSource calls, from the TOC tree or show_topic) mark it with a
+    leading "/" so loadResource knows NOT to resolve it against
+    self._current_topic_path -- resolving an already-root-relative path
+    against another one produces a wrong, doubled-up path (confirmed:
+    QUrl("tools/a.md").resolved(QUrl("tools/b.md")) ==
+    "tools/tools/b.md", not "tools/b.md").
     """
 
     def __init__(self, help_root: Path, parent=None):
         super().__init__(parent)
         self._help_root = help_root
         self._is_dark = False
+        self._current_topic_path = ""
         self.setOpenExternalLinks(False)
         # Lets a relative image src (e.g. "images/foo.png") in a topic's
         # rendered HTML resolve against the help root via the default
@@ -59,10 +77,22 @@ class MarkdownTextBrowser(QTextBrowser):
 
     def loadResource(self, resource_type, url: QUrl):
         path_str = url.path()
-        if path_str.lower().endswith(".md"):
+        if not path_str.lower().endswith(".md"):
+            return super().loadResource(resource_type, url)
+
+        if path_str.startswith("/"):
+            # Already root-relative (a setSource call from our own code) --
+            # use as-is, don't resolve against the previous topic.
             relative_path = path_str.lstrip("/")
-            return render_topic_html(self._help_root, relative_path, self._current_style())
-        return super().loadResource(resource_type, url)
+        else:
+            # A raw in-content href, relative to whichever topic it was
+            # written in -- resolve it against that topic ourselves.
+            base = QUrl(self._current_topic_path)
+            relative_path = base.resolved(url).path().lstrip("/")
+
+        html = render_topic_html(self._help_root, relative_path, self._current_style())
+        self._current_topic_path = relative_path
+        return html
 
 
 class HelpViewerWindow(QDialog):
@@ -140,14 +170,21 @@ class HelpViewerWindow(QDialog):
     def _on_tree_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         relative_path = item.data(0, Qt.ItemDataRole.UserRole)
         if relative_path:
-            self._browser.setSource(QUrl(relative_path))
+            self._browser.setSource(QUrl("/" + relative_path))
 
     # ------------------------------------------------------------------
     # Browser <-> tree sync
     # ------------------------------------------------------------------
 
     def _on_source_changed(self, url: QUrl) -> None:
-        self._select_tree_item_for_path(url.path().lstrip("/"))
+        # NOT url.path() -- for an in-content link click, Qt fires
+        # sourceChanged with the same raw, unresolved href loadResource
+        # received (e.g. "../tools/foo.md"), not the resolved path (see
+        # MarkdownTextBrowser.loadResource's docstring). self._browser's
+        # own _current_topic_path is always the correctly resolved one,
+        # already updated by the time this fires (loadResource runs
+        # synchronously before Qt emits sourceChanged).
+        self._select_tree_item_for_path(self._browser._current_topic_path)
 
     def _select_tree_item_for_path(self, relative_path: str) -> None:
         iterator = QTreeWidgetItemIterator(self._tree)
@@ -164,7 +201,7 @@ class HelpViewerWindow(QDialog):
     # ------------------------------------------------------------------
 
     def show_topic(self, relative_path: str) -> None:
-        self._browser.setSource(QUrl(relative_path))
+        self._browser.setSource(QUrl("/" + relative_path))
 
     def apply_theme_configuration(self, is_dark: bool) -> None:
         colours = DarkThemeColours() if is_dark else LightThemeColours()
