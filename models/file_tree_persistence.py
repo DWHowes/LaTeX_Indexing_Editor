@@ -694,31 +694,32 @@ class FileTreePersistence:
         heading counts (project_headings.depth, 0-indexed) and total
         reference / cross-reference counts from project_references.
 
-        Deliberately does NOT use the has_references column -- it is
-        unreliable: _handle_manual_index_insertion hardcodes it to True
-        for every live-inserted entry regardless of xref status, and the
-        disk-scan path (LatexIndexParser._build_see_reference_payload)
-        uses the opposite convention (True means "is a cross-reference"),
-        so the same column means different, contradictory things
-        depending on how an entry was created.
+        Still deliberately does NOT use the has_references column, even
+        though both write sites (_handle_manual_index_insertion and
+        LatexIndexParser._build_see_reference_payload) were fixed
+        2026-07-13 to agree on "True means a real page reference, not an
+        xref-only pointer" (IndexEntryModel.metadata()'s original
+        semantic). Any project DB populated before that fix still holds
+        has_references values written under the old, contradictory
+        conventions, and won't self-heal until its next full resync --
+        so encap remains the query's signal until a migration/backfill
+        makes has_references trustworthy across every existing project.
 
-        Also deliberately does NOT use see_references/seealso_references
-        -- those are populated by LatexIndexParser._extract_see_modifiers,
-        which only matches a backslash-prefixed \\see{...}/\\seealso{...}
-        occurring inside the index term itself, not the standard
-        imakeidx pipe-modifier cross-reference syntax actually used in
-        real projects (\\index{term|see{Target}} /
-        \\index{term|seealso{Target}}, no backslash -- LaTeX prepends one
-        internally when expanding the pipe). That standard syntax is
-        captured correctly by both entry-creation paths, but into the
-        encap column instead: LatexIndexParser via
-        _strip_global_encap_safe, and IndexEntryModel.metadata() via
-        `encap = f"{xref_type}{{{xref_target}}}"` for a live-inserted
-        xref entry -- so encap LIKE 'see{%' / 'seealso{%' is the one
-        signal both paths agree on. Range closers are excluded from both
-        counts -- they're the second half of one logical range entry,
-        not an independent reference; the range's opener already
-        accounts for it.
+        Also does NOT use see_references/seealso_references directly --
+        LatexIndexParser._extract_see_modifiers now populates those from
+        the standard imakeidx pipe-modifier syntax too (\\index{term|see
+        {Target}} / \\index{term|seealso{Target}}, no backslash -- LaTeX
+        prepends one internally when expanding the pipe), not just the
+        rarer backslash-prefixed \\see{...}/\\seealso{...} form embedded
+        in display text. But that pipe syntax is captured into the encap
+        column regardless (LatexIndexParser via _strip_global_encap_safe,
+        and IndexEntryModel.metadata() via `encap =
+        f"{xref_type}{{{xref_target}}}"` for a live-inserted xref entry),
+        so encap LIKE 'see{%' / 'seealso{%' remains the simplest signal
+        both entry-creation paths agree on regardless of DB vintage.
+        Range closers are excluded from both counts -- they're the
+        second half of one logical range entry, not an independent
+        reference; the range's opener already accounts for it.
         """
         stats = {
             "main_headings": 0,

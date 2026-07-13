@@ -121,17 +121,26 @@ class ProjectLoadWorker(QObject):
         running_id_pool = 1
         heading_id_counter = 1
 
-        # Tracks the still-open "(" entry dict for each heading path, keyed
+        # Tracks the still-open "(" entry dicts for each heading path, keyed
         # by the same lowercased path_key used for seen_headings, so a
-        # later ")" for that same path can be linked back to it. Neither
-        # range_partner_id nor is_range_closer was ever assigned anywhere
-        # in this regex-fallback scan before this fix -- every entry came
-        # out with range_partner_id absent and is_range_closer False,
-        # opener and closer alike, which silently defeated
-        # IndexEditController._sync_range_partner (it no-ops whenever
-        # range_partner_id is missing) for any project loaded through a
-        # fresh scan rather than an already-populated DB.
-        pending_range_opens: dict[str, dict] = {}
+        # later ")" for that same path can be linked back to one of them.
+        # Neither range_partner_id nor is_range_closer was ever assigned
+        # anywhere in this regex-fallback scan before an earlier fix --
+        # every entry came out with range_partner_id absent and
+        # is_range_closer False, opener and closer alike, which silently
+        # defeated IndexEditController._sync_range_partner (it no-ops
+        # whenever range_partner_id is missing) for any project loaded
+        # through a fresh scan rather than an already-populated DB.
+        #
+        # A list (LIFO stack) per path_key, not a single dict slot -- a
+        # single slot meant a second "(" for the same heading path before
+        # its first range closed silently overwrote the first opener's
+        # entry, orphaning that first range's eventual ")" (nothing left
+        # to pop, so it fell through with is_range_closer left False and
+        # got counted as an ordinary reference instead of excluded). The
+        # stack lets each "(" push independently and each ")" pop the
+        # most recently opened, still-unclosed range for that path.
+        pending_range_opens: dict[str, list[dict]] = {}
 
         # Discovery pass: find every custom indexing command already
         # defined anywhere in the project (e.g. a \newcommand{\isidx}...
@@ -238,15 +247,22 @@ class ProjectLoadWorker(QObject):
 
                 # Pair this entry with its range partner, if any. A "("
                 # opens a range for this heading path; the next ")" seen
-                # for that same path closes it. Entries between them for
-                # *other* heading paths don't interfere, since pairing is
-                # tracked per path_key rather than by pure document order.
-                # A ")" with no matching pending "(" (malformed source) is
-                # left unlinked rather than guessed at.
+                # for that same path closes the most recently opened,
+                # still-unclosed range for it (LIFO), so a heading whose
+                # range is reopened before the first one closes still
+                # pairs both correctly instead of orphaning the first.
+                # Entries between them for *other* heading paths don't
+                # interfere, since pairing is tracked per path_key rather
+                # than by pure document order. A ")" with no matching
+                # pending "(" (malformed source) is left unlinked rather
+                # than guessed at.
                 if encap_value == "(":
-                    pending_range_opens[path_key] = entry_dict
+                    pending_range_opens.setdefault(path_key, []).append(entry_dict)
                 elif encap_value == ")":
-                    opener_entry = pending_range_opens.pop(path_key, None)
+                    open_stack = pending_range_opens.get(path_key)
+                    opener_entry = open_stack.pop() if open_stack else None
+                    if open_stack is not None and not open_stack:
+                        del pending_range_opens[path_key]
                     if opener_entry is not None:
                         entry_dict["is_range_closer"] = True
                         entry_dict["range_partner_id"] = int(opener_entry["unique_id_number"])

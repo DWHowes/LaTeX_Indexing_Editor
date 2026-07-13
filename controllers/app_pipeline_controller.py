@@ -1382,7 +1382,7 @@ class AppPipelineController(QObject):
             "uid":                f"{metadata.get('path', '')}:{metadata.get('line', 0)}:{metadata.get('col', 0)}",
             "see_references":     metadata.get("see"),
             "seealso_references": metadata.get("seealso"),
-            "has_references":     True,
+            "has_references":     metadata.get("has_references", True),
             "range_partner_id":   metadata.get("range_partner_id"),
             "is_range_closer":    metadata.get("is_range_closer", False),
             "macro_command":      metadata.get("command_name", "index"),

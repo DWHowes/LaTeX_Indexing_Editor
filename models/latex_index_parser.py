@@ -72,8 +72,8 @@ class LatexIndexParser:
 
             end_line_idx, end_col_idx = cls._compute_coordinates(end_abs - 1, line_offsets)
 
-            clean_inner_content, see_refs, seealso_refs = cls._extract_see_modifiers(inner_content)
-            clean_inner_content, encap_format = cls._strip_global_encap_safe(clean_inner_content)
+            clean_inner_content, encap_format = cls._strip_global_encap_safe(inner_content)
+            clean_inner_content, see_refs, seealso_refs = cls._extract_see_modifiers(clean_inner_content, encap_format)
             levels = cls._split_levels_safe(clean_inner_content)
 
             parts_list = []
@@ -409,7 +409,25 @@ class LatexIndexParser:
         return level_text.strip()
 
     @classmethod
-    def _extract_see_modifiers(cls, text: str) -> tuple[str, list[str], list[str]]:
+    def _extract_see_modifiers(cls, text: str, encap_format: str = "") -> tuple[str, list[str], list[str]]:
+        """
+        Populates see/seealso targets from either syntax a project might
+        use:
+          1. A literal \\see{...}/\\seealso{...} occurring inside the
+             index term's own display text (rare) -- stripped out of
+             `text` below.
+          2. The standard imakeidx pipe-modifier form,
+             \\index{term|see{Target}} / \\index{term|seealso{Target}} --
+             no backslash, since LaTeX prepends one internally when
+             expanding the pipe encap. This is what real projects
+             actually use. `encap_format` is the already-isolated suffix
+             after the top-level pipe (from _strip_global_encap_safe,
+             called on the raw text before this), so it's matched
+             directly rather than re-parsing pipe/brace nesting here.
+             Deliberately not re-stripped from `text` -- encap_format
+             came from a separate string and `text` here is already the
+             pipe-free remainder that _strip_global_encap_safe returned.
+        """
         see_refs = []
         seealso_refs = []
         cleaned_chars = list(text)
@@ -437,12 +455,25 @@ class LatexIndexParser:
         if cleaned_text.startswith('|'):
             cleaned_text = cleaned_text[1:].strip()
 
+        pipe_see_match = re.match(r'(seealso|see)\{(.*)\}$', encap_format, re.DOTALL)
+        if pipe_see_match:
+            ref = pipe_see_match.group(2).strip()
+            if ref:
+                if pipe_see_match.group(1) == "seealso":
+                    seealso_refs.append(ref)
+                else:
+                    see_refs.append(ref)
+
         return cleaned_text, see_refs, seealso_refs
 
     @classmethod
     def _build_see_reference_payload(cls, see_list: list[str], seealso_list: list[str]) -> dict:
+        # has_references convention: True means "this entry carries a real
+        # page reference" (i.e. NOT an xref-only see/seealso pointer) --
+        # the opposite of "has a see/seealso target". Must agree with
+        # IndexEntryModel.metadata()'s semantic.
         return {
             "see": see_list or [],
             "seealso": seealso_list or [],
-            "has_references": bool(see_list or seealso_list)
+            "has_references": not bool(see_list or seealso_list)
         }

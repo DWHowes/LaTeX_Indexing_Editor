@@ -48,6 +48,14 @@ class IndexEntryModel:
         return "!".join(self.normalized_parts())
 
     def metadata(self, assigned_id: int, path: str, line: int, col: int) -> dict:
+        """
+        has_references convention: True means "this entry carries a real
+        page reference" (i.e. NOT an xref-only see/seealso pointer) --
+        flipped to False only when xref_enabled below. This is the
+        authoritative semantic; other has_references write sites
+        (LatexIndexParser._build_see_reference_payload,
+        AppPipelineController._handle_manual_index_insertion) must agree.
+        """
         uid_dict = {
             "id": assigned_id,
             "path": path,
