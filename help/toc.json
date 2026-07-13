@@ -4,7 +4,8 @@
     "children": [
       {"title": "Application Overview", "file": "getting_started/application_overview.md"},
       {"title": "Opening and Creating a Project", "file": "getting_started/opening_a_project.md"},
-      {"title": "Saving and Closing", "file": "getting_started/saving_and_closing.md"}
+      {"title": "Saving and Closing", "file": "getting_started/saving_and_closing.md"},
+      {"title": "Create an Index Entry", "file": "getting_started/create_an_index_entry.md"}
     ]
   },
   {

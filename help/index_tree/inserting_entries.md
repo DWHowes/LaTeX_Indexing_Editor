@@ -1,6 +1,6 @@
 # Inserting Entries
 
-New `\index` entries are created from the entry-insertion panel, not by hand-typing LaTeX. Fill in the fields, place your cursor (or select text — see below), and insert.
+New `\index` entries are created from the entry-insertion panel, not by hand-typing LaTeX. Fill in the fields, place your cursor (or select text — see below), and insert. For a walkthrough of every control in the panel, see [Create an Index Entry](../getting_started/create_an_index_entry.md).
 
 ## The fields
 
