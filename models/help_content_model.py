@@ -1,9 +1,32 @@
 import json
+import re
 from pathlib import Path
 
 from markdown_it import MarkdownIt
 
 _MD = MarkdownIt("commonmark").enable(["table", "strikethrough"])
+
+
+def _slugify_heading(text: str) -> str:
+    """GitHub-style heading slug, e.g. 'About Session Backups' -> 'about-session-backups'."""
+    slug = re.sub(r"[^\w\s-]", "", text).strip().lower()
+    return re.sub(r"\s+", "-", slug)
+
+
+def _heading_open_with_id(tokens, idx, options, env):
+    """
+    Custom heading_open render rule giving every heading an id attribute
+    derived from its own text, so an in-page link like
+    "[see below](#about-session-backups)" has something to scroll to.
+    markdown-it-py doesn't do this by default (that's normally the
+    mdit-py-plugins anchors plugin, not installed here) -- this is a
+    small enough addition to not need the extra dependency.
+    """
+    tokens[idx].attrSet("id", _slugify_heading(tokens[idx + 1].content))
+    return _MD.renderer.renderToken(tokens, idx, options, env)
+
+
+_MD.renderer.rules["heading_open"] = _heading_open_with_id
 
 
 def load_toc(help_root: Path) -> list:
