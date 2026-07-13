@@ -96,3 +96,15 @@ class HeadNoteDialog(QDialog):
     def get_head_note_text(self) -> str:
         """Helper mapping utility to slice and strip text items for storage validation pipelines."""
         return self.text_editor.toPlainText().strip()
+
+    def configure_for_edit(self, existing_text: str) -> None:
+        """
+        Switches the dialog into "edit an existing head note" mode: the
+        text box starts pre-filled with the project's current head note
+        (read from project_metadata by the caller) instead of empty, and
+        the title/button reflect that this replaces the existing note
+        rather than adding a first one.
+        """
+        self.text_editor.setPlainText(existing_text)
+        self.setWindowTitle("Edit Index Head Note")
+        self.submit_button.setText("Update Note")

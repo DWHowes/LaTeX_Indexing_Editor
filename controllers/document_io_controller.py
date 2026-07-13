@@ -426,6 +426,8 @@ class DocumentIOController(QObject):
     _PRINTINDEX_BLOCK_END = "% >>> LaTeX Indexing Editor: END generated printindex block <<<"
     _CUSTOM_COMMANDS_BLOCK_BEGIN = "% >>> LaTeX Indexing Editor: BEGIN generated custom commands (auto-managed) <<<"
     _CUSTOM_COMMANDS_BLOCK_END = "% >>> LaTeX Indexing Editor: END generated custom commands <<<"
+    _HEAD_NOTE_BLOCK_BEGIN = "% >>> LaTeX Indexing Editor: BEGIN generated head note (auto-managed) <<<"
+    _HEAD_NOTE_BLOCK_END = "% >>> LaTeX Indexing Editor: END generated head note <<<"
 
     def inject_latex_settings(self, file_path: str, preamble_body: str, printindex_body: str) -> bool:
         r"""
@@ -606,3 +608,95 @@ class DocumentIOController(QObject):
 
         commands_block = f"{self._CUSTOM_COMMANDS_BLOCK_BEGIN}\n{commands_body}\n{self._CUSTOM_COMMANDS_BLOCK_END}\n"
         return text[:begin_doc_idx] + commands_block + text[begin_doc_idx:]
+
+    def inject_head_note(self, file_path: str, head_note_body: str, printindex_command_name: str = "printindex") -> bool:
+        r"""
+        Splices head_note_body (a full \indexprologue{...} call) into
+        file_path (the project's base/root .tex file), wrapped in its own
+        pair of marker comments. Any previously-injected head note (found
+        via those markers, wherever it landed) is stripped before the new
+        one is inserted, so editing and re-saving a head note updates it
+        in place instead of accumulating duplicate \indexprologue calls.
+
+        \indexprologue only affects the *next* \printindex (or equivalent)
+        call, so it must land immediately before one -- not just anywhere
+        before \end{document} the way inject_project_commands's block can.
+        Anchor priority: the "Insert LaTeX Index Settings" printindex
+        block if present (regardless of what command name it used), else
+        a raw \<printindex_command_name> call already in the file (a user
+        who hand-wrote their own printindex call before ever using this
+        app's settings injector), else \end{document} as a last resort so
+        this never simply fails -- that last case only produces a working
+        prologue once a printindex call is added after it.
+
+        Same open-editor-vs-disk branching as inject_project_commands.
+        Returns True on success. On failure (can't find any anchor, or a
+        read/write error), emits save_error_encountered and returns False.
+        """
+        open_editor = self._find_open_editor(file_path)
+        if open_editor:
+            original_text = open_editor.document().toPlainText()
+        else:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    original_text = f.read()
+            except Exception as e:
+                self.save_error_encountered.emit("Insert Head Note Error", f"Could not read base file:\n{e}")
+                return False
+
+        new_text = self._splice_head_note_block(original_text, head_note_body, printindex_command_name)
+        if new_text is None:
+            self.save_error_encountered.emit(
+                "Insert Head Note Error",
+                "Could not locate a printindex call or \\end{document} in the base file."
+            )
+            return False
+
+        if open_editor:
+            from PySide6.QtGui import QTextCursor
+            cursor = QTextCursor(open_editor.document())
+            cursor.select(QTextCursor.SelectionType.Document)
+            cursor.insertText(new_text)
+            open_editor.document().setModified(True)
+        else:
+            self.backup_manager.register_file_for_session(file_path)
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(new_text)
+            except Exception as e:
+                self.save_error_encountered.emit("Insert Head Note Error", f"Could not write base file:\n{e}")
+                return False
+
+        self.operation_status_emitted.emit("Head note inserted into base document.")
+        return True
+
+    def _splice_head_note_block(self, text: str, head_note_body: str, printindex_command_name: str) -> "str | None":
+        r"""
+        Pure string-manipulation helper for inject_head_note(). Returns the
+        updated full document text, or None if no valid anchor point
+        (printindex block, raw printindex call, or \end{document}) exists.
+        """
+        import re
+
+        head_note_re = re.compile(
+            re.escape(self._HEAD_NOTE_BLOCK_BEGIN) + r".*?" + re.escape(self._HEAD_NOTE_BLOCK_END) + r"\n?",
+            re.DOTALL,
+        )
+
+        # Strip any previously-injected head note first (wherever it
+        # landed) so re-running this (editing and re-saving) updates it
+        # in place instead of accumulating duplicates.
+        text = head_note_re.sub("", text)
+
+        anchor_idx = text.find(self._PRINTINDEX_BLOCK_BEGIN)
+        if anchor_idx == -1:
+            raw_printindex_match = re.search(r"\\" + re.escape(printindex_command_name) + r"\b", text)
+            if raw_printindex_match:
+                anchor_idx = raw_printindex_match.start()
+        if anchor_idx == -1:
+            anchor_idx = text.rfind("\\end{document}")
+        if anchor_idx == -1:
+            return None
+
+        head_note_block = f"{self._HEAD_NOTE_BLOCK_BEGIN}\n{head_note_body}\n{self._HEAD_NOTE_BLOCK_END}\n"
+        return text[:anchor_idx] + head_note_block + text[anchor_idx:]

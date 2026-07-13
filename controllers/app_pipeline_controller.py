@@ -41,6 +41,7 @@ from views.advanced_search_window import AdvancedSearchWindow
 from views.name_inversion_dialog import NameInversionDialog
 from views.index_statistics_dialog import IndexStatisticsDialog
 from views.rtf_viewer_dialog import RtfViewerDialog
+from views.head_note_dialog import HeadNoteDialog
 
 class AppPipelineController(QObject):
     name_inversion_completed = Signal(QModelIndex, str)
@@ -223,7 +224,7 @@ class AppPipelineController(QObject):
         self.window.menu_bar.create_rtf_file_requested.connect(self._handle_create_rtf_file_request)
         self.window.menu_bar.resync_index_data_requested.connect(self._handle_manual_resync_request)
 
-        self.window.menu_bar.add_head_note_requested.connect(self.window.handle_add_head_note_dialog)
+        self.window.menu_bar.add_head_note_requested.connect(self._handle_add_head_note_dialog)
         self.window.menu_bar.create_latex_command_requested.connect(self.create_command_controller.show_create_command_dialog)
         self.window.menu_bar.manage_project_commands_requested.connect(self.project_command_controller.show_manage_commands_dialog)
         self.window.menu_bar.index_statistics_requested.connect(self._handle_index_statistics_request)
@@ -1035,6 +1036,62 @@ class AppPipelineController(QObject):
         if self.doc_io.inject_latex_settings(root_tex_file, preamble, printindex):
             self.window.status_bar.showMessage(
                 f"LaTeX index settings inserted into {os.path.basename(root_tex_file)}.", 4000
+            )
+
+    @Slot()
+    def _handle_add_head_note_dialog(self) -> None:
+        r"""
+        Head notes are project-specific: the raw text is stored in this
+        project's project_metadata (key "head_note_text"), not anywhere
+        global, and it's spliced into the project's base document as an
+        \indexprologue{...} call (see DocumentIOController.
+        inject_head_note) immediately before whatever prints the index --
+        that's the standard imakeidx mechanism for text appearing at the
+        very start of the printed index. Same guards as the sibling
+        "Insert LaTeX Index Settings"/"Insert Project Custom Commands"
+        actions: needs a project open and a base file chosen, since both
+        are required to know where the note's persistence and injection
+        target even are.
+
+        If this project already has a saved head note, the dialog opens
+        pre-filled with it for editing rather than starting blank --
+        accepting the dialog again re-injects the (possibly edited) note
+        in place of the old one rather than duplicating it, since
+        inject_head_note strips any previous head-note block by marker
+        before inserting the new one.
+        """
+        if self.scope_ctrl.active_project_name == "Untitled Project":
+            self.window.status_bar.showMessage("No project is open.", 3000)
+            return
+
+        root_tex_file = self.scope_ctrl.get_current_project_metadata_value("root_tex_file")
+        if not root_tex_file:
+            self.window.status_bar.showMessage("No base document has been selected for this project.", 3000)
+            return
+
+        persistence = self.scope_ctrl.get_persistence_model()
+        existing_note = persistence.get_metadata_value("head_note_text") if persistence else None
+
+        dialog = HeadNoteDialog(self.window)
+        if existing_note:
+            dialog.configure_for_edit(existing_note)
+
+        if dialog.exec() != HeadNoteDialog.DialogCode.Accepted:
+            return
+
+        raw_note = dialog.get_head_note_text()
+        if not raw_note:
+            return
+
+        if persistence:
+            persistence.set_metadata_value("head_note_text", raw_note)
+
+        head_note_body = f"\\indexprologue{{{raw_note}}}"
+        printindex_cmd = self._index_prefs_model.get_printindex_command_name()
+
+        if self.doc_io.inject_head_note(root_tex_file, head_note_body, printindex_cmd):
+            self.window.status_bar.showMessage(
+                f"Head note inserted into {os.path.basename(root_tex_file)}.", 4000
             )
 
     @Slot()

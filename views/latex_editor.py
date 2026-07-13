@@ -8,7 +8,6 @@ from views.main_menu_bar import MainMenuBar
 from views.main_tool_bar import MainToolBar
 from views.main_status_bar import MainStatusBar
 from views.latex_index_window import LatexIndexWindow
-from views.head_note_dialog import HeadNoteDialog
 
 class LatexEditor(QMainWindow):
     """
@@ -131,22 +130,4 @@ class LatexEditor(QMainWindow):
         if geometry:
             self.restoreGeometry(geometry)
         if state:
-            self.restoreState(state)        
-
-    @Slot()
-    def handle_add_head_note_dialog(self):
-        """Spins up the modal instance and routes confirmed string metrics down to models."""
-      
-        # Parent dialog to main application window frame safely
-        dialog = HeadNoteDialog(self.window)
-        
-        # .exec() blocks interface access, running a dedicated local event stream
-        if dialog.exec() == HeadNoteDialog.DialogCode.Accepted:
-            raw_note = dialog.get_head_note_text()
-            
-            if not raw_note:
-                return  # Skip processing if empty string
-                
-            # MVC ROUTING: Pass raw text primitives down onto your model engine here
-            print(f"[CONTROLLER ENGINE] Sending fresh head note data to model layer: {raw_note}")
-            # self.entry_modifier_model.create_head_note_entry(raw_note)
+            self.restoreState(state)

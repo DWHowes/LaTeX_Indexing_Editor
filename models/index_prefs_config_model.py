@@ -291,6 +291,16 @@ class IndexPrefsConfigModel:
         """Returns the executable name to invoke for the active engine."""
         return self._data.index_engine
 
+    def get_printindex_command_name(self) -> str:
+        """
+        Returns the bare (no backslash) printindex command name, same
+        normalization generate_printindex_snippet() applies -- used by
+        callers that need to locate an existing \\<name> call in the base
+        file rather than generate a fresh one (e.g. anchoring a head
+        note's \\indexprologue{} immediately before it).
+        """
+        return self._data.printindex_command.lstrip("\\").strip() or "printindex"
+
     def generate_preamble_snippet(self) -> str:
         r"""
         Builds the \usepackage{...}/\makeindex[...] lines implied by the
