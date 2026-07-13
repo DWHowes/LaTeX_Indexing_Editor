@@ -687,7 +687,75 @@ class FileTreePersistence:
         except sqlite3.Error as e:
             print(f"[FileTreePersistence] fetch_index_manifest error: {e}")
         return headings, references
-    
+
+    def fetch_index_statistics(self) -> dict:
+        """
+        Aggregate counts for the "Index Statistics" dialog: main/sub1/sub2
+        heading counts (project_headings.depth, 0-indexed) and total
+        reference / cross-reference counts from project_references.
+
+        Deliberately does NOT use the has_references column -- it is
+        unreliable: _handle_manual_index_insertion hardcodes it to True
+        for every live-inserted entry regardless of xref status, and the
+        disk-scan path (LatexIndexParser._build_see_reference_payload)
+        uses the opposite convention (True means "is a cross-reference"),
+        so the same column means different, contradictory things
+        depending on how an entry was created.
+
+        Also deliberately does NOT use see_references/seealso_references
+        -- those are populated by LatexIndexParser._extract_see_modifiers,
+        which only matches a backslash-prefixed \\see{...}/\\seealso{...}
+        occurring inside the index term itself, not the standard
+        imakeidx pipe-modifier cross-reference syntax actually used in
+        real projects (\\index{term|see{Target}} /
+        \\index{term|seealso{Target}}, no backslash -- LaTeX prepends one
+        internally when expanding the pipe). That standard syntax is
+        captured correctly by both entry-creation paths, but into the
+        encap column instead: LatexIndexParser via
+        _strip_global_encap_safe, and IndexEntryModel.metadata() via
+        `encap = f"{xref_type}{{{xref_target}}}"` for a live-inserted
+        xref entry -- so encap LIKE 'see{%' / 'seealso{%' is the one
+        signal both paths agree on. Range closers are excluded from both
+        counts -- they're the second half of one logical range entry,
+        not an independent reference; the range's opener already
+        accounts for it.
+        """
+        stats = {
+            "main_headings": 0,
+            "sub1_headings": 0,
+            "sub2_headings": 0,
+            "total_references": 0,
+            "total_cross_references": 0,
+        }
+        if not self.db_path:
+            return stats
+
+        is_cross_reference_sql = "(encap LIKE 'see{%' OR encap LIKE 'seealso{%')"
+
+        try:
+            with self._get_connection() as conn:
+                for depth, key in ((0, "main_headings"), (1, "sub1_headings"), (2, "sub2_headings")):
+                    row = conn.execute(
+                        "SELECT COUNT(*) AS c FROM project_headings WHERE depth = ?", (depth,)
+                    ).fetchone()
+                    stats[key] = row["c"] if row else 0
+
+                row = conn.execute(
+                    "SELECT COUNT(*) AS c FROM project_references "
+                    f"WHERE is_range_closer = 0 AND NOT {is_cross_reference_sql}"
+                ).fetchone()
+                stats["total_references"] = row["c"] if row else 0
+
+                row = conn.execute(
+                    "SELECT COUNT(*) AS c FROM project_references "
+                    f"WHERE is_range_closer = 0 AND {is_cross_reference_sql}"
+                ).fetchone()
+                stats["total_cross_references"] = row["c"] if row else 0
+        except sqlite3.Error as e:
+            print(f"[DB ERROR] fetch_index_statistics failed: {e}")
+
+        return stats
+
     def reset_to_default_state(self) -> None:
         """
         Public Model Contract.

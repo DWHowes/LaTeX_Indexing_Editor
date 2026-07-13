@@ -37,6 +37,7 @@ from views.index_tree_view import IndexTreeView
 from views.project_sidebar_view import ProjectSidebarView
 from views.advanced_search_window import AdvancedSearchWindow
 from views.name_inversion_dialog import NameInversionDialog
+from views.index_statistics_dialog import IndexStatisticsDialog
 from views.rtf_viewer_dialog import RtfViewerDialog
 
 class AppPipelineController(QObject):
@@ -214,6 +215,7 @@ class AppPipelineController(QObject):
         self.window.menu_bar.add_head_note_requested.connect(self.window.handle_add_head_note_dialog)
         self.window.menu_bar.create_latex_command_requested.connect(self.create_command_controller.show_create_command_dialog)
         self.window.menu_bar.manage_project_commands_requested.connect(self.project_command_controller.show_manage_commands_dialog)
+        self.window.menu_bar.index_statistics_requested.connect(self._handle_index_statistics_request)
         self.project_command_controller.commands_changed.connect(self._refresh_index_command_options)
 
         # Structural Layout Hotkey Configurations
@@ -912,6 +914,18 @@ class AppPipelineController(QObject):
             return
         self._resync_index_data_from_disk()
         self.window.status_bar.showMessage("Index data resynced from disk.", 3000)
+
+    @Slot()
+    def _handle_index_statistics_request(self) -> None:
+        persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+        if persistence is None:
+            return
+
+        stats = persistence.fetch_index_statistics()
+        dialog = IndexStatisticsDialog(self.window)
+        dialog.set_statistics(stats)
+        dialog.apply_theme_configuration(bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode")))
+        dialog.exec()
 
     def _resync_index_data_from_disk(self) -> None:
         """
