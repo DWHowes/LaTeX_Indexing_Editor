@@ -49,5 +49,21 @@
       {"title": "Name Inversion", "file": "additional/name_inversion.md"}
     ]
   },
-  {"title": "Preferences", "file": "preferences.md"}
+  {
+    "title": "Preferences",
+    "file": "preferences.md",
+    "children": [
+      {
+        "title": "LaTeX Settings",
+        "children": [
+          {"title": "pdflatex", "file": "preferences/latex_settings/pdflatex.md"},
+          {"title": "imakeidx Package", "file": "preferences/latex_settings/imakeidx.md"},
+          {"title": "idxlayout Package", "file": "preferences/latex_settings/idxlayout.md"},
+          {"title": "hyperref Package", "file": "preferences/latex_settings/hyperref.md"},
+          {"title": "Index Engine (makeindex / xindy)", "file": "preferences/latex_settings/index_engine.md"},
+          {"title": "printindex Command", "file": "preferences/latex_settings/printindex.md"}
+        ]
+      }
+    ]
+  }
 ]
