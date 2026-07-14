@@ -34,5 +34,6 @@ You generally don't need to touch this file yourself. If your `.tex` files are e
 
 ## See also
 
+- [The Base File](../getting_started/base_file.md)
 - [Saving and Closing](../getting_started/saving_and_closing.md)
 - [Resyncing Index Data from Disk](../tools/resync.md)

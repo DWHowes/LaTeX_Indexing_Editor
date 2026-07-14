@@ -4,13 +4,13 @@ A **head note** is text that appears at the very start of the printed index, bef
 
 ## Requirements
 
-Like [RTF Export](../additional/rtf_export.md) and inserting LaTeX settings, this needs a project open with a base document chosen, since the note has to be saved against a specific project and written into that project's document. If either isn't true yet, you'll get a status-bar message telling you what's missing instead of the dialog opening.
+Like [RTF Export](../additional/rtf_export.md) and inserting LaTeX settings, this needs a project open with a [base document](../getting_started/base_file.md) chosen, since the note has to be saved against a specific project and written into that project's document. If either isn't true yet, you'll get a status-bar message telling you what's missing instead of the dialog opening.
 
 ## Writing and saving a note
 
 Type the note's text — full LaTeX formatting is fine, exactly as it should appear (the placeholder text shows a typical example). Click **Add Note** to save it.
 
-Saving does two things: the note text is stored with the project (so it persists in the project's own database, independent of any other project), and it's written into the project's base document as an `\indexprologue{...}` call — the standard mechanism for prologue text in front of a printed index — positioned immediately before wherever the index actually gets printed.
+Saving does two things: the note text is stored with the project (so it persists in the project's own database, independent of any other project), and it's written into the project's [base document](../getting_started/base_file.md) as an `\indexprologue{...}` call — the standard mechanism for prologue text in front of a printed index — positioned immediately before wherever the index actually gets printed.
 
 ## Editing an existing note
 
@@ -18,5 +18,6 @@ If the project already has a head note, choosing **Create Head Note...** again o
 
 ## See also
 
+- [The Base File](../getting_started/base_file.md)
 - [Preferences](../preferences.md)
 - [RTF Export](../additional/rtf_export.md)

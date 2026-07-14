@@ -15,7 +15,7 @@ Configuration for compiling the document and generating the index — needed for
 - [Index Engine (makeindex / xindy)](preferences/latex_settings/index_engine.md) — which engine sorts and formats the index, its own options, and the formatting rules shared by both engines.
 - [printindex Command](preferences/latex_settings/printindex.md) — the command that prints the compiled index.
 
-Changing any of these only updates what the editor has stored — it doesn't touch any `.tex` file by itself. Run **Edit → Insert LaTeX Index Settings...** afterward to actually splice the corresponding preamble text into your document (that action is only available once a project is open with a base/root file chosen).
+Changing any of these only updates what the editor has stored — it doesn't touch any `.tex` file by itself. Run **Edit → Insert LaTeX Index Settings...** afterward to actually splice the corresponding preamble text into your document (that action is only available once a project is open with a [base/root file](getting_started/base_file.md) chosen).
 
 ## UI Themes
 
@@ -33,4 +33,5 @@ LaTeX/indexing settings and theme colours can be different per project: the firs
 
 ## See also
 
+- [The Base File](getting_started/base_file.md)
 - [RTF Export](additional/rtf_export.md)
