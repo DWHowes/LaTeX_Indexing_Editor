@@ -56,7 +56,7 @@
       {
         "title": "LaTeX Settings",
         "children": [
-          {"title": "pdflatex", "file": "preferences/latex_settings/pdflatex.md"},
+          {"title": "LaTeX Compiler", "file": "preferences/latex_settings/latex_compiler.md"},
           {"title": "imakeidx Package", "file": "preferences/latex_settings/imakeidx.md"},
           {"title": "idxlayout Package", "file": "preferences/latex_settings/idxlayout.md"},
           {"title": "hyperref Package", "file": "preferences/latex_settings/hyperref.md"},

@@ -46,7 +46,7 @@ class IndexPrefsConfigDialog(QDialog):
         pdflatex_row_layout.addWidget(self.btn_pdflatex_browse)
 
         form_pdflatex = QFormLayout()
-        form_pdflatex.addRow("pdflatex:", pdflatex_row)
+        form_pdflatex.addRow("compiler:", pdflatex_row)
         lay_pdflatex.addLayout(form_pdflatex)
         lay_pdflatex.addStretch()
 
@@ -174,7 +174,7 @@ class IndexPrefsConfigDialog(QDialog):
         lay_printindex.addRow(self.chk_printindex_multi)
         
         # Mount all sub-tabs to nested horizontal framework container
-        self.horizontal_latex_tabs.addTab(self.tab_pdflatex, "pdflatex")
+        self.horizontal_latex_tabs.addTab(self.tab_pdflatex, "LaTeX Compiler")
         self.horizontal_latex_tabs.addTab(self.tab_imakeidx, "pkg: imakeidx")
         self.horizontal_latex_tabs.addTab(self.tab_idxlayout, "pkg: idxlayout")
         self.horizontal_latex_tabs.addTab(self.tab_hyperref, "pkg: hyperref")
@@ -255,18 +255,17 @@ class IndexPrefsConfigDialog(QDialog):
 
     def _choose_pdflatex_loc(self) -> None:
         file_name = QFileDialog.getOpenFileName(self,
-                                                "Select pdflatex executable",
+                                                "Select LaTeX executable",
                                                 "",
-                                                "Executable Files (pdflatex.exe)")
+                                                "pdflatex (pdflatex.exe);;XeLaTeX (xelatex.exe);;LuaLaTeX (lualatex.exe);;Executable Files (*.exe)")
         if file_name[0]:
             self.txt_pdflatex_path.setText(file_name[0])
 
     def _choose_index_binary_loc(self) -> None:
-        default_name = "makeindex.exe" if self.cmb_index_engine.currentText() == "makeindex" else "xindy.exe"
         file_name = QFileDialog.getOpenFileName(self,
                                                 "Select Index Constructor (makeindex or xindy)",
-                                                default_name,
-                                                "Executable Files (*.exe)")
+                                                "",
+                                                "makeindex (makeindex.exe);;xindy (xindy.exe);;Executable Files (*.exe)")
         if file_name[0]:
             self.txt_index_binary_path.setText(file_name[0])
 

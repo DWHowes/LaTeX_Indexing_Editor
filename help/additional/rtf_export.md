@@ -4,9 +4,9 @@
 
 ## What it does
 
-This runs your actual LaTeX toolchain, not just a re-formatting of the editor's own database: it runs `pdflatex` once to regenerate the raw index data, then runs your configured index engine (`makeindex` or `xindy`) against it, then converts the result to RTF. That means it exports the **entire compiled index for the project's root document** — exactly what your indexing engine would actually produce — not just whatever's currently visible in the tree or table.
+This runs your actual LaTeX toolchain, not just a re-formatting of the editor's own database: it runs your configured LaTeX compiler once to regenerate the raw index data, then runs your configured index engine (`makeindex` or `xindy`) against it, then converts the result to RTF. That means it exports the **entire compiled index for the project's root document** — exactly what your indexing engine would actually produce — not just whatever's currently visible in the tree or table.
 
-Before it can run, **Edit → LaTeX Settings** in [Preferences](../preferences.md) needs a valid `pdflatex` path and a valid path to your chosen index engine; you'll get a clear warning listing what's missing if either isn't set up.
+Before it can run, **Edit → LaTeX Settings** in [Preferences](../preferences.md) needs a valid LaTeX compiler path and a valid path to your chosen index engine; you'll get a clear warning listing what's missing if either isn't set up.
 
 ## Where the file goes
 

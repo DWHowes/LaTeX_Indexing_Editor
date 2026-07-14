@@ -8,7 +8,7 @@ Font family/size and the dark/light mode toggle are **not** in this dialog — t
 
 Configuration for compiling the document and generating the index — needed for [RTF Export](additional/rtf_export.md), and written into your document's preamble via **Edit → Insert LaTeX Index Settings...** when you're ready to use it. This is by far the busiest part of Preferences, laid out across six horizontal tabs — each one is covered in its own topic, with every individual setting explained:
 
-- [pdflatex](preferences/latex_settings/pdflatex.md) — where to find the `pdflatex` executable.
+- [LaTeX Compiler](preferences/latex_settings/latex_compiler.md) — where to find your LaTeX compiler executable (pdflatex, XeLaTeX, or LuaLaTeX).
 - [imakeidx Package](preferences/latex_settings/imakeidx.md) — the package that builds the index itself.
 - [idxlayout Package](preferences/latex_settings/idxlayout.md) — column layout options.
 - [hyperref Package](preferences/latex_settings/hyperref.md) — clickable page-number links.

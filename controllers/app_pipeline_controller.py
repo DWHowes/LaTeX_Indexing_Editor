@@ -1143,7 +1143,12 @@ class AppPipelineController(QObject):
 
         missing = []
         if not pdflatex_path or not os.path.isfile(pdflatex_path):
-            missing.append("pdflatex")
+            compiler_basename = os.path.basename(pdflatex_path).lower()
+            compiler_name = next(
+                (name for name in ("pdflatex", "xelatex", "lualatex") if name in compiler_basename),
+                "LaTeX compiler",
+            )
+            missing.append(compiler_name)
         if not index_binary_path or not os.path.isfile(index_binary_path):
             missing.append(index_engine)
         if missing:
