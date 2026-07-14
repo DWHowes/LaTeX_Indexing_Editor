@@ -6,7 +6,7 @@ from typing import Optional, Callable
 from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QObject, Slot, QModelIndex, Qt, Signal
-from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplication
+from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplication, QProgressDialog
 from shiboken6 import isValid
 
 from models.latex_entry_model import ReferenceCarrier
@@ -24,7 +24,7 @@ from models.name_inverter import NameInverter
 from controllers.index_tree_controller import IndexTreeController
 from controllers.context_menu_subsystem import FileTreeContextMenuManager, IndexTreeContextMenuManager, EditEntryContextMenuManager
 from controllers.index_prefs_config_controller import IndexPrefsConfigController
-from controllers.rtf_export_controller import IndexExportController
+from controllers.rtf_export_controller import RtfExportThread
 from controllers.latex_command_controller import CreateCommandController
 from controllers.project_command_manager_controller import ProjectCommandManagerController
 from controllers.theme_config_controller import ThemeConfigController
@@ -1127,6 +1127,10 @@ class AppPipelineController(QObject):
         project's base document, then optionally launches the read-only
         RTF viewer per the rtf_display_on_creation preference.
         """
+        if getattr(self, "_rtf_export_thread", None) is not None and self._rtf_export_thread.isRunning():
+            self.window.status_bar.showMessage("An RTF export is already in progress.", 3000)
+            return
+
         if self.scope_ctrl.active_project_name == "Untitled Project":
             self.window.status_bar.showMessage("No project is open.", 3000)
             return
@@ -1179,13 +1183,32 @@ class AppPipelineController(QObject):
             output_directory=output_directory,
         )
 
-        self.window.status_bar.set_status_text("Exporting RTF index…")
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            output_filename = f"{self.scope_ctrl.active_project_name}_index.rtf"
-            success, message, output_path = IndexExportController(metadata).export_project_to_rtf(output_filename)
-        finally:
-            QApplication.restoreOverrideCursor()
+        output_filename = f"{self.scope_ctrl.active_project_name}_index.rtf"
+
+        # Indeterminate (busy) progress -- there's no reliable way to turn
+        # pdflatex/makeindex progress into a real percentage, so this just
+        # keeps the user informed of which pipeline stage is running instead
+        # of freezing with no feedback for however long compilation takes.
+        progress = QProgressDialog("Compiling document…", None, 0, 0, self.window)
+        progress.setWindowTitle("Exporting RTF Index")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setCancelButton(None)
+        progress.show()
+
+        self._rtf_export_thread = RtfExportThread(metadata, output_filename, parent=self.window)
+        self._rtf_export_thread.status_updated.connect(progress.setLabelText)
+        self._rtf_export_thread.finished.connect(
+            lambda success, message, output_path: self._handle_rtf_export_finished(
+                success, message, output_path, progress, prefs
+            )
+        )
+        self._rtf_export_thread.start()
+
+    def _handle_rtf_export_finished(
+        self, success: bool, message: str, output_path: str, progress: QProgressDialog, prefs: dict
+    ) -> None:
+        progress.close()
 
         if not success:
             self.window.status_bar.showMessage("RTF export failed.", 4000)
@@ -1194,7 +1217,7 @@ class AppPipelineController(QObject):
 
         self.window.status_bar.showMessage(message, 5000)
 
-        if prefs.get("rtf_display_on_creation", False) and output_path is not None:
+        if prefs.get("rtf_display_on_creation", False) and output_path:
             self._rtf_viewer_dialog = RtfViewerDialog(output_path, parent=self.window)
             is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
             self._rtf_viewer_dialog.apply_theme_configuration(is_dark)

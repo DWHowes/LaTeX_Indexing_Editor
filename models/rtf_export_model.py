@@ -1,6 +1,20 @@
+import os
+import re
 import subprocess
+import unicodedata
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
+
+# Matches a leading LaTeX formatting wrapper (e.g. \textit{, \textbf{) so
+# alphabetization can look past it -- see _first_sort_char below.
+_LEADING_MACRO_RE = re.compile(r"^\\[A-Za-z]+\{")
+
+# Matches the page-shipout markers pdflatex/xelatex/lualatex write to their
+# terminal output as each page ships out (e.g. "[1] [2] [3]") -- deliberately
+# doesn't require an immediate closing "]", since the compiler sometimes
+# embeds extra text before it on a page's first appearance (e.g.
+# "[1{.../pdftex.map}]" when a font map loads for the first time).
+_PAGE_MARKER_RE = re.compile(r"\[(\d+)")
 
 
 class RtfExportMetadata:
@@ -39,7 +53,7 @@ class RtfExportEngine:
     def __init__(self, metadata: RtfExportMetadata):
         self.meta = metadata
 
-    def compile_to_aux(self) -> bool:
+    def compile_to_aux(self, progress_callback: Optional[Callable[[str], None]] = None) -> bool:
         """
         Runs a single pdflatex pass in draft mode to (re)generate the .aux
         file. -draftmode suppresses PDF output entirely (only auxiliary
@@ -50,13 +64,24 @@ class RtfExportEngine:
 
         -interaction=nonstopmode keeps pdflatex from blocking on stdin
         when it hits a recoverable error, which it otherwise would since
-        stdout/stderr are discarded below.
+        stdout is read incrementally below rather than left connected to
+        a real terminal.
 
         pdflatex exits 0 even for many non-fatal LaTeX errors (undefined
         references, missing packages, etc.), so this return value is only
         an early-out for hard failures (bad executable path and the like)
         -- callers must still verify the .aux/.ind actually materialized
         rather than trusting this alone.
+
+        If progress_callback is given, it's invoked with a live
+        "Compiling document… (page N)" label as pages ship out --
+        confirmed empirically that pdflatex/xelatex/lualatex all flush
+        their "[1] [2] [3]..." page markers to stdout as they're produced,
+        even when stdout is a pipe rather than a real terminal, so this
+        tracks genuine progress rather than a single static label for
+        however long the whole pass takes. There's no way to know the
+        total page count in advance, so this can only ever report "page
+        N", never "N of M".
         """
         try:
             # pdflatex won't create -output-directory itself -- it fails
@@ -79,13 +104,39 @@ class RtfExportEngine:
                 f"-output-directory={self.meta.build_dir}",
                 str(self.meta.root_tex_file),
             ]
-            result = subprocess.run(
+            process = subprocess.Popen(
                 cmd,
                 cwd=self.meta.project_root,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
             )
-            return result.returncode == 0
+
+            # Read raw bytes as they arrive rather than by line -- with
+            # imakeidx/\index writes interleaved, the compiler can go long
+            # stretches with several "[N]" markers on one physical line and
+            # no newline at all, so waiting on readline() bunches many pages
+            # into a single late update instead of tracking them as they
+            # actually ship out.
+            max_page = 0
+            tail = ""
+            while True:
+                chunk = os.read(process.stdout.fileno(), 4096)
+                if not chunk:
+                    break
+                if not progress_callback:
+                    continue
+                text = tail + chunk.decode("utf-8", errors="replace")
+                for match in _PAGE_MARKER_RE.finditer(text):
+                    seen = int(match.group(1))
+                    if seen > max_page:
+                        max_page = seen
+                        progress_callback(f"Compiling document… (page {max_page})")
+                # Keep a small overlap in case a marker's digits straddle
+                # the boundary between two reads.
+                tail = text[-16:]
+
+            process.wait()
+            return process.returncode == 0
         except OSError:
             return False
 
@@ -184,6 +235,37 @@ class RtfExportEngine:
         (r"\item", 0),
     )
 
+    @staticmethod
+    def _first_sort_char(entry: str) -> str:
+        """
+        Returns the character alphabetical grouping should key off of --
+        skipping past any leading LaTeX formatting wrapper (e.g. an
+        \\index{sortkey@\\textit{Displayed Title}} entry, whose .ind text
+        starts with \\textit{, not the actual title) so a heading rendered
+        in italics/bold doesn't get sorted under a bogus "\\" bucket.
+
+        An accented letter is normalized to its base Latin form (e.g. "É"
+        -> "E") so it groups under that letter's existing section instead
+        of getting its own -- standard indexing convention (an "École"
+        entry belongs under "E" alongside "Economy", not off in its own
+        "É" section), and it also sidesteps plain code-point sorting
+        placing accented sections in the wrong place entirely (Python's
+        default string sort puts "É" after "Z", not near "E").
+        """
+        text = entry
+        while True:
+            match = _LEADING_MACRO_RE.match(text)
+            if not match:
+                break
+            text = text[match.end():]
+        if not text:
+            return "#"
+
+        first = text[0].upper()
+        decomposed = unicodedata.normalize("NFKD", first)
+        base = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+        return base[0] if base else first
+
     def parse_ind(self, ind_path: Path) -> Dict[str, List[Tuple[int, str]]]:
         """
         Parses raw LaTeX .ind entries into a clean structural dictionary.
@@ -214,7 +296,7 @@ class RtfExportEngine:
                     if line.startswith(macro):
                         clean_entry = line[len(macro):].strip()
                         if depth == 0:
-                            first_char = clean_entry[0].upper() if clean_entry else "#"
+                            first_char = self._first_sort_char(clean_entry)
                             if first_char != current_letter or current_letter not in parsed_data:
                                 current_letter = first_char
                                 parsed_data.setdefault(current_letter, [])

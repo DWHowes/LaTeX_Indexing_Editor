@@ -8,18 +8,19 @@ This runs your actual LaTeX toolchain, not just a re-formatting of the editor's 
 
 Before it can run, **Edit → LaTeX Settings** in [Preferences](../preferences.md) needs a valid LaTeX compiler path and a valid path to your chosen index engine; you'll get a clear warning listing what's missing if either isn't set up.
 
+Compiling can take a while on a large document. A progress dialog tracks which stage is running (compiling, building the index, parsing the result, writing the RTF) so the application doesn't appear to freeze. During the compile stage specifically, the label updates with the page number currently being typeset — there's still no way to show a real percentage, since the total page count isn't known until the compile finishes, but a live page count is a better signal than a static label for however long that stage takes.
+
 ## Where the file goes
 
 The exported file is named `<ProjectName>_index.rtf` and written straight into the project's root folder — there's no save-as dialog, and no overwrite confirmation if a file by that name is already there from a previous export.
 
 ## Formatting
 
-The RTF is deliberately plain: a single font at body size, bold section headings for each letter of the alphabet (A, B, C...), and entries indented to show nesting (sub-entries indented further than their parent heading). Page numbers appear exactly as your index engine wrote them.
+The RTF is deliberately plain: a single font at body size, bold section headings for each letter of the alphabet (A, B, C...), and entries indented to show nesting (sub-entries indented further than their parent heading). Bold and italic page-number styling (an `\index{term|textbf}`-style override) carries through as real RTF bold/italic, `see`/`see also` cross-references are written out as plain "see Target" / "see also Target" text, and accented or other non-ASCII characters (é, ç, ü, and so on) are preserved via RTF's own Unicode escape mechanism rather than being mangled.
 
-Two limitations worth knowing about before you rely on this for a final deliverable:
+One limitation worth knowing about before you rely on this for a final deliverable:
 
-- **Bold or italic page-number styling isn't preserved.** If your index uses a page-style override to bold or italicize certain page numbers, that formatting doesn't carry through to the RTF — the underlying styling markup passes through as plain text rather than becoming real RTF bold/italic.
-- **Non-ASCII characters may not survive.** Accented letters and other non-ASCII text can come out mangled in the export.
+- **Custom project-specific page-style commands only show the page number.** A command defined through [Managing Project Commands](../custom_commands/managing.md) that wraps a page reference in something other than the built-in bold/italic/see/see-also styles isn't understood generically — whatever extra text or arguments it carries are dropped, and only the actual page number is shown.
 
 ## Previewing
 

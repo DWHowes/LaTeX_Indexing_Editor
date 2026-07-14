@@ -21,6 +21,68 @@ def _render_rtf_special_chars(text: str) -> str:
     return text.replace(r"\endash ", "–").replace(r"\endash", "–")
 
 
+_INLINE_STYLE_RE = re.compile(r"\{\\(b|i) ")
+
+# Matches RtfExportView._escape_non_ascii_to_rtf's \uN? control words (N =
+# a signed 16-bit UTF-16 code unit, always followed by exactly one ASCII
+# fallback character here, per the header's \uc1 declaration).
+_UNICODE_ESCAPE_RE = re.compile(r"\\u(-?\d+)\?")
+
+
+def _decode_unicode_escape(value: int) -> str:
+    if value < 0:
+        value += 65536
+    return chr(value)
+
+
+def _convert_rtf_inline_styles_to_html(text: str) -> str:
+    """
+    Converts the inline {\\b ...}/{\\i ...} groups RtfExportView.render()
+    emits for page-style overrides and cross-reference phrases (e.g.
+    "{\\b 224}", "{\\i see also }Target") into real <b>/<i> tags, and
+    \\uN? escapes back into the actual accented/non-Latin characters they
+    represent, escaping everything else as plain text. Without this, those
+    groups' literal braces/control words and the raw \\uN? escape syntax
+    showed up as visible text in the preview.
+
+    Astral characters (encoded as a \\uN?\\uN? surrogate pair) aren't
+    recombined here -- vanishingly unlikely in a book index, and each half
+    still renders as SOMETHING rather than corrupting the surrounding text.
+    """
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        match = _INLINE_STYLE_RE.match(text, i)
+        if match:
+            tag = match.group(1)
+            depth = 1
+            j = match.end()
+            start = j
+            while j < n and depth > 0:
+                if text[j] == "{":
+                    depth += 1
+                elif text[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            inner = text[start:j]
+            out.append(f"<{tag}>{_convert_rtf_inline_styles_to_html(inner)}</{tag}>")
+            i = j + 1
+            continue
+
+        uni_match = _UNICODE_ESCAPE_RE.match(text, i)
+        if uni_match:
+            out.append(_escape_html(_decode_unicode_escape(int(uni_match.group(1)))))
+            i = uni_match.end()
+            continue
+
+        out.append(_escape_html(text[i]))
+        i += 1
+    return "".join(out)
+
+
 def rtf_subset_to_html(raw_rtf: str) -> str:
     """
     Renders the specific, narrow RTF subset RtfExportView.render() emits
@@ -44,7 +106,7 @@ def rtf_subset_to_html(raw_rtf: str) -> str:
         if line.startswith(r"\b\fs32"):
             content = line[len(r"\b\fs32"):].replace(r"\b0\fs24", "").strip()
             html_parts.append(
-                f"<p style='font-weight:bold; font-size:15pt; margin:14px 0 4px 0;'>{_escape_html(content)}</p>"
+                f"<p style='font-weight:bold; font-size:15pt; margin:14px 0 4px 0;'>{_convert_rtf_inline_styles_to_html(content)}</p>"
             )
             continue
 
@@ -57,7 +119,7 @@ def rtf_subset_to_html(raw_rtf: str) -> str:
 
         indent_px = depth * 20
         content = _render_rtf_special_chars(line)
-        html_parts.append(f"<p style='margin:2px 0 2px {indent_px}px;'>{_escape_html(content)}</p>")
+        html_parts.append(f"<p style='margin:2px 0 2px {indent_px}px;'>{_convert_rtf_inline_styles_to_html(content)}</p>")
 
     return "<html><body>" + "".join(html_parts) + "</body></html>"
 
