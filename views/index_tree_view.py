@@ -79,8 +79,8 @@ class IndexTreeView(QTreeView):
     UserRoles, and direct SQLite serialization loops.
     """
     locationRequested = Signal(str, int, int)
-    # path, line, col, fallback_label, absolute_position, absolute_end, macro_command
-    coordinate_navigation_requested = Signal(str, int, int, str, object, object, str)
+    # path, line, col, fallback_label, absolute_position, absolute_end, macro_command, unique_id_number
+    coordinate_navigation_requested = Signal(str, int, int, str, object, object, str, object)
 
     def __init__(self, model_engine, parent=None):
         super().__init__(parent)
@@ -164,11 +164,28 @@ class IndexTreeView(QTreeView):
         absolute_end = record_payload.get("absolute_end")
         macro_command = str(record_payload.get("macro_command") or "index")
 
+        # unique_id_number lets the controller re-resolve this entry's
+        # CURRENT coordinates from the live EntryModifierModel cache instead
+        # of trusting the values above, which are a snapshot copied into
+        # this node's UserRole+1 payload back when the tree was populated
+        # (see _populate_row_metadata) and never refreshed afterward. A
+        # tree-side rename (IndexEditController._rewrite_single_reference)
+        # updates EntryModifierModel's coordinates and shifts every entry
+        # after it in the same file, but has no way to reach back into
+        # every tree node's own cached payload to keep it in sync -- so
+        # this snapshot silently goes stale the moment any rename touches
+        # this entry or shifts it. Passing the uid through lets the
+        # controller layer (which owns the live model) resolve the correct
+        # position at click-time rather than the view carrying coordinates
+        # as if they were immutable.
+        unique_id_number = record_payload.get("unique_id_number")
+
         if file_path:
             # Emit type-safe parameters across the architectural boundary
             self.coordinate_navigation_requested.emit(
                 file_path, line_num, column_num, match_text,
                 absolute_position, absolute_end, macro_command,
+                unique_id_number,
             )
 
     def _process_embedded_metrics_click(self, index):
@@ -205,20 +222,39 @@ class IndexTreeView(QTreeView):
         if target_dict:
             self._unpack_delegate_payload(target_dict)
 
-    def append_entry(self, parts_list: list, refs: list) -> None:
+    def append_entry(self, parts_list: list, refs: list, suppress_transaction: bool = False) -> None:
         """
         Public incremental-append contract.
         Inserts a single new index entry into the existing tree without
         rebuilding/clearing the rest of the model. Re-sorts and re-expands
         afterward so the new node is visible in its correct alphabetical slot.
+
+        suppress_transaction: pass True when refs are being RE-attached to
+        a node (e.g. IndexEditController._reconcile_heading_node moving an
+        existing, already-persisted entry to a different heading node
+        after a rename or a discard revert) rather than genuinely inserted
+        for the first time. Without this, _populate_row_metadata's call to
+        engine.compile_transaction_record (gated only on
+        self._suppress_transaction_compilation, which is only ever True
+        during a full populate_hierarchy_tree reload) would stage the
+        already-existing entry into engine._staged_db_entries as if it
+        were a brand-new \\index insertion pending its first DB write --
+        left permanently uncommitted for reconciliations that don't run
+        through the new-entry insertion pipeline, so has_unsaved_changes()
+        (and therefore the exit save-prompt) stayed True forever after,
+        even once every real edit had been either saved or discarded.
         """
         if not parts_list:
             return
 
         self.setSortingEnabled(False)
+        previous_suppress = self._suppress_transaction_compilation
+        if suppress_transaction:
+            self._suppress_transaction_compilation = True
         try:
             self._insert_visual_node(self.base_model.invisibleRootItem(), parts_list, refs)
         finally:
+            self._suppress_transaction_compilation = previous_suppress
             self.setSortingEnabled(True)
             self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
             self.expandAll()

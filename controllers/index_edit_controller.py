@@ -175,6 +175,11 @@ class IndexEditController(QObject):
         except RuntimeError:
             return
 
+        # Captured before ToolTipRole is updated below (item's ToolTipRole
+        # still holds the pre-rename token at this point) -- needed to patch
+        # _active_headings afterward. See _update_active_headings_prefix's
+        # docstring for why that patch is necessary.
+        old_path_parts = self._collect_node_path(item)
 
         # Collect all references under this node (column 1 sibling, UserRole+1)
         affected_refs = self._collect_refs_from_node(item)
@@ -243,7 +248,49 @@ class IndexEditController(QObject):
         if hasattr(item, 'sort_key'):
             item.sort_key = item._compute_clean_sort_key(new_raw_token)
 
+        new_path_parts = old_path_parts[:-1] + [new_raw_token] if old_path_parts else [new_raw_token]
+        self._update_active_headings_prefix(self._tree.engine, old_path_parts, new_path_parts)
+
         self.heading_renamed.emit(old_raw_token, new_raw_token)
+
+    def _update_active_headings_prefix(
+        self, engine, old_path_parts: list[str], new_path_parts: list[str]
+    ) -> None:
+        r"""
+        Rewrites heading_text/name in engine._active_headings for the
+        renamed node itself and every descendant heading, replacing the
+        old path prefix (root..renamed node) with the new one.
+
+        _process_heading_rename only ever changes the tree QStandardItem's
+        own text/ToolTipRole and each reference's cached heading_raw_text
+        -- unlike the table-edit path (_reconcile_heading_node), it never
+        touched _active_headings, so a heading's registry entry (the
+        source _find_heading_id_by_text/_create_heading_in_engine consult
+        for every id lookup, including the orphan check that runs when a
+        tab is discarded) permanently disagreed with the tree's actual
+        displayed text after any tree-side rename. That gap is what let a
+        discard-triggered detach from the renamed node's heading always
+        fail to find its heading_id (no _active_headings entry existed
+        under the new text), so the now-empty node was never recognized as
+        orphaned and never pruned -- it just sat there as a dead node with
+        no children.
+        """
+        if not old_path_parts:
+            return
+        old_prefix_norm = [p.strip().lower() for p in old_path_parts]
+        depth = len(old_prefix_norm)
+
+        for head in engine._active_headings:
+            heading_text = head.get("heading_text") or head.get("name") or ""
+            parts = [p.strip() for p in heading_text.split("!") if p.strip()]
+            if len(parts) < depth:
+                continue
+            if [p.lower() for p in parts[:depth]] != old_prefix_norm:
+                continue
+            new_parts = list(new_path_parts) + parts[depth:]
+            new_heading_text = "!".join(new_parts)
+            head["heading_text"] = new_heading_text
+            head["name"] = new_heading_text
 
     # ------------------------------------------------------------------
     # Reference collection
@@ -864,9 +911,14 @@ class IndexEditController(QObject):
 
             # Closers are never shown in the tree (see
             # _handle_manual_index_insertion) — reattaching one here would
-            # spuriously make it appear for the first time.
-            if not is_closer and old_heading and db_heading and old_heading != db_heading:
-                self._reconcile_heading_node(entry_id, old_heading, db_heading)
+            # spuriously make it appear for the first time. Their
+            # heading_id still needs to track the reverted heading though
+            # (see _reassign_closer_heading_id's docstring for why).
+            if old_heading and db_heading and old_heading != db_heading:
+                if is_closer:
+                    self._reassign_closer_heading_id(entry_id, old_heading, db_heading)
+                else:
+                    self._reconcile_heading_node(entry_id, old_heading, db_heading)
 
             self.entry_reverted.emit(entry_id, db_heading)
 
@@ -974,13 +1026,64 @@ class IndexEditController(QObject):
         # freshly created node is immediately visible in place.
         parts = [p.strip() for p in new_heading_clean.split("!") if p.strip()]
         if parts and record:
-            self._tree.append_entry(parts, [record])
+            # suppress_transaction=True: record already exists (it's being
+            # re-attached after a rename or a discard revert, not inserted
+            # for the first time) -- see append_entry's docstring for why
+            # this must not stage a duplicate "new entry" DB transaction.
+            self._tree.append_entry(parts, [record], suppress_transaction=True)
 
         # Update the reference record's heading_id in the model cache
         if record:
             record["heading_id"] = new_heading_id
 
         # --- Check whether old heading is now orphaned ---
+        old_heading_id = self._find_heading_id_by_text(engine, old_heading_clean)
+        if old_heading_id is not None:
+            remaining = [
+                r for r in self._entry_model._records.values()
+                if r.get("heading_id") == old_heading_id
+            ]
+            if not remaining:
+                self._remove_orphaned_heading(engine, old_heading_id, old_heading_clean)
+
+    def _reassign_closer_heading_id(
+        self,
+        entry_id: int,
+        old_heading: str,
+        new_heading: str,
+    ) -> None:
+        r"""
+        Discard-only counterpart to _reconcile_heading_node for range
+        closers. A closer has no tree presence of its own (populate_
+        hierarchy_tree never sends closers to append_entry, and
+        _collect_refs_from_node's ref lists never include them), so the
+        tree-attach/detach steps _reconcile_heading_node performs don't
+        apply here. But its cached record["heading_id"] still needs to
+        move in lockstep with its opener sibling's, or it permanently
+        blocks the orphan check below (and the identical one inside
+        _reconcile_heading_node): that check scans every cached record
+        for a matching heading_id with no way to know a given record is
+        an invisible closer, so a closer left pointing at the OLD
+        heading_id keeps that heading reading as "still referenced"
+        forever, even after every visible sibling has already moved off
+        it via _reconcile_heading_node. That is what left a renamed-then-
+        fully-discarded heading node stuck in the tree with an empty ref
+        list and no way to ever be pruned -- discard_dirty_edits was
+        skipping this reassignment for closers entirely.
+        """
+        engine = self._tree.engine
+        record = self._entry_model._records.get(entry_id)
+        if record is None:
+            return
+
+        old_heading_clean = self._strip_encap_suffix(old_heading)
+        new_heading_clean = self._strip_encap_suffix(new_heading)
+
+        new_heading_id = self._find_heading_id_by_text(engine, new_heading_clean)
+        if new_heading_id is None:
+            new_heading_id = self._create_heading_in_engine(engine, new_heading_clean)
+        record["heading_id"] = new_heading_id
+
         old_heading_id = self._find_heading_id_by_text(engine, old_heading_clean)
         if old_heading_id is not None:
             remaining = [

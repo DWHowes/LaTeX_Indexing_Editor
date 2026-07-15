@@ -943,6 +943,53 @@ class FileTreePersistence:
             print(f"[DB ERROR] delete_reference failed for ID {entry_id}: {err}")
             return False
 
+    def update_heading_text(self, heading_id: int | None, heading_text: str) -> bool:
+        """
+        Syncs a project_headings row's heading_text/name columns to match
+        the current canonical path shared by every reference under
+        heading_id. Called from EntryModifierModel.flush_dirty_to_db
+        alongside update_reference_field, once a reference's rename has
+        actually reached disk (a tab Save) — never for a rename that ends
+        up discarded, since discarded renames never flush a dirty record
+        at all.
+
+        Without this, a tree-side heading rename (IndexEditController.
+        _process_heading_rename) updated every reference's own
+        heading_raw_text but left this shared heading row's own text
+        exactly as it was at the last full project (re)scan. Per this
+        project's convention that the DB, not the .tex files, is the
+        source of truth for everything after initial creation/an explicit
+        resync, a project reopened without a resync would then rebuild
+        its tree from that stale row and show the pre-rename name again
+        — silently disagreeing with what's actually in the .tex source
+        and in every project_references row under it.
+
+        No-ops (returns False) if heading_id is None (references without
+        a resolved heading, or a malformed cache entry) or heading_text is
+        empty. Idempotent: writing the same text twice is harmless, so
+        callers don't need to first check whether the text actually
+        changed.
+        """
+        if not self.db_path or heading_id is None or not heading_text:
+            return False
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE project_headings SET heading_text = ?, name = ? WHERE id = ?;",
+                    (heading_text, heading_text, heading_id),
+                )
+                if cursor.rowcount == 0:
+                    print(f"[DB TRACE] update_heading_text: no heading row matched id={heading_id}")
+                    return False
+                conn.commit()
+                print(f"[DB TRACE] update_heading_text: synced heading id={heading_id} -> {heading_text!r}")
+                return True
+        except sqlite3.Error as err:
+            print(f"[DB ERROR] update_heading_text failed for heading_id={heading_id}: {err}")
+            return False
+
     def delete_heading_if_orphaned(self, heading_id: int) -> bool:
         """
         Removes a project_headings row if (and only if) no project_references

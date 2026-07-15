@@ -1935,7 +1935,7 @@ class AppPipelineController(QObject):
         print(f"Project Loading Failure: {err_msg}")
         QMessageBox.critical(self.window, "Project Loading Failure", f"An out-of-thread error occurred:\n{err_msg}")
 
-    @Slot(str, int, int, str, object, object, str)
+    @Slot(str, int, int, str, object, object, str, object)
     def handle_index_navigation(
         self,
         path: str,
@@ -1945,7 +1945,37 @@ class AppPipelineController(QObject):
         absolute_position=None,
         absolute_end=None,
         macro_command: str = "index",
+        unique_id_number=None,
     ):
+        r"""
+        Fires when the user clicks a "[uid]" reference link in the index
+        tree's References column (IndexTreeView._unpack_delegate_payload).
+
+        The path/line/col/absolute_position/absolute_end/macro_command
+        arguments are a snapshot captured when this tree node was last
+        (re)populated (see IndexTreeView._populate_row_metadata) -- they go
+        stale the moment a rename or coordinate shift touches this entry
+        (IndexEditController._rewrite_single_reference /
+        EntryModifierModel.shift_coordinates_after both update only the
+        live EntryModifierModel cache, with no path back into every tree
+        node's own cached payload). unique_id_number lets this controller
+        re-resolve the entry's CURRENT location from that live cache before
+        navigating, so the highlighted span reflects the entry's actual
+        position rather than whatever it was when the tree was last built.
+        Falls back to the snapshot values if the uid is missing or no
+        longer present in the cache.
+        """
+        if unique_id_number is not None and self.entry_modifier_model:
+            live_location = self.entry_modifier_model.get_location_metadata(int(unique_id_number))
+            if live_location is not None:
+                path = live_location.get("file_path") or path
+                line = live_location.get("line_number") or line
+                col = live_location.get("column_offset")
+                col = col if col is not None else 0
+                absolute_position = live_location.get("absolute_position")
+                absolute_end = live_location.get("absolute_end")
+                macro_command = live_location.get("macro_command") or macro_command
+
         if self.lc_ctrl:
             self.lc_ctrl.navigate_to_embedded_index_coordinate(
                 path, line, col, fallback,

@@ -275,6 +275,17 @@ class EntryModifierModel(QObject):
             ok = self._persistence.update_reference_field(entry_id, record)
             if ok:
                 success_count += 1
+                # Keeps the shared project_headings row's own text in sync
+                # with whatever this now-durably-saved reference's heading
+                # path actually is -- see FileTreePersistence.
+                # update_heading_text's docstring for why this can't be
+                # skipped: a tree rename only ever updated each
+                # reference's own heading_raw_text, never this row, so
+                # without this a reopened project would rebuild its tree
+                # from the pre-rename name.
+                self._persistence.update_heading_text(
+                    record.get("heading_id"), record.get("heading_raw_text", "")
+                )
             else:
                 print(f"[MODEL WARNING] flush_dirty_to_db: DB write failed for ID {entry_id}")
                 failure_count += 1
