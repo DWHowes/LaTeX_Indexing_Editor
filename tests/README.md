@@ -18,19 +18,25 @@ that construct real widgets) runs headlessly in a plain terminal or CI.
 
 ```
 tests/
-  conftest.py                    # QT_QPA_PLATFORM=offscreen, fresh_persistence, sample_project_dir
+  conftest.py                    # QT_QPA_PLATFORM=offscreen, fresh_persistence, sample_project_dir, booted_app
   fixtures/sample_project/       # small checked-in .tex project used across layers
+  unit/models/                   # layer 1: pure logic, no PySide6 dependency
   persistence/                   # layer 2: FileTreePersistence + ProjectLoadWorker's sync logic
   controllers/                   # layer 3: one controller at a time, hand-built collaborators
   integration/                   # layer 4: boots the REAL AppPipelineController object graph
-  unit/models/                   # layer 1 (not yet built)
-  gui_smoke/                     # layer 5 (not yet built)
+  gui_smoke/                     # layer 5: drives the real app through actual user actions
 ```
 
-- **Layer 1 (unit, not yet built)** — pure logic with no PySide6 dependency:
-  `latex_index_parser.py`, `range_consistency_model.py`, `name_inverter.py`,
-  `rtf_export_model.py`, `text_sanitizer.py`, etc. Plain pytest, no fixtures
-  needed.
+- **Layer 1 (unit)** — pure logic with no PySide6 dependency. `latex_index_parser.py`
+  gets the deepest coverage of any layer-1 module (highest historical defect
+  density in the project — the FIFO range-pairing fix and the `absolute_end`
+  off-by-one both originated there), covering plain/nested/sort-keyed
+  entries, ranges, see/seealso, custom command patterns, macro-definition
+  scrubbing, and coordinate computation. `range_consistency_model.py`,
+  `text_sanitizer.py`, and `macro_id_generator.py` are covered too;
+  `rtf_export_model.py`, `name_inverter.py`'s offline logic, and
+  `cross_reference_model.py` are not yet — worth adding if you're touching
+  those.
 - **Layer 2 (persistence)** — `FileTreePersistence` (real sqlite, real
   temp files, no `QApplication` needed) and the synchronous, non-threaded
   parts of `ProjectLoadWorker` (`scan_file_tree`, `load_tree_from_db`,
@@ -46,8 +52,8 @@ tests/
   assumes about the view's interface and what it actually is, which is
   exactly the kind of gap layer 4 exists to catch structurally but a
   narrower layer-3 test can catch functionally, one behavior at a time.
-- **Layer 4 (integration)** — `tests/integration/conftest.py`'s `booted_app`
-  fixture constructs the *entire* real application object graph, the same
+- **Layer 4 (integration)** — the root `conftest.py`'s `booted_app` fixture
+  constructs the *entire* real application object graph, the same
   construction chain as `main.py`, with every real-machine touchpoint
   (Windows registry via `QSettings`, the real user home directory, the
   `data/name_cache.db` sqlite file, `.session_logs/`) redirected into
@@ -65,8 +71,18 @@ tests/
     test** — as long as your object is reachable via a plain `self.x = ...`
     attribute from something already in the graph, the walk finds it
     automatically.
-- **Layer 5 (gui_smoke, not yet built)** — drive real user actions (open
-  project, right-click → Prune, reopen, assert) against `booted_app`.
+- **Layer 5 (gui_smoke)** — drives the real, booted app through actual user
+  actions: `QFileDialog`/`QInputDialog` are monkeypatched to bypass the
+  native OS dialogs (unautomatable headlessly), then `select_project_folder_workflow()`
+  runs for real, including the real background `SafeProjectLoadThread` and
+  regex parse of `sample_project_dir`. From there, prune/reopen/restore are
+  driven through the real `scope_ctrl`/`pruned_files_ctrl` — the same full
+  feature loop this session built and fixed, now proven end-to-end through
+  the real app rather than hand-wired collaborators. Use `qtbot.waitUntil`
+  (not `waitSignal` on the load thread directly) to wait for a background
+  load to finish — polling an observable end-state (the tree populating)
+  sidesteps having to reason precisely about the thread's queued-connection
+  timing.
 
 ## The known-dead-signal xfail convention
 
@@ -93,7 +109,7 @@ the sweep quietly ignore it forever with no forcing function to revisit it.
 ## Fixture project
 
 `tests/fixtures/sample_project/` is deliberately small and used across
-layers 2, 4 (eventually), and 5 (eventually):
+layers 2 and 5:
 
 - `main.tex` — base file (`\documentclass`, `\begin{document}`, pulls in
   the two chapters below plus `cross_refs.tex`).
