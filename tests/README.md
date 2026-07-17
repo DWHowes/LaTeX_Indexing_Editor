@@ -27,16 +27,22 @@ tests/
   gui_smoke/                     # layer 5: drives the real app through actual user actions
 ```
 
-- **Layer 1 (unit)** — pure logic with no PySide6 dependency. `latex_index_parser.py`
-  gets the deepest coverage of any layer-1 module (highest historical defect
-  density in the project — the FIFO range-pairing fix and the `absolute_end`
-  off-by-one both originated there), covering plain/nested/sort-keyed
-  entries, ranges, see/seealso, custom command patterns, macro-definition
-  scrubbing, and coordinate computation. `range_consistency_model.py`,
-  `text_sanitizer.py`, and `macro_id_generator.py` are covered too;
-  `rtf_export_model.py`, `name_inverter.py`'s offline logic, and
-  `cross_reference_model.py` are not yet — worth adding if you're touching
-  those.
+- **Layer 1 (unit)** — pure logic with no PySide6 dependency, now covering
+  every module identified for it: `latex_index_parser.py` (the deepest
+  coverage of any layer-1 module — highest historical defect density in the
+  project, the FIFO range-pairing fix and the `absolute_end` off-by-one both
+  originated there), `range_consistency_model.py`, `text_sanitizer.py`,
+  `macro_id_generator.py`, `rtf_export_model.py` (pure/file-based methods
+  only — `compile_to_aux`/`generate_ind_file` shell out to a real LaTeX
+  toolchain and are out of scope here), `name_inverter.py`'s offline
+  rule-based logic (`_fast_invert` and friends — the VIAF/LC network-calling
+  methods are likewise out of scope), and `cross_reference_model.py`.
+  Two real, pre-existing bugs in `_fast_invert` were found and confirmed
+  empirically while writing this coverage, not just inferred from reading —
+  see `test_name_inverter.py`'s two `xfail(strict=True)` cases for exactly
+  which inputs crash and why (an `UnboundLocalError` on any name where "del"
+  is the Spanish connector, and dead code — a regex guard that can never
+  match — silently breaking the documented two-token "Mac Donald" form).
 - **Layer 2 (persistence)** — `FileTreePersistence` (real sqlite, real
   temp files, no `QApplication` needed) and the synchronous, non-threaded
   parts of `ProjectLoadWorker` (`scan_file_tree`, `load_tree_from_db`,
@@ -44,14 +50,42 @@ tests/
   `fresh_persistence` and `sample_project_dir` fixtures from the root
   `conftest.py`.
 - **Layer 3 (controllers)** — `pytest-qt`'s `qtbot`, testing one controller
-  at a time. Prefer real collaborators over stubs where they're cheap and
-  side-effect-free (`test_entry_modifier_controller_staging_sync.py` uses
-  the real `EntryModifierList` view and `EntryModifierModel`, only faking
-  `IndexEditController` since nothing in that test touches the tree) — a
-  stub view can silently mask a mismatch between what the controller
-  assumes about the view's interface and what it actually is, which is
-  exactly the kind of gap layer 4 exists to catch structurally but a
-  narrower layer-3 test can catch functionally, one behavior at a time.
+  at a time. Covers `ProjectScopeController`, `PrunedFilesController`,
+  `EntryModifierController` (the staging live-preview sync), `IndexEditController`'s
+  rename and orphan-cleanup paths (a real `IndexTreeView` + `EntryModifierModel`
+  + `DocumentIOController` stack doing a real `.tex` rewrite, not stubbed —
+  see `test_index_edit_controller_rename_orphan.py`), `CrossReferenceController`,
+  and `RangeConsistencyController`. Prefer real collaborators over stubs
+  where they're cheap and side-effect-free — a stub view can silently mask a
+  mismatch between what the controller assumes about the view's interface
+  and what it actually is, which is exactly the kind of gap layer 4 exists
+  to catch structurally but a narrower layer-3 test can catch functionally,
+  one behavior at a time. Only fake collaborators whose own logic is already
+  covered elsewhere and isn't what the test in question is about (e.g.
+  `IndexEditController.handle_entry_deletion` is faked in the
+  `CrossReferenceController`/`RangeConsistencyController` tests, since
+  deletion mechanics are `IndexEditController`'s own tested responsibility,
+  not theirs).
+
+  **Gotcha worth knowing**: `AppStyleConfiguration.event_broker()` is a
+  process-wide singleton (not per-`QApplication` or per-widget). Some real
+  view classes connect its `theme_mutated` signal to a raw lambda rather
+  than a bound method, so Qt's destroy-time auto-disconnect never fires for
+  it — constructing and destroying many short-lived widgets (e.g. a fresh
+  `IndexTreeView` per test) leaks a dead connection per instance. The root
+  `conftest.py`'s `_reset_theme_broker_connections` autouse fixture clears
+  every connection after each test so this can't accumulate across test
+  boundaries and crash a later, unrelated test the moment anything emits
+  `theme_mutated` again. You don't need to do anything about this yourself —
+  it's handled globally — but if you ever see
+  `RuntimeError: Internal C++ object ... already deleted` pointing at a
+  `theme_mutated`-connected lambda, this is why, and the fixture is the
+  first place to check.
+  A `QMessageBox.warning`/similar real modal call reachable from a failure
+  path needs monkeypatching before you drive that path in a test — it
+  blocks forever waiting for a click that can never come headlessly (see
+  `test_range_consistency_controller.py`'s `test_shows_warning_dialog_on_failure`
+  for the pattern: `monkeypatch.setattr(QMessageBox, "warning", ...)`).
 - **Layer 4 (integration)** — the root `conftest.py`'s `booted_app` fixture
   constructs the *entire* real application object graph, the same
   construction chain as `main.py`, with every real-machine touchpoint

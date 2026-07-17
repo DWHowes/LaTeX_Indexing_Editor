@@ -30,6 +30,38 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 SAMPLE_PROJECT_SRC = FIXTURES_DIR / "sample_project"
 
 
+@pytest.fixture(autouse=True)
+def _reset_theme_broker_connections():
+    """
+    AppStyleConfiguration.event_broker() is a module-level singleton
+    (_GlobalThemeChannel) that outlives any single test -- it's shared
+    across the whole pytest process, not per-QApplication or per-widget.
+    Several real view classes (e.g. IndexTreeView) connect
+    theme_mutated to a raw `lambda: self.viewport().update()` rather than
+    a bound method, so Qt's normal auto-disconnect-on-destroy (which
+    tracks QObject receivers) never fires for it -- destroying the widget
+    at test teardown leaves the connection dangling. In the real app this
+    is harmless (there's exactly one long-lived IndexTreeView for the
+    whole session), but a test suite that constructs and destroys many
+    short-lived instances accumulates dead lambdas referencing
+    already-destroyed C++ objects, which crash the moment any LATER test
+    emits theme_mutated again ("RuntimeError: Internal C++ object ...
+    already deleted"). Clearing every connection after each test keeps
+    that accumulation from crossing test boundaries.
+
+    Most tests never touch theme_mutated at all, so disconnect() with
+    nothing connected is the common case -- PySide6 only emits a
+    RuntimeWarning for that (not an exception), but at one per test that
+    adds up to real noise in the suite's output, so it's suppressed
+    rather than caught.
+    """
+    yield
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        AppStyleConfiguration.event_broker().theme_mutated.disconnect()
+
+
 @pytest.fixture
 def fresh_persistence(tmp_path) -> FileTreePersistence:
     """
