@@ -10,40 +10,7 @@ the real code path.
 """
 import os
 
-import pytest
-from PySide6.QtWidgets import QFileDialog, QInputDialog
-
-
-def _open_project(qtbot, monkeypatch, pipeline_ctrl, project_dir: str, project_name: str = "SmokeTest"):
-    monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: project_dir))
-    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: (project_name, True)))
-
-    pipeline_ctrl.select_project_folder_workflow()
-
-    qtbot.waitUntil(
-        lambda: pipeline_ctrl.file_tree_widget.base_model.rowCount() > 0,
-        timeout=10000,
-    )
-
-
-def _tree_file_names(file_tree_widget) -> set[str]:
-    names = set()
-
-    def _walk(parent_item):
-        for row in range(parent_item.rowCount()):
-            child = parent_item.child(row)
-            names.add(child.text())
-            _walk(child)
-
-    _walk(file_tree_widget.base_model.invisibleRootItem())
-    return names
-
-
-@pytest.fixture
-def opened_project(booted_app, qtbot, monkeypatch, sample_project_dir):
-    pipeline_ctrl = booted_app.pipeline_controller
-    _open_project(qtbot, monkeypatch, pipeline_ctrl, str(sample_project_dir))
-    return pipeline_ctrl, sample_project_dir
+from tests.gui_smoke.conftest import _tree_file_names
 
 
 def test_opening_a_project_populates_the_tree_and_detects_the_base_file(opened_project):
@@ -77,7 +44,7 @@ def test_pruning_a_file_removes_it_from_the_tree_and_db(opened_project, qtbot):
     assert "descript.tex" not in _tree_file_names(pipeline_ctrl.file_tree_widget)
 
 
-def test_pruned_file_stays_pruned_across_a_simulated_reopen(opened_project, qtbot, monkeypatch):
+def test_pruned_file_stays_pruned_across_a_simulated_reopen(opened_project, qtbot, monkeypatch, open_project):
     pipeline_ctrl, project_dir = opened_project
     descript_path = os.path.normpath(str(project_dir / "10.Chapter10" / "fig10" / "descript.tex"))
     pipeline_ctrl.scope_ctrl.prune_project_file(descript_path)
@@ -87,7 +54,7 @@ def test_pruned_file_stays_pruned_across_a_simulated_reopen(opened_project, qtbo
     # fixed: a project (re)open used to always re-walk the filesystem and
     # silently resurrect every pruned file.
     pipeline_ctrl._execute_project_close_workflow()
-    _open_project(qtbot, monkeypatch, pipeline_ctrl, str(project_dir))
+    open_project(qtbot, monkeypatch, pipeline_ctrl, str(project_dir))
 
     assert descript_path not in pipeline_ctrl.scope_ctrl.get_active_search_scope()
     assert "descript.tex" not in _tree_file_names(pipeline_ctrl.file_tree_widget)

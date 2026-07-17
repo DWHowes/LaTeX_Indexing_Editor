@@ -108,17 +108,37 @@ tests/
     attribute from something already in the graph, the walk finds it
     automatically.
 - **Layer 5 (gui_smoke)** — drives the real, booted app through actual user
-  actions: `QFileDialog`/`QInputDialog` are monkeypatched to bypass the
-  native OS dialogs (unautomatable headlessly), then `select_project_folder_workflow()`
-  runs for real, including the real background `SafeProjectLoadThread` and
-  regex parse of `sample_project_dir`. From there, prune/reopen/restore are
-  driven through the real `scope_ctrl`/`pruned_files_ctrl` — the same full
-  feature loop this session built and fixed, now proven end-to-end through
-  the real app rather than hand-wired collaborators. Use `qtbot.waitUntil`
-  (not `waitSignal` on the load thread directly) to wait for a background
-  load to finish — polling an observable end-state (the tree populating)
-  sidesteps having to reason precisely about the thread's queued-connection
-  timing.
+  actions. `tests/gui_smoke/conftest.py` holds the shared setup every file
+  here needs: `QFileDialog`/`QInputDialog` are monkeypatched to bypass the
+  native OS dialogs (unautomatable headlessly), then the real
+  `select_project_folder_workflow()` runs, including the real background
+  `SafeProjectLoadThread` and regex parse of `sample_project_dir` (the
+  `opened_project` fixture; `open_project`/`tree_file_names` are the
+  underlying callables, exposed as fixtures so other test files in this
+  directory can reuse them without a fragile cross-file import of
+  underscore-prefixed helpers). Covers: project open/base-file
+  auto-detection, prune/reopen/restore (the exact bug this session started
+  from — prune resurrecting on reopen — proven fixed end-to-end, not just
+  at the controller level), "Set as root file" (both the `QModelIndex`
+  context-menu path and the plain string path), "Resync Workspace Files
+  from Disk" (files added/removed/un-pruned on disk outside the app),
+  "Resync Index Data from Disk" (`\index` content changed on disk), and the
+  Cross-References workflow (add/remove writes `cross_refs.tex` for real,
+  "Insert Cross-References File..." splices `\input{cross_refs.tex}` into
+  the real base file and is idempotent on a second run). Use
+  `qtbot.waitUntil` (not `waitSignal` on the load thread directly) to wait
+  for a background load to finish — polling an observable end-state (the
+  tree populating) sidesteps having to reason precisely about the thread's
+  queued-connection timing.
+
+  **Gotcha**: pytest's default import mode can't distinguish two test files
+  with the same basename in different directories without `__init__.py`
+  files (`tests/gui_smoke/test_cross_reference_workflow.py` is named that,
+  not `test_cross_references.py`, specifically to avoid colliding with
+  `tests/persistence/test_cross_references.py` — collecting the whole
+  suite errors out with "import file mismatch" the moment two exist). Keep
+  test file basenames unique across the whole `tests/` tree, not just
+  within a directory.
 
 ## The known-dead-signal xfail convention
 
@@ -148,7 +168,10 @@ the sweep quietly ignore it forever with no forcing function to revisit it.
 layers 2 and 5:
 
 - `main.tex` — base file (`\documentclass`, `\begin{document}`, pulls in
-  the two chapters below plus `cross_refs.tex`).
+  the two chapters below). Deliberately does **not** `\input{cross_refs.tex}`
+  itself -- that line is what "Insert Cross-References File..." exists to
+  splice in, so the fixture starts without it to let gui_smoke tests
+  actually exercise that injection.
 - `01.Intro/intro.tex` — a plain entry and a one-level sub-entry.
 - `10.Chapter10/chapter10.tex` — a page-range pair (`|(` / `|)`) and a
   `see{}` cross-reference.
