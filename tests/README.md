@@ -21,8 +21,8 @@ tests/
   conftest.py                    # QT_QPA_PLATFORM=offscreen, fresh_persistence, sample_project_dir
   fixtures/sample_project/       # small checked-in .tex project used across layers
   persistence/                   # layer 2: FileTreePersistence + ProjectLoadWorker's sync logic
+  controllers/                   # layer 3: one controller at a time, hand-built collaborators
   integration/                   # layer 4: boots the REAL AppPipelineController object graph
-  controllers/                   # layer 3 (not yet built)
   unit/models/                   # layer 1 (not yet built)
   gui_smoke/                     # layer 5 (not yet built)
 ```
@@ -37,8 +37,15 @@ tests/
   `scan_tex_files_for_index_data`, `compute_file_checksums`). Use the
   `fresh_persistence` and `sample_project_dir` fixtures from the root
   `conftest.py`.
-- **Layer 3 (controllers, not yet built)** — `pytest-qt`'s `qtbot`, testing
-  one controller at a time with hand-built collaborators.
+- **Layer 3 (controllers)** — `pytest-qt`'s `qtbot`, testing one controller
+  at a time. Prefer real collaborators over stubs where they're cheap and
+  side-effect-free (`test_entry_modifier_controller_staging_sync.py` uses
+  the real `EntryModifierList` view and `EntryModifierModel`, only faking
+  `IndexEditController` since nothing in that test touches the tree) — a
+  stub view can silently mask a mismatch between what the controller
+  assumes about the view's interface and what it actually is, which is
+  exactly the kind of gap layer 4 exists to catch structurally but a
+  narrower layer-3 test can catch functionally, one behavior at a time.
 - **Layer 4 (integration)** — `tests/integration/conftest.py`'s `booted_app`
   fixture constructs the *entire* real application object graph, the same
   construction chain as `main.py`, with every real-machine touchpoint
@@ -63,19 +70,25 @@ tests/
 
 ## The known-dead-signal xfail convention
 
-`test_signal_wiring.py` currently pins several **pre-existing** unconnected
-signals (found by writing this test, not introduced by it) as individual
-`@pytest.mark.xfail(strict=True)` cases — see `KNOWN_DEAD_SIGNALS` and the
-`test_known_dead_signal_*` functions. `strict=True` means: if someone wires
-one of these up later without touching this file, that specific test starts
-**unexpectedly passing**, which pytest reports as a hard failure (XPASS) —
-forcing a conscious edit (delete the xfail, add the signal's key removed
-from `KNOWN_DEAD_SIGNALS`) instead of the fix going unnoticed.
+Writing `test_signal_wiring.py` originally surfaced 9 pre-existing
+unconnected signals beyond the ones this test suite was built to catch in
+the first place. Each was individually triaged (deleted if genuinely dead
+code, wired up if it was a real gap, or left as documented future work) —
+see the project history around `KNOWN_DEAD_SIGNALS` for the reasoning
+behind each call. `KNOWN_DEAD_SIGNALS` is currently empty as a result.
 
 If you find a *new* unconnected signal that's a genuine bug (not a
 lazily-constructed dialog/thread that simply doesn't exist yet at boot),
-add it the same way rather than adding it to an exclusion list that just
-makes the sweep test quietly ignore it forever.
+pin it as its own `@pytest.mark.xfail(strict=True)` case using the
+`_find_one` helper in `test_signal_wiring.py`, and add its
+`(qualname, signal_name)` pair to `KNOWN_DEAD_SIGNALS` so the sweep test
+doesn't double-report it. `strict=True` means: if someone wires it up
+later without touching this file, that specific test starts
+**unexpectedly passing**, which pytest reports as a hard failure (XPASS) —
+forcing a conscious edit (delete the xfail, remove the entry from
+`KNOWN_DEAD_SIGNALS`) instead of the fix going unnoticed. Don't just add a
+signal to an exclusion list without a dedicated xfail test — that makes
+the sweep quietly ignore it forever with no forcing function to revisit it.
 
 ## Fixture project
 

@@ -293,6 +293,7 @@ class AppPipelineController(QObject):
             self.lc_ctrl.file_watcher.file_reload_failed.connect(self._handle_external_file_watch_error)
 
         self.index_edit_ctrl.heading_rename_conflict.connect(self._handle_heading_rename_conflict)
+        self.index_edit_ctrl.heading_renamed.connect(self._handle_heading_renamed)
 
         if self.idx_ctrl:
             self._index_context_manager.delete_tree_term_triggered.connect(self._handle_index_deletion_request)
@@ -1970,6 +1971,20 @@ class AppPipelineController(QObject):
             )
         else:
             self.window.status_bar.set_status_text(f"Removed empty term '{display_text}'.")
+
+    @Slot(str, str)
+    def _handle_heading_renamed(self, old_raw_token: str, new_raw_token: str) -> None:
+        """
+        A tree-view inline rename (IndexEditController._process_heading_rename)
+        already writes the .tex rewrite and DB update itself -- this just
+        marks _tree_modified, the same bookkeeping every other tree-mutating
+        action (name inversion, undo/redo, table edits, node deletion)
+        already does. Without it, a rename via the tree view was the one
+        mutation _is_safe_to_auto_resync() didn't know about, so an
+        external-change auto-resync landing right after a rename could
+        silently discard/reassign the very state the rename just touched.
+        """
+        self._tree_modified = True
 
     @Slot(str, list)
     def _handle_heading_rename_conflict(self, old_raw_token: str, conflict_ids: list) -> None:

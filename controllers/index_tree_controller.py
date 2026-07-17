@@ -1,4 +1,4 @@
-from PySide6.QtCore import QObject, Slot, Signal, QModelIndex
+from PySide6.QtCore import QObject, Slot, Signal
 
 class IndexTreeController(QObject):
     """
@@ -6,7 +6,6 @@ class IndexTreeController(QObject):
     Strict MVC: Contains zero data regex parsing, zero layout coloring,
     and zero explicit font modifications.
     """
-    jump_to_coordinate_requested = Signal(dict)
     tree_population_requested = Signal(list, list) # Instructs view to repaint
 
     def __init__(self, data_model_engine, parent=None):
@@ -39,11 +38,6 @@ class IndexTreeController(QObject):
         """
         self.model_engine.clear_active_manifests()        
         
-    @Slot(dict)
-    def direct_coordinate_jump_slot(self, payload: dict):
-        if payload:
-            self.jump_to_coordinate_requested.emit(payload)
-
     @Slot(list, list)
     def populate_from_worker_payloads(self, headings: list, references: list):
         """Passes raw background payloads straight to the presentation view."""

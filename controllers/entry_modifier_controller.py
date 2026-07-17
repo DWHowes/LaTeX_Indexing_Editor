@@ -47,6 +47,18 @@ class EntryModifierController(QObject):
         # displayed, so update_row_from_canonical no-ops for those; this is
         # what keeps a tree-originated rename from leaving the table stale.
         self._staging_model.entry_committed.connect(self._on_staged_entry_committed)
+        # Live preview, ahead of commit: a tree-side rename in progress
+        # (IndexEditController._process_heading_rename) calls stage_edit
+        # per keystroke-completion, well before the rename is finalized --
+        # without this, this table kept showing the old heading for that
+        # row until the tree edit committed. Reuses the same
+        # update_row_from_canonical primitive as the commit case above, so
+        # it inherits the same no-op-when-already-matching guard: a
+        # table-originated stage_edit round-trips through
+        # _assemble_canonical_heading -> here and finds nothing changed,
+        # since the row's displayed fields are what produced the staged
+        # canonical string in the first place.
+        self._staging_model.entry_staged.connect(self._on_entry_staged)
         self._index_edit_ctrl.entry_deleted.connect(self._on_entry_deleted)
         self._index_edit_ctrl.entry_reverted.connect(self._on_entry_reverted)
 
@@ -353,6 +365,20 @@ class EntryModifierController(QObject):
         here without a full reload.
         """
         canonical = self._staging_model.get_original(entry_id)
+        if canonical is None:
+            return
+        self.view.update_row_from_canonical(entry_id, canonical)
+
+    @Slot(int)
+    def _on_entry_staged(self, entry_id: int):
+        """
+        Fires on every IndexEditStagingModel.stage_edit() -- i.e. before
+        commit, while an edit is still in progress. get_staged() (not
+        get_original()) is the point of this handler: it previews whatever
+        the currently in-flight value is, so a tree-side rename shows up
+        here live rather than only once it's written to the .tex file.
+        """
+        canonical = self._staging_model.get_staged(entry_id)
         if canonical is None:
             return
         self.view.update_row_from_canonical(entry_id, canonical)

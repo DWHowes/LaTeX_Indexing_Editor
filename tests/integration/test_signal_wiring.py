@@ -19,7 +19,8 @@ get connected inside their own on-demand construction path (e.g.
 PrunedFilesDialog.restore_approved is connected inside
 PrunedFilesController.manage_pruned_files(), the first time that dialog is
 opened), which this test can't observe without actually driving that user
-action. See tests/integration/test_lazy_dialog_wiring.py for that layer.
+action. That's a separate, not-yet-built test layer (drive the real user
+action, then inspect), not something this boot-time walk can cover.
 
 Known pre-existing dead signals (found by this test's design, not
 introduced by it) are pinned below as individual xfail(strict=True) cases
@@ -126,15 +127,7 @@ def _collect_boot_time_signal_pairs(app):
 # Each gets its own xfail test below rather than being silently skipped by
 # the sweep, and the sweep itself excludes exactly these pairs so it isn't
 # reporting the same finding twice.
-KNOWN_DEAD_SIGNALS = {
-    ("controllers.document_io_controller.DocumentIOController", "file_saved_successfully"),
-    ("controllers.document_io_controller.DocumentIOController", "operation_status_emitted"),
-    ("controllers.index_edit_controller.IndexEditController", "heading_renamed"),
-    ("controllers.index_edit_controller.IndexEditController", "heading_node_orphaned"),
-    ("controllers.index_tree_controller.IndexTreeController", "jump_to_coordinate_requested"),
-    ("views.index_tree_view.IndexTreeView", "locationRequested"),
-    ("models.index_edit_staging_model.IndexEditStagingModel", "entry_staged"),
-}
+KNOWN_DEAD_SIGNALS = set()
 
 
 def _qualname(obj) -> str:
@@ -180,6 +173,8 @@ def test_walk_finds_the_known_live_wired_signals_as_a_sanity_check(booted_app):
         ("controllers.project_scope_controller.ProjectScopeController", "file_pruned"),
         ("views.main_menu_bar.MainMenuBar", "manage_pruned_files_requested"),
         ("views.file_tree_view.FileTreeView", "file_prune_requested"),
+        ("controllers.index_edit_controller.IndexEditController", "heading_renamed"),
+        ("models.index_edit_staging_model.IndexEditStagingModel", "entry_staged"),
     ]
     for key in expect_present_and_connected:
         assert key in by_key, f"Expected signal {key} was not found by the object walk at all."
@@ -188,9 +183,13 @@ def test_walk_finds_the_known_live_wired_signals_as_a_sanity_check(booted_app):
 
 
 # ---------------------------------------------------------------------
-# Known pre-existing dead signals -- pinned individually so a fix to any
-# one of these shows up as a loud, specific failure (XPASS under
-# strict=True) rather than silently making the sweep test above pass.
+# Known pre-existing dead signals -- none currently. When one turns up,
+# pin it individually here as @pytest.mark.xfail(strict=True) (using
+# _find_one below) rather than adding it to an exclusion list the sweep
+# test silently honors -- xfail(strict=True) means a later fix shows up as
+# a loud, specific failure (XPASS) instead of just vanishing into a
+# passing sweep unnoticed. See README.md's "known-dead-signal xfail
+# convention" section for the full rationale and a worked example.
 # ---------------------------------------------------------------------
 
 def _find_one(app, qualname: str, signal_name: str):
@@ -199,52 +198,3 @@ def _find_one(app, qualname: str, signal_name: str):
         if name == signal_name and _qualname(obj) == qualname:
             return obj
     pytest.fail(f"{qualname}.{signal_name} was not found in the boot-time object graph at all (walk gap, not a connection gap).")
-
-
-@pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="Pre-existing: DocumentIOController.file_saved_successfully is emitted but never connected.")
-def test_known_dead_signal_document_io_file_saved_successfully(booted_app):
-    obj = _find_one(booted_app, "controllers.document_io_controller.DocumentIOController", "file_saved_successfully")
-    assert _is_signal_connected(obj, "file_saved_successfully")
-
-
-@pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="Pre-existing: DocumentIOController.operation_status_emitted is emitted but never connected.")
-def test_known_dead_signal_document_io_operation_status_emitted(booted_app):
-    obj = _find_one(booted_app, "controllers.document_io_controller.DocumentIOController", "operation_status_emitted")
-    assert _is_signal_connected(obj, "operation_status_emitted")
-
-
-@pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="Pre-existing: IndexEditController.heading_renamed is emitted but never connected.")
-def test_known_dead_signal_index_edit_heading_renamed(booted_app):
-    obj = _find_one(booted_app, "controllers.index_edit_controller.IndexEditController", "heading_renamed")
-    assert _is_signal_connected(obj, "heading_renamed")
-
-
-@pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="Pre-existing: IndexEditController.heading_node_orphaned is emitted but never connected.")
-def test_known_dead_signal_index_edit_heading_node_orphaned(booted_app):
-    obj = _find_one(booted_app, "controllers.index_edit_controller.IndexEditController", "heading_node_orphaned")
-    assert _is_signal_connected(obj, "heading_node_orphaned")
-
-
-@pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="Pre-existing: IndexTreeController.jump_to_coordinate_requested is emitted but never connected.")
-def test_known_dead_signal_index_tree_jump_to_coordinate_requested(booted_app):
-    obj = _find_one(booted_app, "controllers.index_tree_controller.IndexTreeController", "jump_to_coordinate_requested")
-    assert _is_signal_connected(obj, "jump_to_coordinate_requested")
-
-
-@pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="Pre-existing: IndexTreeView.locationRequested is unused/superseded by coordinate_navigation_requested.")
-def test_known_dead_signal_index_tree_view_location_requested(booted_app):
-    obj = _find_one(booted_app, "views.index_tree_view.IndexTreeView", "locationRequested")
-    assert _is_signal_connected(obj, "locationRequested")
-
-
-@pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="Pre-existing: IndexEditStagingModel.entry_staged is emitted but never connected.")
-def test_known_dead_signal_staging_model_entry_staged(booted_app):
-    obj = _find_one(booted_app, "models.index_edit_staging_model.IndexEditStagingModel", "entry_staged")
-    assert _is_signal_connected(obj, "entry_staged")

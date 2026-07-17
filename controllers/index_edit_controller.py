@@ -26,7 +26,6 @@ class IndexEditController(QObject):
     # Emitted after a successful rename so the app pipeline can mark the
     # project dirty and update any other interested parties.
     heading_renamed = Signal(str, str)   # old_raw_token, new_raw_token
-    heading_node_orphaned = Signal(int)  # heading_id of the removed node
     entry_deleted = Signal(int)          # entry_id of a deleted reference
     heading_rename_conflict = Signal(str, list)  # old_raw_token, blocking entry ids
     entry_reverted = Signal(int, str)    # entry_id, reverted canonical heading (discard rollback)
@@ -845,7 +844,6 @@ class IndexEditController(QObject):
                 h for h in engine._active_headings if h.get("id") != heading_id
             ]
             self._entry_model.delete_heading_if_orphaned(heading_id)
-            self.heading_node_orphaned.emit(heading_id)
 
     def discard_uncommitted_entry(self, entry_id: int) -> bool:
         r"""
@@ -1150,8 +1148,6 @@ class IndexEditController(QObject):
             self._remove_tree_node_by_path(parts)
 
         self._entry_model.delete_heading_if_orphaned(heading_id)
-
-        self.heading_node_orphaned.emit(heading_id)
 
     def _remove_reference_from_tree_display(self, entry_id: int, heading_text: str) -> None:
         """

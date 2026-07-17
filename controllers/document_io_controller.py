@@ -7,8 +7,6 @@ class DocumentIOController(QObject):
     Coordinates raw document canvas file streaming and save operations.
     Strict MVC Compliance: Free of hasattr checks; relies on public object interfaces.
     """
-    file_saved_successfully = Signal(str)
-    operation_status_emitted = Signal(str)
     save_error_encountered = Signal(str, str)
 
     def __init__(self, backup_manager, text_sanitizer, tabs_widget, parent_view=None):
@@ -43,8 +41,7 @@ class DocumentIOController(QObject):
                 f.write(editor.toPlainText())
             
             editor.document().setModified(False)
-                
-            self.file_saved_successfully.emit(cleaned_path)
+
             return True
             
         except Exception as e:
@@ -518,7 +515,6 @@ class DocumentIOController(QObject):
                 self.save_error_encountered.emit("Insert Settings Error", f"Could not write base file:\n{e}")
                 return False
 
-        self.operation_status_emitted.emit("LaTeX index settings inserted into base document.")
         return True
 
     def _splice_generated_blocks(self, text: str, preamble_body: str, printindex_body: str) -> "str | None":
@@ -618,7 +614,6 @@ class DocumentIOController(QObject):
                 self.save_error_encountered.emit("Insert Commands Error", f"Could not write base file:\n{e}")
                 return False
 
-        self.operation_status_emitted.emit("Project custom commands inserted into base document.")
         return True
 
     def _splice_commands_block(self, text: str, commands_body: str) -> "str | None":
@@ -703,7 +698,6 @@ class DocumentIOController(QObject):
                 self.save_error_encountered.emit("Insert Head Note Error", f"Could not write base file:\n{e}")
                 return False
 
-        self.operation_status_emitted.emit("Head note inserted into base document.")
         return True
 
     def _splice_head_note_block(self, text: str, head_note_body: str, printindex_command_name: str) -> "str | None":
@@ -790,7 +784,6 @@ class DocumentIOController(QObject):
                 self.save_error_encountered.emit("Insert Cross-References Error", f"Could not write base file:\n{e}")
                 return False
 
-        self.operation_status_emitted.emit("Cross-references file linked into base document.")
         return True
 
     def _splice_cross_references_block(self, text: str) -> "str | None":

@@ -78,7 +78,6 @@ class IndexTreeView(QTreeView):
     Strict MVC Compliance: Free of low-level string regex parsing, hardcoded raw
     UserRoles, and direct SQLite serialization loops.
     """
-    locationRequested = Signal(str, int, int)
     # path, line, col, fallback_label, absolute_position, absolute_end, macro_command, unique_id_number
     coordinate_navigation_requested = Signal(str, int, int, str, object, object, str, object)
 
