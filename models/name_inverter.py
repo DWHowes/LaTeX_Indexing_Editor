@@ -606,8 +606,13 @@ class NameInverter:
                 # Single-token Mac/Mc: treat last token as family name (falls through
                 # to standard logic below — no special case needed).
                 pass
-            elif MAC_MC.match(tokens[-2]) and tokens[-2].lower() in ("mac", "mc"):
-                # Two-token form: "Mac Donald" — combine last two as family name
+            elif tokens[-2].lower() in ("mac", "mc"):
+                # Two-token form: "Mac Donald" — combine last two as family name.
+                # (MAC_MC itself requires an uppercase letter immediately after
+                # "Mac"/"Mc" *within the same token* -- e.g. "MacDonald" -- so it
+                # can never match a bare "Mac"/"Mc" token on its own; checking
+                # membership in ("mac", "mc") directly is what actually detects
+                # this space-separated form.)
                 family = " ".join(tokens[-2:])
                 given  = " ".join(tokens[:-2])
                 result = f"{family}, {given}".strip(", ")
@@ -656,7 +661,7 @@ class NameInverter:
             if lower_tokens[connector_index] == "del" and prefix_len <= 2:
                 family = " ".join(tokens[connector_index + connector_length:])
                 given  = " ".join(tokens[: connector_index + connector_length])
-                result = f"{result}, {suffix}" if suffix else result
+                result = f"{family}, {given}".strip(", ")
                 return f"{result}, {suffix}" if suffix else result
 
             if lower_tokens[connector_index] == "de" and prefix_len == 1 and suffix_len == 1:
