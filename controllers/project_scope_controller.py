@@ -51,9 +51,6 @@ class ProjectScopeController(QObject):
     # without needing to re-derive it from the broader scope_mutated signal
     # (which fires for many unrelated mutations too).
     file_pruned = Signal(str)
-    # Emitted with the normalized absolute path when a previously pruned
-    # file is restored (see unprune_project_file / PrunedFilesController).
-    file_unpruned = Signal(str)
 
     def __init__(self, file_persistence_model, parent=None):
         super().__init__(parent)
@@ -109,6 +106,12 @@ class ProjectScopeController(QObject):
         """
         Restores a previously pruned file back into the active project
         scope. Inverse of prune_project_file/process_file_pruning_request.
+        Callers that need the Workspace Files tree to reflect the restore
+        immediately (PrunedFilesController) do so themselves via a batched
+        rebuild after processing the whole restore list, rather than this
+        method emitting a per-file signal for it -- restoring many files at
+        once would otherwise trigger a full tree rebuild per file for no
+        benefit.
         """
         if not absolute_path or not self.model:
             return False
@@ -117,7 +120,6 @@ class ProjectScopeController(QObject):
         restored = self.model.unprune_file_record(clean_absolute_path)
         if restored:
             self.scope_mutated.emit()
-            self.file_unpruned.emit(clean_absolute_path)
         return restored
 
     def prune_project_file(self, absolute_path: str) -> bool:

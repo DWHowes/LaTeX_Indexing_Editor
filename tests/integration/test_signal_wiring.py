@@ -132,7 +132,6 @@ KNOWN_DEAD_SIGNALS = {
     ("controllers.index_edit_controller.IndexEditController", "heading_renamed"),
     ("controllers.index_edit_controller.IndexEditController", "heading_node_orphaned"),
     ("controllers.index_tree_controller.IndexTreeController", "jump_to_coordinate_requested"),
-    ("controllers.project_scope_controller.ProjectScopeController", "file_unpruned"),
     ("views.index_tree_view.IndexTreeView", "locationRequested"),
     ("models.index_edit_staging_model.IndexEditStagingModel", "entry_staged"),
 }
@@ -235,18 +234,6 @@ def test_known_dead_signal_index_edit_heading_node_orphaned(booted_app):
 def test_known_dead_signal_index_tree_jump_to_coordinate_requested(booted_app):
     obj = _find_one(booted_app, "controllers.index_tree_controller.IndexTreeController", "jump_to_coordinate_requested")
     assert _is_signal_connected(obj, "jump_to_coordinate_requested")
-
-
-@pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason=(
-    "Introduced this session: ProjectScopeController.file_unpruned is emitted by "
-    "unprune_project_file(), but PrunedFilesController._on_restore_approved refreshes "
-    "the tree via a direct method call instead of listening for it -- the signal itself "
-    "is currently vestigial. Either wire a listener to it or remove the signal."
-))
-def test_known_dead_signal_project_scope_file_unpruned(booted_app):
-    obj = _find_one(booted_app, "controllers.project_scope_controller.ProjectScopeController", "file_unpruned")
-    assert _is_signal_connected(obj, "file_unpruned")
 
 
 @pytest.mark.integration
