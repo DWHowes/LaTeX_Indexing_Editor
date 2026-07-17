@@ -38,11 +38,13 @@ tests/
   rule-based logic (`_fast_invert` and friends — the VIAF/LC network-calling
   methods are likewise out of scope), and `cross_reference_model.py`.
   Two real, pre-existing bugs in `_fast_invert` were found and confirmed
-  empirically while writing this coverage, not just inferred from reading —
-  see `test_name_inverter.py`'s two `xfail(strict=True)` cases for exactly
-  which inputs crash and why (an `UnboundLocalError` on any name where "del"
-  is the Spanish connector, and dead code — a regex guard that can never
-  match — silently breaking the documented two-token "Mac Donald" form).
+  empirically while writing this coverage, not just inferred from reading
+  (an `UnboundLocalError` on any name where "del" is the Spanish connector,
+  and dead code — a regex guard that could never match — silently breaking
+  the documented two-token "Mac Donald" form). Both are now fixed, with
+  `test_two_token_mac_space_form_combines` and
+  `test_del_connector_does_not_crash` in `test_name_inverter.py` as
+  permanent regression coverage (no longer `xfail`).
 - **Layer 2 (persistence)** — `FileTreePersistence` (real sqlite, real
   temp files, no `QApplication` needed) and the synchronous, non-threaded
   parts of `ProjectLoadWorker` (`scan_file_tree`, `load_tree_from_db`,

@@ -68,7 +68,7 @@ pytest
 That's it. It will print a line for every test file it runs, then finish with a summary like:
 
 ```
-361 passed, 2 xfailed in 20.7s
+363 passed in 19.8s
 ```
 
 That means everything checked out — the app is behaving as expected. Green/passing output like this is what you want to see both before you start changing anything and after you're done.
@@ -81,7 +81,7 @@ FAILED tests/persistence/test_project_files.py::test_prune_marks_inactive_and_re
 
 followed by details about what the test expected versus what actually happened. Read that section — it usually points at the exact file and line involved, and the mismatch it describes is a direct clue to what's wrong. If you weren't the one who broke it (say, it fails on a completely fresh clone before you've changed anything), that's worth flagging rather than working around.
 
-You'll also see `xfailed` in that summary line (`2 xfailed` above). That's not a failure — it marks a known, deliberately-tracked bug that's expected to fail until someone specifically fixes it (right now: two real bugs in the name-inversion logic, found and confirmed while building this test suite — see `tests/README.md` for details). Don't worry about these unless you're the one doing that fix.
+You might also occasionally see `xfailed` in the summary line (for example: `362 passed, 1 xfailed`). That's not a failure — it marks a known, deliberately-tracked issue that's expected to fail until someone specifically fixes it. Don't worry about these unless you're the one doing that fix.
 
 ### Learning more / adding your own tests
 

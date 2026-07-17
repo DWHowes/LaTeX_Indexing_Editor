@@ -78,23 +78,18 @@ class TestFastInvertMacMc:
     def test_single_token_mac_surname_falls_through_to_standard(self, inverter):
         assert inverter._fast_invert("Duncan MacDougall") == "MacDougall, Duncan"
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Real bug found while writing this test suite: the docstring documents "
-            "'John Mac Donald' -> 'Mac Donald, John' (a space-separated two-token "
-            "Mac/Mc form), but the guard `MAC_MC.match(tokens[-2])` in "
-            "models/name_inverter.py's _fast_invert can never be true for a bare "
-            "'Mac'/'Mc' token -- MAC_MC is `^(Mac|Mc)[A-Z]`, which requires an "
-            "uppercase letter immediately after 'Mac'/'Mc' within the SAME token "
-            "(matching a compound like 'MacDonald', not the standalone word 'Mac' "
-            "followed by a separate 'Donald' token). Confirmed empirically: "
-            "MAC_MC.match('Mac') is False. The whole elif branch is unreachable "
-            "dead code, so this input silently falls through to the standard "
-            "particle walk instead, producing 'Donald, John Mac'."
-        ),
-    )
     def test_two_token_mac_space_form_combines(self, inverter):
+        """
+        Regression test for a real bug found while writing this test suite
+        (now fixed): the guard used to be `MAC_MC.match(tokens[-2])`, which
+        can never be true for a bare "Mac"/"Mc" token -- MAC_MC requires an
+        uppercase letter immediately after "Mac"/"Mc" within the SAME
+        token (matching a compound like "MacDonald"), not a standalone
+        word followed by a separate token. That silently made this whole
+        branch unreachable, so "John Mac Donald" fell through to the
+        standard particle walk and produced "Donald, John Mac" instead of
+        the documented "Mac Donald, John".
+        """
         assert inverter._fast_invert("John Mac Donald") == "Mac Donald, John"
 
 
@@ -116,22 +111,18 @@ class TestFastInvertSpanishConnectors:
         result = inverter._fast_invert("Diego de la Vega")
         assert result.startswith("de la Vega,") or result.startswith("Vega,")
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Real bug found while writing this test suite: the 'del' branch of the "
-            "Spanish/Portuguese connector cascade (models/name_inverter.py, in "
-            "_fast_invert's Spanish connectors section) computes `family`/`given` "
-            "but then does `result = f\"{result}, {suffix}\" ... else result` -- "
-            "referencing `result` before it's ever assigned in that code path, "
-            "instead of building the string from `family`/`given` like every other "
-            "branch in this function does. Raises UnboundLocalError for any real "
-            "name where 'del' is the connector with <=2 tokens before it (e.g. "
-            "'Maria del Carmen'). Confirmed empirically, not just by reading."
-        ),
-    )
     def test_del_connector_does_not_crash(self, inverter):
-        inverter._fast_invert("Maria del Carmen")
+        """
+        Regression test for a real bug found while writing this test suite
+        (now fixed): the 'del' branch of the Spanish/Portuguese connector
+        cascade computed `family`/`given` but then did
+        `result = f"{result}, {suffix}" ... else result` -- referencing
+        `result` before it was ever assigned in that code path, instead of
+        building the string from `family`/`given` like every other branch
+        in this function does. Raised UnboundLocalError for any real name
+        where "del" is the connector with <=2 tokens before it.
+        """
+        assert inverter._fast_invert("Maria del Carmen") == "Carmen, Maria del"
 
 
 class TestStripLcDateQualifier:
