@@ -5,10 +5,14 @@
 __pycache__
 data
 documentation
-tests
 *.txt
 !requirements.txt
+!requirements-dev.txt
 *.tex
+!tests/fixtures/**/*.tex
 *.zip
 *.png
 *.log
+.pytest_cache
+.coverage
+htmlcov
