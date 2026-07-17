@@ -53,7 +53,7 @@ class LatexIndexController(QObject):
                 return
 
         cursor = editor.textCursor()
-        is_range = cursor.hasSelection() and not entry.xref_enabled
+        is_range = cursor.hasSelection()
 
         id_carrier = ReferenceCarrier(-1)
         self.view.nextIdRequested.emit(id_carrier)
@@ -79,27 +79,7 @@ class LatexIndexController(QObject):
         chain = entry.chain()
         doc = editor.document()
 
-        if entry.xref_enabled:
-            # Single macro — xref entries are never ranges
-            absolute_start = cursor.position()
-            target_term = entry.xref_target.strip()
-            mode = entry.xref_type
-            macro_tag = f"\\{entry.command_name}{{{chain}|{mode}{{{target_term}}}}}"
-            cursor.insertText(macro_tag)
-            absolute_end = cursor.position()
-            editor.setTextCursor(cursor)
-
-            block = doc.findBlock(absolute_start)
-            true_line = block.blockNumber() + 1
-            true_col = absolute_start - block.position()
-
-            uid_dict = entry.metadata(assigned_id, path, true_line, true_col)
-            uid_dict["range_partner_id"] = None
-            uid_dict["is_range_closer"] = False
-            self._attach_byte_coordinates(doc, uid_dict, path, absolute_start, absolute_end)
-            self.view.indexInserted.emit(entry.normalized_parts(), uid_dict)
-
-        elif close_id is not None:
+        if close_id is not None:
             # Range entry — two macros, two records, one logical entry in the views
             selected_text = cursor.selectedText()
             start_format = f"|{entry.page_style}|(" if entry.page_style else "|("

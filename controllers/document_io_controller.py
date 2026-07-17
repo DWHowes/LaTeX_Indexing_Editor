@@ -412,6 +412,40 @@ class DocumentIOController(QObject):
         """Public contract for updating the active tab container reference."""
         self.tabs = tabs_widget
 
+    def write_generated_file(self, file_path: str, content: str) -> bool:
+        """
+        Generic full-file overwrite for auto-managed generated files (e.g.
+        cross_refs.tex) -- distinct from the block-splicing injectors below,
+        which update one marked region inside an existing document, this
+        replaces a whole file's contents. Same open-editor-vs-disk branching
+        as the injectors: edits the live QTextDocument if file_path is open
+        in a tab (so the unsaved-changes indicator fires normally),
+        otherwise registers a session backup and writes the file directly,
+        creating it if it doesn't exist yet.
+
+        Returns True on success. On failure (disk write error), emits
+        save_error_encountered and returns False.
+        """
+        open_editor = self._find_open_editor(file_path)
+        if open_editor:
+            from PySide6.QtGui import QTextCursor
+            cursor = QTextCursor(open_editor.document())
+            cursor.select(QTextCursor.SelectionType.Document)
+            cursor.insertText(content)
+            open_editor.document().setModified(True)
+            return True
+
+        self.backup_manager.register_file_for_session(file_path)
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            return True
+        except Exception as e:
+            self.save_error_encountered.emit(
+                "Write Error", f"Could not write {os.path.basename(file_path)}:\n{e}"
+            )
+            return False
+
     # ------------------------------------------------------------------
     # Base-document LaTeX settings injection
     # ------------------------------------------------------------------
@@ -428,6 +462,8 @@ class DocumentIOController(QObject):
     _CUSTOM_COMMANDS_BLOCK_END = "% >>> LaTeX Indexing Editor: END generated custom commands <<<"
     _HEAD_NOTE_BLOCK_BEGIN = "% >>> LaTeX Indexing Editor: BEGIN generated head note (auto-managed) <<<"
     _HEAD_NOTE_BLOCK_END = "% >>> LaTeX Indexing Editor: END generated head note <<<"
+    _CROSS_REFS_BLOCK_BEGIN = "% >>> LaTeX Indexing Editor: BEGIN generated cross-references input (auto-managed) <<<"
+    _CROSS_REFS_BLOCK_END = "% >>> LaTeX Indexing Editor: END generated cross-references input <<<"
 
     def inject_latex_settings(self, file_path: str, preamble_body: str, printindex_body: str) -> bool:
         r"""
@@ -700,3 +736,90 @@ class DocumentIOController(QObject):
 
         head_note_block = f"{self._HEAD_NOTE_BLOCK_BEGIN}\n{head_note_body}\n{self._HEAD_NOTE_BLOCK_END}\n"
         return text[:anchor_idx] + head_note_block + text[anchor_idx:]
+
+    def inject_cross_references(self, file_path: str) -> bool:
+        r"""
+        Splices a static \input{cross_refs.tex} line immediately after
+        \begin{document} in file_path (the project's base/root .tex file),
+        wrapped in its own pair of marker comments. Any previously-injected
+        block (found via those markers, wherever it landed) is stripped
+        before the new one is inserted, so repeated use is a no-op rather
+        than accumulating duplicate \input lines.
+
+        Unlike inject_project_commands (which splices content on every
+        run), this line never needs to change once inserted -- cross_refs.tex
+        itself is regenerated in place by CrossReferenceController whenever
+        the Cross-References tab's data changes, so the base document never
+        needs to be touched again after the first run.
+
+        Same open-editor-vs-disk branching as the other injectors. Returns
+        True on success. On failure (can't find \begin{document}, or a
+        read/write error), emits save_error_encountered and returns False.
+        """
+        open_editor = self._find_open_editor(file_path)
+        if open_editor:
+            original_text = open_editor.document().toPlainText()
+        else:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    original_text = f.read()
+            except Exception as e:
+                self.save_error_encountered.emit("Insert Cross-References Error", f"Could not read base file:\n{e}")
+                return False
+
+        new_text = self._splice_cross_references_block(original_text)
+        if new_text is None:
+            self.save_error_encountered.emit(
+                "Insert Cross-References Error",
+                "Could not locate \\begin{document} in the base file."
+            )
+            return False
+
+        if open_editor:
+            from PySide6.QtGui import QTextCursor
+            cursor = QTextCursor(open_editor.document())
+            cursor.select(QTextCursor.SelectionType.Document)
+            cursor.insertText(new_text)
+            open_editor.document().setModified(True)
+        else:
+            self.backup_manager.register_file_for_session(file_path)
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(new_text)
+            except Exception as e:
+                self.save_error_encountered.emit("Insert Cross-References Error", f"Could not write base file:\n{e}")
+                return False
+
+        self.operation_status_emitted.emit("Cross-references file linked into base document.")
+        return True
+
+    def _splice_cross_references_block(self, text: str) -> "str | None":
+        r"""
+        Pure string-manipulation helper for inject_cross_references().
+        Returns the updated full document text, or None if
+        \begin{document} can't be located.
+
+        Anchors AFTER \begin{document} (unlike _splice_commands_block/
+        _splice_generated_blocks, which anchor before it) -- the user's
+        spec places this block immediately following the start of the
+        document body, not in the preamble.
+        """
+        import re
+
+        cross_refs_re = re.compile(
+            re.escape(self._CROSS_REFS_BLOCK_BEGIN) + r".*?" + re.escape(self._CROSS_REFS_BLOCK_END) + r"\n?",
+            re.DOTALL,
+        )
+
+        # Strip any previously-injected block first (wherever it landed) so
+        # re-running this doesn't accumulate duplicate \input lines.
+        text = cross_refs_re.sub("", text)
+
+        begin_doc_marker = "\\begin{document}"
+        begin_doc_idx = text.find(begin_doc_marker)
+        if begin_doc_idx == -1:
+            return None
+
+        insertion_point = begin_doc_idx + len(begin_doc_marker)
+        cross_refs_block = f"\n{self._CROSS_REFS_BLOCK_BEGIN}\n\\input{{cross_refs.tex}}\n{self._CROSS_REFS_BLOCK_END}"
+        return text[:insertion_point] + cross_refs_block + text[insertion_point:]

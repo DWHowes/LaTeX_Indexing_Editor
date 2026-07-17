@@ -137,6 +137,39 @@ class FileTreeView(QTreeView):
         self.root_file_path = os.path.normpath(root_file_path) if root_file_path else ""
         self._refresh_root_indicators(self.base_model.invisibleRootItem())
 
+    def remove_file_node(self, absolute_path: str) -> bool:
+        """
+        Removes the tree node matching absolute_path from the tree display.
+        Called after a successful prune (see ProjectScopeController.file_pruned)
+        so the workspace tree reflects that the file is no longer part of the
+        project's indexable scope. Does not touch the file on disk -- a full
+        project reload still repopulates the tree straight from the folder
+        scan, same as before.
+        """
+        item = self._find_item_by_path(self.base_model.invisibleRootItem(), os.path.normpath(absolute_path))
+        if item is None:
+            return False
+
+        parent_item = item.parent() or self.base_model.invisibleRootItem()
+        parent_item.removeRow(item.row())
+        self.proxy_model.invalidateFilter()
+        return True
+
+    def _find_item_by_path(self, parent_item: QStandardItem, target_path: str) -> QStandardItem | None:
+        for row in range(parent_item.rowCount()):
+            child = parent_item.child(row)
+            if child is None:
+                continue
+            is_dir = bool(child.data(Qt.ItemDataRole.UserRole))
+            child_path = os.path.normpath(str(child.data(Qt.ItemDataRole.UserRole + 1) or ""))
+            if not is_dir and child_path == target_path:
+                return child
+            if child.hasChildren():
+                found = self._find_item_by_path(child, target_path)
+                if found is not None:
+                    return found
+        return None
+
     def _file_path_from_proxy_index(self, proxy_index: QModelIndex) -> str:
         if not proxy_index.isValid():
             return ""

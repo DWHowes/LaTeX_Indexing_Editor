@@ -37,7 +37,7 @@ Every shortcut in the application, grouped by where it applies. Menu shortcuts a
 | `Ctrl+Alt+M` | Manage Project Commands... |
 | `Ctrl+Alt+R` | Create Rtf File |
 
-**Resync Index Data from Disk**, **Index Statistics...**, and **Check Range Consistency...** don't have shortcuts — use the Tools menu.
+**Resync Index Data from Disk**, **Resync Workspace Files from Disk**, **Manage Pruned Files...**, **Index Statistics...**, and **Check Range Consistency...** don't have shortcuts — use the Tools menu.
 
 ## Help menu
 

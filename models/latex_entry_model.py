@@ -12,9 +12,6 @@ class IndexEntryModel:
     main: str
     sub1: Optional[str] = None
     sub2: Optional[str] = None
-    xref_enabled: bool = False
-    xref_type: str = "see"
-    xref_target: str = ""
     page_style: Optional[str] = None
     command_name: str = "index"
 
@@ -50,13 +47,15 @@ class IndexEntryModel:
     def metadata(self, assigned_id: int, path: str, line: int, col: int) -> dict:
         """
         has_references convention: True means "this entry carries a real
-        page reference" (i.e. NOT an xref-only see/seealso pointer) --
-        flipped to False only when xref_enabled below. This is the
-        authoritative semantic; other has_references write sites
+        page reference" (i.e. NOT an xref-only see/seealso pointer). This
+        is the authoritative semantic; other has_references write sites
         (LatexIndexParser._build_see_reference_payload,
         AppPipelineController._handle_manual_index_insertion) must agree.
+        Cross-reference entries are created exclusively via the
+        Cross-References tab (CrossReferenceController), never through this
+        live-insertion model, so has_references is always True here.
         """
-        uid_dict = {
+        return {
             "id": assigned_id,
             "path": path,
             "line": int(line),
@@ -69,9 +68,4 @@ class IndexEntryModel:
             "is_range_closer": False,
             "command_name": self.command_name,
         }
-        if self.xref_enabled:
-            uid_dict["encap"] = f"{self.xref_type}{{{self.xref_target}}}"
-            uid_dict[self.xref_type] = self.xref_target
-            uid_dict["has_references"] = False
-        return uid_dict
     

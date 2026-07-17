@@ -9,7 +9,7 @@ This tab configures the program that actually turns your raw `\index` entries in
 | **Execution Command Binary** | makeindex | Which engine to use: **makeindex** (the traditional, simpler tool) or **xindy** (more flexible — better multi-language/sorting support, but a separate install). Switching this shows/hides the engine-specific settings below to match. |
 | **Executable Path** | *(empty)* | Full path to the chosen engine's executable. Click **Browse** to pick it. Switching the engine dropdown automatically clears this field, since a path chosen for one engine isn't valid for the other — you'll need to browse to the new one's executable after switching. |
 
-Both the engine choice and this path are required for [RTF Export](../../additional/rtf_export.md) to run.
+Both the engine choice and this path are required for [RTF Export](../../tools/rtf_export.md) to run.
 
 ## makeindex options
 
@@ -52,4 +52,4 @@ Shared by both engines — the same choices here get translated into whichever e
 
 - [imakeidx Package](../../preferences/latex_settings/imakeidx.md)
 - [printindex Command](../../preferences/latex_settings/printindex.md)
-- [RTF Export](../../additional/rtf_export.md)
+- [RTF Export](../../tools/rtf_export.md)

@@ -31,6 +31,8 @@ from controllers.theme_config_controller import ThemeConfigController
 from controllers.entry_modifier_controller import EntryModifierController
 from controllers.index_edit_controller import IndexEditController
 from controllers.range_consistency_controller import RangeConsistencyController
+from controllers.cross_reference_controller import CrossReferenceController
+from controllers.pruned_files_controller import PrunedFilesController
 from controllers.help_controller import HelpController
 
 from controllers.app_style_configuration import AppStyleConfiguration
@@ -118,6 +120,24 @@ class AppPipelineController(QObject):
             window=self.window,
             entry_modifier_model=self.entry_modifier_model,
             index_edit_ctrl=self.index_edit_ctrl,
+            file_watcher=self.lc_ctrl.file_watcher,
+            parent=self,
+        )
+
+        self.cross_reference_ctrl = CrossReferenceController(
+            window=self.window,
+            view=self.sidebar_view_panel.get_cross_reference_view(),
+            index_model_engine=self.index_model_engine,
+            index_edit_ctrl=self.index_edit_ctrl,
+            doc_io=self.doc_io,
+            file_watcher=self.lc_ctrl.file_watcher,
+            parent=self,
+        )
+
+        self.pruned_files_ctrl = PrunedFilesController(
+            window=self.window,
+            scope_ctrl=self.scope_ctrl,
+            file_tree_widget=self.file_tree_widget,
             parent=self,
         )
 
@@ -202,6 +222,15 @@ class AppPipelineController(QObject):
         # File tree context menu connections
         self.file_tree_widget.set_root_requested.connect(self._handle_file_set_as_root)
         self.file_tree_widget.file_prune_requested.connect(self._handle_file_prune_requested)
+        # The live right-click "Prune" / "Set as root" actions are built by
+        # _file_context_manager and emit *_triggered(QModelIndex) directly --
+        # they do not route through FileTreeView's file_prune_requested /
+        # set_root_requested signals above.
+        self._file_context_manager.prune_file_triggered.connect(self.scope_ctrl.process_file_pruning_request)
+        self._file_context_manager.set_root_file_triggered.connect(self._handle_file_set_as_root_index)
+        # Keep the workspace tree display in sync with a successful prune --
+        # process_file_pruning_request/prune_project_file only mutate the DB.
+        self.scope_ctrl.file_pruned.connect(self.file_tree_widget.remove_file_node)
 
         # Connect the direct tree view update to the indexInserted signal
         self.window.latex_index_window.indexInserted.connect(self._handle_manual_index_insertion)
@@ -223,12 +252,17 @@ class AppPipelineController(QObject):
         self.window.menu_bar.edit_menu_about_to_show.connect(self._refresh_insert_settings_menu_state)
         self.window.menu_bar.create_rtf_file_requested.connect(self._handle_create_rtf_file_request)
         self.window.menu_bar.resync_index_data_requested.connect(self._handle_manual_resync_request)
+        self.window.menu_bar.resync_workspace_files_requested.connect(self._handle_manual_workspace_resync_request)
+        self.window.menu_bar.manage_pruned_files_requested.connect(self.pruned_files_ctrl.manage_pruned_files)
 
         self.window.menu_bar.add_head_note_requested.connect(self._handle_add_head_note_dialog)
         self.window.menu_bar.create_latex_command_requested.connect(self.create_command_controller.show_create_command_dialog)
         self.window.menu_bar.manage_project_commands_requested.connect(self.project_command_controller.show_manage_commands_dialog)
         self.window.menu_bar.index_statistics_requested.connect(self._handle_index_statistics_request)
         self.window.menu_bar.range_consistency_check_requested.connect(self.range_consistency_ctrl.run_check)
+        self.window.menu_bar.migrate_legacy_xrefs_requested.connect(self.cross_reference_ctrl.run_migration_scan)
+        self.window.menu_bar.inject_cross_references_requested.connect(self._handle_inject_cross_references)
+        self.window.menu_bar.tools_menu_about_to_show.connect(self._refresh_cross_ref_menu_state)
         self.window.menu_bar.help_contents_requested.connect(self.help_ctrl.show_help)
         self.project_command_controller.commands_changed.connect(self._refresh_index_command_options)
 
@@ -490,21 +524,34 @@ class AppPipelineController(QObject):
         persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
         if persistence:
             persistence.set_metadata_value("root_tex_file", os.path.normpath(file_path))
+            self.file_tree_widget.set_root_file_path(file_path)
             self.window.status_bar.showMessage("Root file set successfully.", 3000)
         else:
             print("PERSISTENCE ERROR: No file database persistence model has been set.")
+
+    @Slot(QModelIndex)
+    def _handle_file_set_as_root_index(self, proxy_index: QModelIndex):
+        """
+        Adapter for the live right-click "Set as root file" action, which
+        emits a QModelIndex (see _file_context_manager.set_root_file_triggered
+        wiring in _bind_signal_pipelines) rather than the str path
+        _handle_file_set_as_root expects.
+        """
+        persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+        if not persistence:
+            return
+        file_path = persistence.get_absolute_path(proxy_index)
+        if file_path:
+            self._handle_file_set_as_root(file_path)
 
     @Slot(str)
     def _handle_file_prune_requested(self, absolute_path: str):
         if not absolute_path or not self.scope_ctrl:
             return
-        # Optional: route to an existing project file pruning interface
-        try:
-            self.scope_ctrl.prune_project_file(absolute_path)
+        if self.scope_ctrl.prune_project_file(absolute_path):
             self.window.status_bar.showMessage("File removed from workspace.", 3000)
-        except AttributeError as e:
-            print(f"File Prune error: {e}. Prune attempt ignored")
-            pass
+        else:
+            self.window.status_bar.showMessage("File prune failed: record not found.", 3000)
 
     @Slot(object, object)
     def _handle_workspace_sync_request(self, editor_tab: EditorTab, path_carrier: ReferenceCarrier):
@@ -724,6 +771,7 @@ class AppPipelineController(QObject):
                                                   file_persistence=self.scope_ctrl.get_persistence_model()
                                                   )
         self.range_consistency_ctrl.set_active_project(self.scope_ctrl.get_persistence_model())
+        self.cross_reference_ctrl.set_active_project(self.scope_ctrl.get_persistence_model(), project_root_dir)
         self.window.status_bar.showMessage(f"Project '{project_name}' loaded successfully.", 3000)
 
         # Enable menu items that are gated behind an active project context
@@ -755,7 +803,19 @@ class AppPipelineController(QObject):
             self._load_thread.quit()
 
     def _collect_tex_file_paths(self, file_tree_payload: list) -> list:
-        """Flattens a file-tree payload into a list of every .tex file's absolute path."""
+        """
+        Flattens a file-tree payload into a list of every .tex file's
+        absolute path, for the three external-change-detection consumers
+        below (_register_all_project_tex_files, _update_file_sync_checksums,
+        _check_for_external_drift_and_prompt). cross_refs.tex is excluded --
+        it's auto-managed and rewritten wholesale by CrossReferenceController
+        on every Cross-References tab change, so its own checksum/content
+        constantly "drifts" as a normal, expected side effect of using the
+        app, not an external edit worth watching for or prompting about.
+        Same exclusion as ProjectLoadWorker._scan_folder_data's
+        _tex_file_paths, applied here since this is a separate list built
+        straight from file_tree_payload rather than reusing that one.
+        """
         paths: list = []
 
         def _walk(nodes: list) -> None:
@@ -765,7 +825,8 @@ class AppPipelineController(QObject):
                 if node.get("is_dir") is False:
                     path = node.get("path")
                     if isinstance(path, str) and path.lower().endswith(".tex"):
-                        paths.append(path)
+                        if os.path.basename(path).lower() != "cross_refs.tex":
+                            paths.append(path)
                 children = node.get("children")
                 if isinstance(children, list):
                     _walk(children)
@@ -929,6 +990,39 @@ class AppPipelineController(QObject):
             return
         self._resync_index_data_from_disk()
         self.window.status_bar.showMessage("Index data resynced from disk.", 3000)
+
+    @Slot()
+    def _handle_manual_workspace_resync_request(self) -> None:
+        if self.scope_ctrl.active_project_name == "Untitled Project":
+            self.window.status_bar.showMessage("No project is open.", 3000)
+            return
+        self._resync_workspace_files_from_disk()
+        self.window.status_bar.showMessage("Workspace files resynced from disk.", 3000)
+
+    def _resync_workspace_files_from_disk(self) -> None:
+        """
+        Explicit escape hatch back to "the Workspace Files tree matches disk
+        exactly" -- re-walks the project directory and resets project_files
+        to match it (un-pruning any previously pruned file still present,
+        dropping rows for files that no longer exist), then repopulates the
+        tree from that fresh scan. Project (re)open otherwise never re-walks
+        the directory once project_files has tracked content -- see
+        ProjectLoadWorker.process() -- trusting the DB as source of truth.
+        """
+        persistence = self.scope_ctrl.get_persistence_model()
+        db_path = self.scope_ctrl.get_active_database_path()
+        if not persistence or not db_path:
+            return
+        project_root = os.path.dirname(os.path.normpath(db_path))
+
+        worker = ProjectLoadWorker(db_persistence=persistence, project_root=project_root)
+        file_tree_payload = worker.scan_file_tree()
+
+        self.scope_ctrl.resync_project_files(file_tree_payload)
+
+        root_tex_file = self.scope_ctrl.get_current_project_metadata_value("root_tex_file")
+        self.file_tree_widget.populate_file_hierarchy(file_tree_payload, root_tex_file)
+        self._register_all_project_tex_files(file_tree_payload)
 
     @Slot()
     def _handle_index_statistics_request(self) -> None:
@@ -1120,6 +1214,45 @@ class AppPipelineController(QObject):
             )
 
     @Slot()
+    def _refresh_cross_ref_menu_state(self) -> None:
+        """
+        Re-evaluates "Insert Cross-References File..." enabled-state right
+        before the Tools menu opens -- same lazy base-file-chosen recheck as
+        _refresh_insert_settings_menu_state, just for the Tools menu instead
+        of the Edit menu (update_menu_item_state() already forces this off
+        immediately on project close).
+        """
+        is_project_open = self.scope_ctrl.active_project_name != "Untitled Project"
+        has_root_file = bool(self.scope_ctrl.get_current_project_metadata_value("root_tex_file"))
+        self.window.menu_bar.set_inject_cross_refs_enabled(is_project_open and has_root_file)
+
+    @Slot()
+    def _handle_inject_cross_references(self) -> None:
+        """
+        Splices \\input{cross_refs.tex} into the project's base document,
+        immediately after \\begin{document}. cross_refs.tex itself is kept
+        up to date automatically by CrossReferenceController whenever the
+        Cross-References tab's data changes, so this only ever needs to run
+        once per base document -- re-running it is a harmless no-op
+        (DocumentIOController.inject_cross_references strips and re-inserts
+        its own marker block).
+        """
+        root_tex_file = self.scope_ctrl.get_current_project_metadata_value("root_tex_file")
+        if not root_tex_file:
+            self.window.status_bar.showMessage("No base document has been selected for this project.", 3000)
+            return
+
+        xrefs = self.scope_ctrl.get_persistence_model().fetch_project_cross_references()
+        if not xrefs:
+            self.window.status_bar.showMessage("No cross-references have been added to this project.", 3000)
+            return
+
+        if self.doc_io.inject_cross_references(root_tex_file):
+            self.window.status_bar.showMessage(
+                f"Cross-references file linked into {os.path.basename(root_tex_file)}.", 4000
+            )
+
+    @Slot()
     def _handle_create_rtf_file_request(self) -> None:
         """
         Runs the full RTF export pipeline (single-pass pdflatex draft
@@ -1261,6 +1394,7 @@ class AppPipelineController(QObject):
         self._theme_controller.set_active_project(None, None)
         self.project_command_controller.set_active_project(None, None)
         self.range_consistency_ctrl.set_active_project(None)
+        self.cross_reference_ctrl.set_active_project(None, None)
         self._refresh_index_command_options()
 
         self._tree_modified = False

@@ -168,6 +168,21 @@ class FileTreePersistence:
                 );
             """)
 
+            # Partition 7: Cross-references managed by the "Cross-References"
+            # Edit Entries sub-tab. This table is the authoritative source
+            # for cross_refs.tex -- that file is fully regenerated from these
+            # rows on every add/edit/remove, never hand-parsed back in. See
+            # CrossReferenceController.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS project_cross_references (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_heading TEXT NOT NULL,
+                    xref_type TEXT NOT NULL DEFAULT 'see',
+                    target_heading TEXT NOT NULL,
+                    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
             default_metadata = [
                 ("schema_version", "1.0.0"),
                 ("project_name", self._pending_project_name),
@@ -231,25 +246,73 @@ class FileTreePersistence:
         return os.path.normpath(raw_path) if raw_path else ""
 
     def prune_file_record(self, absolute_path: str) -> bool:
-        """Removes a tracked file record. Transaction is staged; caller commits."""
+        """
+        Marks a tracked file record inactive (is_active = 0) rather than
+        deleting the row outright. A hard delete would leave project_files
+        empty once every tracked file happened to be pruned, and
+        ProjectLoadWorker.process() treats an empty project_files as "brand
+        new project, nothing tracked yet" -- triggering a full filesystem
+        rescan that would rediscover and silently un-prune everything. The
+        row surviving as an inactive marker is what keeps that from
+        happening. Commits immediately: the `with` block below commits on
+        clean exit, so no separate commit call is needed or made by the
+        caller.
+        """
         if not self.db_path:
             return False
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "DELETE FROM project_files WHERE absolute_path = ?;",
+                    "UPDATE project_files SET is_active = 0 WHERE absolute_path = ?;",
                     (absolute_path,)
                 )
                 rows_affected = cursor.rowcount
                 if rows_affected > 0:
-                    print(f"[DB TRACE] Row cleared for path target: '{absolute_path}'. Transaction staged.")
+                    print(f"[DB TRACE] Row marked inactive for path target: '{absolute_path}'. Committed.")
                     return True
                 else:
                     print(f"[DB TRACE] Pruning target '{absolute_path}' not found in database schema records.")
                     return False
         except Exception as db_err:
-            print(f"[DB CRITICAL FAILURE] Failed to execute deletion statement: {db_err}")
+            print(f"[DB CRITICAL FAILURE] Failed to execute prune update statement: {db_err}")
+            return False
+
+    def fetch_pruned_files(self) -> List[Dict[str, Any]]:
+        """
+        Retrieves every pruned (is_active = 0) file record, for the "Manage
+        Pruned Files..." dialog's checklist.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT file_name, absolute_path FROM project_files WHERE is_active = 0 ORDER BY file_name COLLATE NOCASE"
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def unprune_file_record(self, absolute_path: str) -> bool:
+        """
+        Marks a previously pruned file record active again (is_active = 1)
+        -- the inverse of prune_file_record. Commits immediately, same as
+        prune_file_record.
+        """
+        if not self.db_path:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE project_files SET is_active = 1 WHERE absolute_path = ?;",
+                    (absolute_path,)
+                )
+                rows_affected = cursor.rowcount
+                if rows_affected > 0:
+                    print(f"[DB TRACE] Row marked active for path target: '{absolute_path}'. Committed.")
+                    return True
+                else:
+                    print(f"[DB TRACE] Un-prune target '{absolute_path}' not found in database schema records.")
+                    return False
+        except Exception as db_err:
+            print(f"[DB CRITICAL FAILURE] Failed to execute un-prune update statement: {db_err}")
             return False
     
     def fetch_project_custom_commands(self) -> List[Dict[str, str]]:
@@ -309,6 +372,105 @@ class FileTreePersistence:
         except Exception as db_err:
             print(f"[DB CRITICAL FAILURE] Failed to execute deletion statement: {db_err}")
             return False
+
+    def fetch_project_cross_references(self) -> List[Dict[str, Any]]:
+        """Returns every cross-reference in this project, source-then-target sorted."""
+        if not self.db_path:
+            return []
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "SELECT id, source_heading, xref_type, target_heading "
+                    "FROM project_cross_references "
+                    "ORDER BY source_heading COLLATE NOCASE, target_heading COLLATE NOCASE"
+                )
+                return [dict(row) for row in cursor.fetchall()]
+        except sqlite3.Error as e:
+            print(f"[DB ERROR] Failed to read project cross-references: {e}")
+            return []
+
+    def add_project_cross_reference(self, source_heading: str, xref_type: str, target_heading: str) -> int | None:
+        """Inserts a new cross-reference row and returns its assigned id, or None on failure."""
+        if not self.db_path:
+            return None
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO project_cross_references (source_heading, xref_type, target_heading) "
+                    "VALUES (?, ?, ?)",
+                    (source_heading, xref_type, target_heading)
+                )
+                conn.commit()
+                return cursor.lastrowid
+        except sqlite3.Error as e:
+            print(f"[DB ERROR] Failed to add cross-reference '{source_heading}': {e}")
+            return None
+
+    def update_project_cross_reference(self, entry_id: int, source_heading: str, xref_type: str, target_heading: str) -> bool:
+        """Overwrites an existing cross-reference row's fields. Returns True if a row was updated."""
+        if not self.db_path:
+            return False
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE project_cross_references "
+                    "SET source_heading = ?, xref_type = ?, target_heading = ? "
+                    "WHERE id = ?",
+                    (source_heading, xref_type, target_heading, entry_id)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except sqlite3.Error as e:
+            print(f"[DB ERROR] Failed to update cross-reference id {entry_id}: {e}")
+            return False
+
+    def remove_project_cross_reference(self, entry_id: int) -> bool:
+        """Deletes a cross-reference row by id. Returns True if a row was removed."""
+        if not self.db_path:
+            return False
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM project_cross_references WHERE id = ?", (entry_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except sqlite3.Error as e:
+            print(f"[DB ERROR] Failed to remove cross-reference id {entry_id}: {e}")
+            return False
+
+    def fetch_legacy_cross_reference_candidates(self) -> List[Dict[str, Any]]:
+        """
+        Raw rows for the "Migrate Legacy Cross-References..." tool
+        (CrossReferenceController.run_migration_scan): every
+        project_references row whose encap is a see/seealso pipe-modifier
+        (the term written directly on an ordinary \\index macro somewhere in
+        the project, from before the Cross-References tab existed), rather
+        than a row already managed via project_cross_references. Same
+        encap-prefix predicate fetch_index_statistics's is_cross_reference_sql
+        and fetch_range_consistency_candidates already use to recognize a
+        cross-reference row.
+        """
+        if not self.db_path:
+            return []
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "SELECT unique_id_number, heading_raw_text, file_path, line_number, encap "
+                    "FROM project_references "
+                    "WHERE encap LIKE 'see{%' OR encap LIKE 'seealso{%' "
+                    "ORDER BY heading_raw_text COLLATE NOCASE"
+                )
+                return [dict(row) for row in cursor.fetchall()]
+        except sqlite3.Error as e:
+            print(f"[DB ERROR] Failed to read legacy cross-reference candidates: {e}")
+            return []
 
     def update_active_database_connection(self, new_db_path: str) -> None:
         """
@@ -537,6 +699,66 @@ class FileTreePersistence:
             cursor.close()
             conn.close()
 
+    def resync_project_files(self, scanned_records: list[dict]) -> None:
+        """
+        Explicit, user-triggered rebuild of project_files to match a fresh
+        directory scan exactly: every scanned .tex file is upserted with
+        is_active reset to 1 (undoing any prior prune), and any existing row
+        whose path is absent from this scan (deleted/moved since last
+        tracked) is removed outright. This is the deliberate escape hatch
+        back to "everything on disk is included" -- unlike upsert_project_files,
+        which preserves is_active on conflict so a normal project (re)open
+        can never silently resurrect a pruned file.
+        """
+        if not self.db_path:
+            return
+
+        sanitized_batch = []
+        scanned_paths: set[str] = set()
+        for record in scanned_records:
+            abs_path = record.get("absolute_path") or record.get("file_path") or record.get("path")
+            if not abs_path:
+                continue
+            path_obj = Path(str(abs_path))
+            if path_obj.suffix.lower() != ".tex":
+                continue
+
+            abs_path = os.path.normpath(str(abs_path))
+            file_name = record.get("file_name") or os.path.basename(abs_path)
+            sanitized_batch.append((abs_path, str(file_name), 1))
+            scanned_paths.add(abs_path)
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                if sanitized_batch:
+                    cursor.executemany(
+                        """
+                        INSERT INTO project_files (absolute_path, file_name, is_active)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(absolute_path) DO UPDATE SET
+                            file_name = excluded.file_name,
+                            is_active = 1,
+                            last_indexed = CURRENT_TIMESTAMP
+                        """,
+                        sanitized_batch
+                    )
+
+                existing_paths = [
+                    row["absolute_path"] for row in cursor.execute("SELECT absolute_path FROM project_files").fetchall()
+                ]
+                stale_paths = [p for p in existing_paths if p not in scanned_paths]
+                if stale_paths:
+                    cursor.executemany(
+                        "DELETE FROM project_files WHERE absolute_path = ?",
+                        [(p,) for p in stale_paths]
+                    )
+
+                print(f"[DB TRACE] resync_project_files: {len(sanitized_batch)} file(s) tracked, {len(stale_paths)} stale row(s) removed.")
+        except sqlite3.Error as err:
+            print(f"[DATABASE ERROR] resync_project_files failed: {err}")
+
     def serialize_scraped_index_manifest(self, headings: list[dict], references: list[dict]) -> None:
         """
         Public Model Endpoint.
@@ -706,20 +928,20 @@ class FileTreePersistence:
         makes has_references trustworthy across every existing project.
 
         Also does NOT use see_references/seealso_references directly --
-        LatexIndexParser._extract_see_modifiers now populates those from
-        the standard imakeidx pipe-modifier syntax too (\\index{term|see
+        LatexIndexParser._extract_see_modifiers populates those from the
+        standard imakeidx pipe-modifier syntax too (\\index{term|see
         {Target}} / \\index{term|seealso{Target}}, no backslash -- LaTeX
         prepends one internally when expanding the pipe), not just the
         rarer backslash-prefixed \\see{...}/\\seealso{...} form embedded
         in display text. But that pipe syntax is captured into the encap
         column regardless (LatexIndexParser via _strip_global_encap_safe,
-        and IndexEntryModel.metadata() via `encap =
-        f"{xref_type}{{{xref_target}}}"` for a live-inserted xref entry),
-        so encap LIKE 'see{%' / 'seealso{%' remains the simplest signal
-        both entry-creation paths agree on regardless of DB vintage.
-        Range closers are excluded from both counts -- they're the
-        second half of one logical range entry, not an independent
-        reference; the range's opener already accounts for it.
+        and CrossReferenceController via cross_reference_model.
+        build_xref_index_macro for a cross-reference created through the
+        Cross-References tab), so encap LIKE 'see{%' / 'seealso{%' remains
+        the simplest signal both entry-creation paths agree on regardless
+        of DB vintage. Range closers are excluded from both counts --
+        they're the second half of one logical range entry, not an
+        independent reference; the range's opener already accounts for it.
         """
         stats = {
             "main_headings": 0,

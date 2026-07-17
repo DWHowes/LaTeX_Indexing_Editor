@@ -41,6 +41,28 @@ class ExternalFileWatcherEngine(QObject):
         if tracked:
             self._watcher.removePaths(tracked)
 
+    def pause_watching(self) -> None:
+        """
+        Temporarily suppresses fileChanged emission. Callers making a
+        deliberate burst of their own direct-to-disk writes (e.g.
+        CrossReferenceController's/RangeConsistencyController's bulk
+        delete loops, each of which can call DocumentIOController.
+        rewrite_macro_span dozens of times against a file that isn't open
+        in a tab) must bracket that loop with pause_watching()/
+        resume_watching() -- otherwise every one of the app's own writes
+        gets misdetected as an external edit, and each triggers a full,
+        expensive _resync_index_data_from_disk() that reassigns every
+        unique_id_number from scratch, invalidating ids the caller's own
+        loop is still relying on. Always pair with resume_watching() in a
+        try/finally so a mid-loop exception can't leave watching disabled
+        for the rest of the session.
+        """
+        self._watcher.blockSignals(True)
+
+    def resume_watching(self) -> None:
+        """Re-enables fileChanged emission after pause_watching()."""
+        self._watcher.blockSignals(False)
+
     @Slot(str)
     def _handle_external_file_modification(self, modified_path: str):
         """Streams raw incoming disk updates out-of-band via data signals."""

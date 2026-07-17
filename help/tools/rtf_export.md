@@ -30,4 +30,5 @@ If **Display RTF file on creation** is checked (in [Preferences](../preferences.
 
 - [The Base File](../getting_started/base_file.md)
 - [Preferences](../preferences.md)
-- [Index Statistics](../tools/index_statistics.md)
+- [Index Statistics](index_statistics.md)
+- [Head Notes](head_notes.md)

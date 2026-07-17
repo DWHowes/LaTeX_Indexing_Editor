@@ -22,10 +22,15 @@ class MainMenuBar(QMenuBar):
     manage_project_commands_requested = Signal()
     create_rtf_file_requested = Signal()
     resync_index_data_requested = Signal()
+    resync_workspace_files_requested = Signal()
+    manage_pruned_files_requested = Signal()
     index_statistics_requested = Signal()
     range_consistency_check_requested = Signal()
+    migrate_legacy_xrefs_requested = Signal()
+    inject_cross_references_requested = Signal()
     help_contents_requested = Signal()
     edit_menu_about_to_show = Signal()
+    tools_menu_about_to_show = Signal()
 
     def __init__(self, parent_window=None):
         super().__init__(parent_window)
@@ -143,6 +148,27 @@ class MainMenuBar(QMenuBar):
         self.resync_index_data_action.triggered.connect(lambda: self.resync_index_data_requested.emit())
         self.resync_index_data_action.setEnabled(False)
 
+        # Escape hatch back to "the Workspace Files tree matches disk
+        # exactly" -- project (re)open normally trusts project_files as the
+        # source of truth once it has tracked content and never re-walks
+        # the directory tree (see ProjectLoadWorker.process()), so a file
+        # added, removed, or moved outside the app needs this manual action
+        # to be picked back up. Restores every pruned file still present on
+        # disk at once -- manage_pruned_files_action below is the per-file
+        # equivalent.
+        self.resync_workspace_files_action = tools_menu.addAction("Resync &Workspace Files from Disk")
+        self.resync_workspace_files_action.triggered.connect(lambda: self.resync_workspace_files_requested.emit())
+        self.resync_workspace_files_action.setEnabled(False)
+
+        # Pruning (via the Workspace Files tree's right-click menu) removes
+        # a file from the tree entirely, so there's no per-file affordance
+        # left in the tree to reverse it -- this checklist dialog is that
+        # missing entry point, letting the user restore individual pruned
+        # files instead of everything at once via resync_workspace_files_action.
+        self.manage_pruned_files_action = tools_menu.addAction("Manage &Pruned Files...")
+        self.manage_pruned_files_action.triggered.connect(lambda: self.manage_pruned_files_requested.emit())
+        self.manage_pruned_files_action.setEnabled(False)
+
         self.index_statistics_action = tools_menu.addAction("Index &Statistics...")
         self.index_statistics_action.triggered.connect(lambda: self.index_statistics_requested.emit())
         self.index_statistics_action.setEnabled(False)
@@ -150,6 +176,32 @@ class MainMenuBar(QMenuBar):
         self.range_consistency_check_action = tools_menu.addAction("Check Range &Consistency...")
         self.range_consistency_check_action.triggered.connect(lambda: self.range_consistency_check_requested.emit())
         self.range_consistency_check_action.setEnabled(False)
+
+        tools_menu.addSeparator()
+
+        # Finds cross-references still written the old way -- inline on an
+        # ordinary \index macro, from before the Cross-References tab
+        # existed -- and offers to move them into the new system. Only
+        # meaningful with a project open (no base-file dependency, unlike
+        # inject_cross_refs_action below), so it's gated the same simple
+        # way as range_consistency_check_action.
+        self.migrate_legacy_xrefs_action = tools_menu.addAction("Migrate &Legacy Cross-References...")
+        self.migrate_legacy_xrefs_action.triggered.connect(lambda: self.migrate_legacy_xrefs_requested.emit())
+        self.migrate_legacy_xrefs_action.setEnabled(False)
+
+        # Splices \input{cross_refs.tex} into the project's base document.
+        # Only meaningful once a project is open AND a base/root .tex file
+        # has been chosen -- same two-part gate as insert_settings_action /
+        # insert_project_commands_action in the Edit menu:
+        # update_menu_item_state() covers "project open", and
+        # tools_menu_about_to_show (below) covers "base file chosen", which
+        # can change independently at any time via the tree view's "Set as
+        # base file" action.
+        self.inject_cross_refs_action = tools_menu.addAction("Insert &Cross-References File...")
+        self.inject_cross_refs_action.triggered.connect(lambda: self.inject_cross_references_requested.emit())
+        self.inject_cross_refs_action.setEnabled(False)
+
+        tools_menu.aboutToShow.connect(lambda: self.tools_menu_about_to_show.emit())
 
         # --- Help Menu ---
         # Not gated behind an active project (unlike the Tools actions
@@ -172,18 +224,27 @@ class MainMenuBar(QMenuBar):
         self.index_entry_action.setEnabled(is_enabled)
         self.head_note_action.setEnabled(is_enabled)
         self.resync_index_data_action.setEnabled(is_enabled)
+        self.resync_workspace_files_action.setEnabled(is_enabled)
+        self.manage_pruned_files_action.setEnabled(is_enabled)
         self.manage_project_commands_action.setEnabled(is_enabled)
         self.index_statistics_action.setEnabled(is_enabled)
         self.range_consistency_check_action.setEnabled(is_enabled)
+        self.migrate_legacy_xrefs_action.setEnabled(is_enabled)
         # Project closing always forces this off immediately. Project opening
         # only forces it as far as "project is open" -- whether a base file
         # has ALSO been chosen is re-checked separately whenever the Edit
-        # menu is about to open, via edit_menu_about_to_show.
+        # menu is about to open, via edit_menu_about_to_show (and, for
+        # inject_cross_refs_action, tools_menu_about_to_show).
         if not is_enabled:
             self.insert_settings_action.setEnabled(False)
             self.insert_project_commands_action.setEnabled(False)
+            self.inject_cross_refs_action.setEnabled(False)
 
     def set_insert_settings_enabled(self, enabled: bool) -> None:
         """Public contract for the controller to reflect base-file-chosen state."""
         self.insert_settings_action.setEnabled(enabled)
         self.insert_project_commands_action.setEnabled(enabled)
+
+    def set_inject_cross_refs_enabled(self, enabled: bool) -> None:
+        """Public contract for the controller to reflect base-file-chosen state (Tools menu)."""
+        self.inject_cross_refs_action.setEnabled(enabled)

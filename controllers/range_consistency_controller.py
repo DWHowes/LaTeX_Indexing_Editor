@@ -48,11 +48,12 @@ class RangeConsistencyController(QObject):
         "enclosed_point": "Enclosed point references",
     }
 
-    def __init__(self, window, entry_modifier_model, index_edit_ctrl, parent=None):
+    def __init__(self, window, entry_modifier_model, index_edit_ctrl, file_watcher=None, parent=None):
         super().__init__(parent or window)
         self._window = window
         self._entry_model = entry_modifier_model
         self._index_edit_ctrl = index_edit_ctrl
+        self._file_watcher = file_watcher
         self._persistence = None  # bound per-project via set_active_project
         self.dialog = None
 
@@ -208,37 +209,50 @@ class RangeConsistencyController(QObject):
         skipped = 0
         failed = 0
 
-        for issue in issues:
-            entry_ids = issue["entries"]
-            if not all(eid in self._entry_model._records for eid in entry_ids):
-                # An earlier fix in this same batch already consumed one of
-                # this issue's entries (e.g. shared between two reported
-                # issues) — nothing left here to act on.
-                skipped += 1
-                continue
+        # See CrossReferenceController._on_migration_approved's matching
+        # comment: handle_entry_deletion can write straight to disk when
+        # its target file isn't open in a tab, and every registered
+        # project file is watched for external edits -- without pausing
+        # that watch here, a batch of several fixes in the same unopened
+        # file can each get misdetected as an external change and trigger
+        # a redundant, state-invalidating full resync mid-loop.
+        if self._file_watcher is not None:
+            self._file_watcher.pause_watching()
+        try:
+            for issue in issues:
+                entry_ids = issue["entries"]
+                if not all(eid in self._entry_model._records for eid in entry_ids):
+                    # An earlier fix in this same batch already consumed one of
+                    # this issue's entries (e.g. shared between two reported
+                    # issues) — nothing left here to act on.
+                    skipped += 1
+                    continue
 
-            kind = issue["kind"]
+                kind = issue["kind"]
 
-            if kind in ("orphaned_opener", "orphaned_closer", "enclosed_point"):
-                target_id = entry_ids[-1]
-                if self._index_edit_ctrl.handle_entry_deletion(target_id):
-                    applied += 1
+                if kind in ("orphaned_opener", "orphaned_closer", "enclosed_point"):
+                    target_id = entry_ids[-1]
+                    if self._index_edit_ctrl.handle_entry_deletion(target_id):
+                        applied += 1
+                    else:
+                        failed += 1
+
+                elif kind == "overlapping_ranges":
+                    first_open_id, first_close_id, second_open_id, second_close_id = entry_ids
+                    ok_close = self._index_edit_ctrl.handle_entry_deletion(first_close_id)
+                    ok_open = self._index_edit_ctrl.handle_entry_deletion(second_open_id)
+                    if ok_close and ok_open:
+                        self._entry_model.relink_range_partner(first_open_id, second_close_id)
+                        self._entry_model.relink_range_partner(second_close_id, first_open_id)
+                        applied += 1
+                    else:
+                        failed += 1
+
                 else:
-                    failed += 1
-
-            elif kind == "overlapping_ranges":
-                first_open_id, first_close_id, second_open_id, second_close_id = entry_ids
-                ok_close = self._index_edit_ctrl.handle_entry_deletion(first_close_id)
-                ok_open = self._index_edit_ctrl.handle_entry_deletion(second_open_id)
-                if ok_close and ok_open:
-                    self._entry_model.relink_range_partner(first_open_id, second_close_id)
-                    self._entry_model.relink_range_partner(second_close_id, first_open_id)
-                    applied += 1
-                else:
-                    failed += 1
-
-            else:
-                skipped += 1
+                    skipped += 1
+        finally:
+            if self._file_watcher is not None:
+                self._file_watcher.resume_watching()
 
         return applied, skipped, failed
 

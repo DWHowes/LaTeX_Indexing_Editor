@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QLabel,
     QRadioButton,
-    QCheckBox,
     QComboBox,
     QButtonGroup,
     QGridLayout,
@@ -177,24 +176,7 @@ class LatexIndexWindow(QDockWidget):
         self.input_layout.addWidget(self.sub2_label, 2, 0)
         self.input_layout.addWidget(self.sub2_entry, 2, 1)
 
-        self.xref_layout = QHBoxLayout()
-        self.xref_enable = QCheckBox("Cross-Reference (Xref)")
-        self.xref_type = QComboBox()
-        self.xref_type.addItems(["see", "seealso"])
-        self.xref_type.setFixedWidth(80)
-        self.xref_target = QLineEdit(placeholderText="Target Reference Term (e.g., discursive context)")
-
-        self.xref_type.setEnabled(False)
-        self.xref_target.setEnabled(False)
-        self.xref_enable.toggled.connect(self.toggle_xref_mode)
-
-        self.xref_layout.addWidget(self.xref_enable)
-        self.xref_layout.addWidget(self.xref_type)
-        self.xref_layout.addWidget(self.xref_target)
-        self.xref_layout.addStretch()
-
         self.layout.addLayout(self.input_layout)
-        self.layout.addLayout(self.xref_layout)
 
         self.bar_layout = QHBoxLayout()
 
@@ -253,7 +235,7 @@ class LatexIndexWindow(QDockWidget):
         for btn in [self.none_ref, self.bold_ref, self.italic_ref]:
             self.style_group.addButton(btn)
 
-        for field in [self.main_entry, self.sub1_entry, self.sub2_entry, self.xref_target]:
+        for field in [self.main_entry, self.sub1_entry, self.sub2_entry]:
             field.installEventFilter(self)
 
         self.insert_btn = QPushButton("Insert Index Tag")
@@ -334,30 +316,6 @@ class LatexIndexWindow(QDockWidget):
             self.sub2_entry.show()
             self.sub2_entry.setFocus()
 
-    def toggle_xref_mode(self, enabled: bool):
-        self.xref_type.setEnabled(enabled)
-        self.xref_target.setEnabled(enabled)
-
-        self.none_ref.setEnabled(not enabled)
-        self.bold_ref.setEnabled(not enabled)
-        self.italic_ref.setEnabled(not enabled)
-        self.bold_entry.setEnabled(not enabled)
-        self.ital_entry.setEnabled(not enabled)
-
-        active_style = "color: palette(text);"
-        disabled_style = "color: grey;"
-
-        faded_style = disabled_style if enabled else active_style
-        self.page_ref_label.setStyleSheet(faded_style)
-        self.text_style_label.setStyleSheet(faded_style)
-
-        self.none_ref.setStyleSheet(faded_style)
-        self.bold_ref.setStyleSheet(faded_style)
-        self.italic_ref.setStyleSheet(faded_style)
-
-        if enabled:
-            self.xref_target.setFocus()
-
     def format_selected_text(self, command):
         field = self.last_focused_field
         if not field or not field.hasSelectedText():
@@ -380,9 +338,6 @@ class LatexIndexWindow(QDockWidget):
             "main": self.main_entry.text(),
             "sub1": self.sub1_entry.text(),
             "sub2": self.sub2_entry.text(),
-            "xref_enabled": self.xref_enable.isChecked(),
-            "xref_type": self.xref_type.currentText(),
-            "xref_target": self.xref_target.text(),
             "page_style": "bold" if self.bold_ref.isChecked() else "italic" if self.italic_ref.isChecked() else None,
             "command_name": self.command_selector.currentText(),
         }
@@ -417,8 +372,6 @@ class LatexIndexWindow(QDockWidget):
         self.main_entry.clear()
         self.sub1_entry.clear()
         self.sub2_entry.clear()
-        self.xref_target.clear()
-        self.xref_enable.setChecked(False)
 
         for w in [self.sub1_label, self.sub1_entry, self.sub2_label, self.sub2_entry]:
             w.hide()

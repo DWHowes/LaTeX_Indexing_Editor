@@ -20,13 +20,11 @@ Three heading-level fields, revealed progressively rather than all shown at once
 
 All three fields offer live autocomplete as you type, suggesting headings already used elsewhere in the project at that same level — useful for staying consistent (so "Fairness beliefs" and "fairness beliefs" don't end up as two different headings by accident).
 
-## Cross-Reference (Xref)
-
-Check **Cross-Reference (Xref)** to turn this entry into a "see"/"see also" pointer instead of a page reference — see [Cross-References](../index_tree/cross_references.md). Checking it enables the **see**/**seealso** dropdown and the **Target Reference Term** field next to it (and focuses the target field for you), while disabling **Text Style** and **Page Ref** below, since neither applies to a cross-reference.
-
 ## Text Style
 
-The **B** / **I** buttons format *part* of whatever you're currently typing — they wrap the **selected text** in whichever field you were last in (Main, Subhead 1, Subhead 2, or the cross-reference target) in `\textbf{...}`/`\textit{...}`. Use this to italicize or bold one word within a heading, not the whole entry's page number — for that, see **Page Ref** below. Select some text in a field first, then click B or I.
+The **B** / **I** buttons format *part* of whatever you're currently typing — they wrap the **selected text** in whichever field you were last in (Main, Subhead 1, or Subhead 2) in `\textbf{...}`/`\textit{...}`. Use this to italicize or bold one word within a heading, not the whole entry's page number — for that, see **Page Ref** below. Select some text in a field first, then click B or I.
+
+> Cross-references ("see"/"see also" pointers) are created separately, in the **Cross-References** tab of Edit Entries — not from this window. See [Cross-References](../index_tree/cross_references.md).
 
 ## Page Ref
 

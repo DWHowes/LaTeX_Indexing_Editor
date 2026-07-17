@@ -2,6 +2,8 @@
 
 The editor normally keeps its project database in step with your `.tex` files automatically — every insert, edit, and delete made through the editor writes to both at once. **Resync Index Data from Disk** (**Tools → Resync Index Data from Disk**) is the manual fallback for when the two fall out of step some other way.
 
+This rebuilds the **heading tree and reference list** — the `\index` entries themselves. If you instead need to pick up a `.tex` file that was added, removed, un-pruned, or moved on disk outside the editor, use [Resyncing Workspace Files from Disk](../tools/resync_workspace_files.md) instead.
+
 ## When to use it
 
 - You (or another tool) edited a project `.tex` file outside the editor — by hand, with a script, or with another program — and the index tree, entry table, or [Index Statistics](../tools/index_statistics.md) don't reflect that change.
@@ -16,5 +18,7 @@ Because this is a full rebuild from the source files, anything the database knew
 
 ## See also
 
+- [Resyncing Workspace Files from Disk](../tools/resync_workspace_files.md)
+- [Managing Pruned Files](../tools/manage_pruned_files.md)
 - [Opening and Creating a Project](../getting_started/opening_a_project.md)
 - [Managing Project Commands](../custom_commands/managing.md)

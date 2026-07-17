@@ -14,7 +14,7 @@ A real book index can run to thousands of entries spread across dozens of chapte
 - **Offers a spreadsheet-style entry table** as an alternative to the tree, for bulk review and editing of many entries at once.
 - **Recognizes your own custom indexing commands** — a project-specific `\newcommand` wrapper around `\index` is picked up automatically, so entries written with it show up right alongside plain `\index` entries.
 - **Checks the index for structural problems.** [Index Statistics](../tools/index_statistics.md) summarizes what's in the project; [Range Consistency Check](../tools/range_consistency.md) finds page-range markup that's broken, overlapping, or redundant — a common byproduct of indexing tools that scan a document in multiple passes — and lets you review and apply fixes individually.
-- **Supports the rest of the indexing workflow**: head notes, RTF export, an advanced project-wide search, and author name inversion for consistent alphabetization (see [Additional Features](../additional/head_notes.md)).
+- **Supports the rest of the indexing workflow**: [head notes](../tools/head_notes.md), [RTF export](../tools/rtf_export.md), an [advanced project-wide search](../additional/advanced_search.md), and [author name inversion](../additional/name_inversion.md) for consistent alphabetization.
 
 ## What it isn't
 

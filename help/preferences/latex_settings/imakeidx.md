@@ -5,7 +5,7 @@
 | Setting | Default | What it does |
 |---|---|---|
 | **Enable imakeidx package** | On | Master switch. When off, nothing else on this tab has any effect and no `\usepackage{imakeidx}`/`\makeindex[...]` lines are generated at all — the rest of the controls are grayed out to match. |
-| **No Automatic Compilation** (`noautomatic`) | On | Stops imakeidx from trying to shell out and run the index engine automatically during compilation. With this on (the default), you run the index engine yourself — which is what [RTF Export](../../additional/rtf_export.md)'s pipeline does on your behalf. |
+| **No Automatic Compilation** (`noautomatic`) | On | Stops imakeidx from trying to shell out and run the index engine automatically during compilation. With this on (the default), you run the index engine yourself — which is what [RTF Export](../../tools/rtf_export.md)'s pipeline does on your behalf. |
 | **Prevent New Page Before Index** (`nonewpage`) | On | The index continues directly after whatever comes before it, instead of imakeidx forcing a page break first. |
 | **Number of Columns** | 2 | How many columns the printed index is laid out in (1–4). |
 

@@ -118,6 +118,49 @@ class IndexTreeModelEngine:
         self._active_headings.clear()
         self._active_references.clear()
 
+    def get_main_headings(self) -> list[tuple[str, str]]:
+        """
+        Returns (display_label, raw_token) pairs for every distinct main
+        (top-level) heading currently loaded, deduped by raw_token and
+        sorted case-insensitively by display_label. Feeds the Cross-
+        References tab's Source/Cross-Ref dropdowns.
+
+        Extracts the main-level segment (everything before the first "!")
+        from EVERY loaded heading, regardless of that heading's own depth
+        -- NOT just rows literally at depth == 0. A main heading that's
+        purely an "umbrella" for sub-entries (e.g. every actual page
+        reference is filed as "belief change!causal factors", "belief
+        change!economic shock", etc., with no bare \\index{belief change}
+        anywhere) never gets its own depth-0 project_headings row, only
+        depth-1+ rows whose heading_text is the full compound path -- a
+        depth-0-only filter would silently drop it from these dropdowns
+        even though the index tree correctly shows it as a main node
+        (the tree derives its parent nodes the same "!"-split way, not
+        from a literal depth-0 row).
+
+        raw_token is the exact token as it appears in \\index{...} (e.g.
+        "Die Linke@\\textit{Die Linke} (Germany)") -- required for the
+        Source side of a cross-reference, which must reuse the same raw
+        token as the heading's other entries or makeindex will group it
+        under a spurious duplicate heading. display_label is the post-"@"
+        display portion (or the whole token when there's no "@" override),
+        same split convention as entry_modifier_list._parse_index_level --
+        reimplemented locally to keep this model layer free of a view-layer
+        import.
+        """
+        seen: dict[str, str] = {}
+        for heading in self._active_headings:
+            raw_full = str(heading.get("heading_text") or "").strip()
+            if not raw_full:
+                continue
+            raw = raw_full.split("!", 1)[0].strip()
+            if not raw or raw in seen:
+                continue
+            display = raw.partition("@")[2].strip() if "@" in raw else raw
+            seen[raw] = display or raw
+
+        return sorted(((display, raw) for raw, display in seen.items()), key=lambda pair: pair[0].lower())
+
     def ingest_pre_parsed_project_dataset(self, headings: list[dict], references: list[dict]) -> None:
         """
         Public Data Entry Contract.

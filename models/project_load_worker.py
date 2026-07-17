@@ -29,13 +29,28 @@ class ProjectLoadWorker(QObject):
         try:
             if self._is_abort_requested:
                 return
-            
+
             db_path = Path(self.db_persist.get_active_database_path()).resolve()
             project_root = Path(self.project_root_str).resolve()
-            
-            self.status_updated.emit("Scanning project directory tree nodes...")
+
+            # project_files is the source of truth for which files belong to
+            # the project once it has any tracked rows (active or pruned) --
+            # re-walking the whole directory tree on every ordinary project
+            # (re)open was what let a pruned file's row get silently
+            # resurrected the moment the rescan rediscovered it still sitting
+            # on disk. Only a genuinely brand-new project (zero rows ever
+            # written) still bootstraps itself from a real filesystem scan.
+            # The user-triggered "Resync Workspace Files from Disk" action
+            # (AppPipelineController._resync_workspace_files_from_disk) is
+            # the deliberate, explicit escape hatch back to disk truth.
+            tracked_records = self.db_persist.fetch_all_project_files()
             file_tree_payload = []
-            self._scan_folder_data(str(project_root), file_tree_payload)
+            if tracked_records:
+                self.status_updated.emit("Loading tracked project files from database...")
+                self._load_tree_from_db(str(project_root), tracked_records, file_tree_payload)
+            else:
+                self.status_updated.emit("Scanning project directory tree nodes...")
+                self._scan_folder_data(str(project_root), file_tree_payload)
 
             actual_db_to_load = None
             if db_path.exists() and db_path.is_file():
@@ -94,11 +109,105 @@ class ProjectLoadWorker(QObject):
                     self._scan_folder_data(entry.path, node_data["children"])
                 else:
                     if entry.name.lower().endswith(".tex"):
-                        # Save unified path form to guarantee regex scanning lookup success
-                        self._tex_file_paths.append(resolved_posix_path)
+                        # cross_refs.tex is an auto-managed file exclusively
+                        # written by CrossReferenceController, fully
+                        # regenerated from project_cross_references on every
+                        # change -- never hand-parsed back in. Excluding it
+                        # from the scan keeps it out of
+                        # project_headings/project_references entirely, so
+                        # it never reaches the Index tree or the "Index"
+                        # sub-tab of Edit Entries (whose see/seealso
+                        # rendering can't represent it correctly -- the
+                        # whole reason cross-reference management moved to
+                        # its own tab). It's still listed in output_list
+                        # above, so it appears normally in the Workspace
+                        # Files tree.
+                        if entry.name.lower() != "cross_refs.tex":
+                            # Save unified path form to guarantee regex scanning lookup success
+                            self._tex_file_paths.append(resolved_posix_path)
         except PermissionError as e:
             print(f"Permission Error: {e}")
             pass
+
+    def _load_tree_from_db(self, project_root: str, tracked_records: list[dict], output_list: list) -> None:
+        """
+        Reconstructs the workspace tree structure from project_files rows
+        instead of walking the filesystem -- see process(), which only
+        takes this path once project_files already has tracked content.
+        Only active (non-pruned) rows are included, matching how a pruned
+        file already gets live-removed from the tree
+        (ProjectScopeController.file_pruned) without a reload.
+
+        Also populates self._tex_file_paths, mirroring what _scan_folder_data
+        would have done, in case the regex fallback extraction still needs
+        to run (e.g. project_files is tracked but project_references is
+        empty).
+
+        cross_refs.tex is deliberately excluded from project_files (see
+        ProjectScopeController.persist_project_file_records), but the file
+        itself should still be browsable in the tree if it exists on disk --
+        a single existence check, not a directory walk, keeps that
+        exception cheap.
+        """
+        root_path = Path(project_root).resolve()
+
+        resolved_paths: list[Path] = []
+        for record in tracked_records:
+            if not record.get("is_active"):
+                continue
+            raw_path = record.get("absolute_path")
+            if not raw_path:
+                continue
+            resolved = Path(str(raw_path)).resolve()
+            resolved_paths.append(resolved)
+            if resolved.name.lower() != "cross_refs.tex":
+                self._tex_file_paths.append(resolved.as_posix())
+
+        cross_refs_path = root_path / "cross_refs.tex"
+        if cross_refs_path.is_file():
+            resolved_paths.append(cross_refs_path)
+
+        tree: dict = {}
+        for path in resolved_paths:
+            try:
+                rel_parts = path.relative_to(root_path).parts
+            except ValueError:
+                continue  # tracked file no longer lives under the project root; skip defensively
+            if not rel_parts:
+                continue
+            node = tree
+            for part in rel_parts[:-1]:
+                node = node.setdefault(part, {})
+            node.setdefault("__files__", {})[rel_parts[-1]] = path.as_posix()
+
+        def _emit(container: dict, current_dir: Path, into: list) -> None:
+            # Mirrors _scan_folder_data's ordering: dirs and files intermixed,
+            # sorted case-insensitively by name (os.scandir + sorted(..., key=name.lower())).
+            for name, value in container.items():
+                if name == "__files__":
+                    continue
+                child_dir = current_dir / name
+                child_node = {"name": name, "is_dir": True, "path": child_dir.as_posix(), "children": []}
+                into.append(child_node)
+                _emit(value, child_dir, child_node["children"])
+            for name, abs_path_str in container.get("__files__", {}).items():
+                into.append({"name": name, "is_dir": False, "path": abs_path_str, "children": []})
+            into.sort(key=lambda n: str(n["name"]).lower())
+
+        _emit(tree, root_path, output_list)
+
+    def load_tree_from_db(self) -> list[dict]:
+        """
+        Public wrapper around _load_tree_from_db for callers that want to
+        rebuild the workspace tree from project_files without a full
+        process() cycle or a disk walk -- e.g. PrunedFilesController after
+        restoring some files, so the newly-active rows show back up in the
+        Workspace Files tree without re-touching the filesystem at all.
+        """
+        tracked_records = self.db_persist.fetch_all_project_files()
+        file_tree_payload: list = []
+        self._load_tree_from_db(self.project_root_str, tracked_records, file_tree_payload)
+        return file_tree_payload
 
     def _execute_regex_fallback_extraction(self, file_tree_payload: list, fallback_db_path: str):
         """Harvests indexing macros using standard file scanning regex routines (async worker entry point)."""
@@ -290,6 +399,20 @@ class ProjectLoadWorker(QObject):
         file_tree_payload: list = []
         self._scan_folder_data(self.project_root_str, file_tree_payload)
         return self.scan_tex_files_for_index_data()
+
+    def scan_file_tree(self) -> list[dict]:
+        """
+        Public wrapper around _scan_folder_data for callers that only need a
+        fresh directory-tree structure, not a full \\index regex re-parse --
+        used by the manual "Resync Workspace Files from Disk" action
+        (AppPipelineController._resync_workspace_files_from_disk) to rebuild
+        project_files from what's actually on disk. process() itself only
+        takes this scan path when project_files has no tracked rows yet.
+        """
+        self._tex_file_paths = []
+        file_tree_payload: list = []
+        self._scan_folder_data(self.project_root_str, file_tree_payload)
+        return file_tree_payload
 
     def get_scanned_tex_file_paths(self) -> list[str]:
         """

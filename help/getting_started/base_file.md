@@ -6,8 +6,9 @@ Several features write directly into this file, or compile it, so the editor nee
 
 - [Insert LaTeX Index Settings...](../preferences.md) — splices your configured `imakeidx`/`idxlayout`/`hyperref`/`makeindex`/`xindy`/`printindex` setup into the base file's preamble.
 - [Creating a Command](../custom_commands/creating.md) / [Managing Project Commands](../custom_commands/managing.md) — splices your project's custom indexing commands into the base file.
-- [Head Notes](../additional/head_notes.md) — writes the `\indexprologue{...}` call into the base file, immediately before the index is printed.
-- [RTF Export](../additional/rtf_export.md) — compiles the base file (with your configured [LaTeX compiler](../preferences/latex_settings/latex_compiler.md)) to regenerate the raw index data before converting it.
+- [Head Notes](../tools/head_notes.md) — writes the `\indexprologue{...}` call into the base file, immediately before the index is printed.
+- [The Cross-References Tab](../entry_table/cross_references_tab.md) — splices a single `\input{cross_refs.tex}` line into the base file, immediately after `\begin{document}`.
+- [RTF Export](../tools/rtf_export.md) — compiles the base file (with your configured [LaTeX compiler](../preferences/latex_settings/latex_compiler.md)) to regenerate the raw index data before converting it.
 
 If no base file has been chosen yet, each of these tells you so in the status bar instead of doing anything.
 
@@ -28,5 +29,5 @@ Like most preferences, the base file is stored per-project — it's saved in tha
 ## See also
 
 - [Opening and Creating a Project](../getting_started/opening_a_project.md)
-- [RTF Export](../additional/rtf_export.md)
-- [Head Notes](../additional/head_notes.md)
+- [RTF Export](../tools/rtf_export.md)
+- [Head Notes](../tools/head_notes.md)

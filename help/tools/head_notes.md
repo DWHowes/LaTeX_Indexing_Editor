@@ -4,7 +4,7 @@ A **head note** is text that appears at the very start of the printed index, bef
 
 ## Requirements
 
-Like [RTF Export](../additional/rtf_export.md) and inserting LaTeX settings, this needs a project open with a [base document](../getting_started/base_file.md) chosen, since the note has to be saved against a specific project and written into that project's document. If either isn't true yet, you'll get a status-bar message telling you what's missing instead of the dialog opening.
+Like [RTF Export](rtf_export.md) and inserting LaTeX settings, this needs a project open with a [base document](../getting_started/base_file.md) chosen, since the note has to be saved against a specific project and written into that project's document. If either isn't true yet, you'll get a status-bar message telling you what's missing instead of the dialog opening.
 
 ## Writing and saving a note
 
@@ -20,4 +20,4 @@ If the project already has a head note, choosing **Create Head Note...** again o
 
 - [The Base File](../getting_started/base_file.md)
 - [Preferences](../preferences.md)
-- [RTF Export](../additional/rtf_export.md)
+- [RTF Export](rtf_export.md)

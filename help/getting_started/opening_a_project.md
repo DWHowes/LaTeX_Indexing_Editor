@@ -28,12 +28,13 @@ That last step matters: creating a "new" project over a folder that already cont
 
 ## What gets created
 
-The editor creates one file in your project folder: `<ProjectName>_index_manifest.db`. This is a small SQLite database holding every heading and reference the editor knows about — it's what makes reopening a large project fast (no need to re-scan every file each time) and what the [Range Consistency Check](../tools/range_consistency.md) and [Index Statistics](../tools/index_statistics.md) tools query directly.
+The editor creates one file in your project folder: `<ProjectName>_index_manifest.db`. This is a small SQLite database holding every heading and reference the editor knows about, plus the list of `.tex` files it's tracking for the Workspace Files tree — it's what makes reopening a large project fast (no need to re-scan the whole project folder each time) and what the [Range Consistency Check](../tools/range_consistency.md) and [Index Statistics](../tools/index_statistics.md) tools query directly.
 
-You generally don't need to touch this file yourself. If your `.tex` files are ever edited outside the editor (or the database and the files fall out of sync for any other reason), use [Resyncing Index Data from Disk](../tools/resync.md) to rebuild it rather than deleting it by hand.
+You generally don't need to touch this file yourself. Because the editor trusts this database rather than re-scanning your project folder on every open, a `.tex` file added, removed, or moved outside the editor — or edited outside it, changing its `\index` content — won't be picked up automatically on the next open. Use [Resyncing Workspace Files from Disk](../tools/resync_workspace_files.md) to catch up on files added/removed/moved, and [Resyncing Index Data from Disk](../tools/resync.md) to catch up on content changes, rather than deleting the database by hand.
 
 ## See also
 
 - [The Base File](../getting_started/base_file.md)
 - [Saving and Closing](../getting_started/saving_and_closing.md)
 - [Resyncing Index Data from Disk](../tools/resync.md)
+- [Resyncing Workspace Files from Disk](../tools/resync_workspace_files.md)

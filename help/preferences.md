@@ -6,7 +6,7 @@ Font family/size and the dark/light mode toggle are **not** in this dialog — t
 
 ## LaTeX Settings
 
-Configuration for compiling the document and generating the index — needed for [RTF Export](additional/rtf_export.md), and written into your document's preamble via **Edit → Insert LaTeX Index Settings...** when you're ready to use it. This is by far the busiest part of Preferences, laid out across six horizontal tabs — each one is covered in its own topic, with every individual setting explained:
+Configuration for compiling the document and generating the index — needed for [RTF Export](tools/rtf_export.md), and written into your document's preamble via **Edit → Insert LaTeX Index Settings...** when you're ready to use it. This is by far the busiest part of Preferences, laid out across six horizontal tabs — each one is covered in its own topic, with every individual setting explained:
 
 - [LaTeX Compiler](preferences/latex_settings/latex_compiler.md) — where to find your LaTeX compiler executable (pdflatex, XeLaTeX, or LuaLaTeX).
 - [imakeidx Package](preferences/latex_settings/imakeidx.md) — the package that builds the index itself.
@@ -25,7 +25,7 @@ Colour changes apply immediately across the whole application as soon as you acc
 
 ## RTF Export
 
-One setting: **Display RTF file on creation** — when checked, exporting to RTF opens a preview automatically instead of just reporting success in the status bar. See [RTF Export](additional/rtf_export.md).
+One setting: **Display RTF file on creation** — when checked, exporting to RTF opens a preview automatically instead of just reporting success in the status bar. See [RTF Export](tools/rtf_export.md).
 
 ## Global vs. per-project
 
@@ -34,4 +34,4 @@ LaTeX/indexing settings and theme colours can be different per project: the firs
 ## See also
 
 - [The Base File](getting_started/base_file.md)
-- [RTF Export](additional/rtf_export.md)
+- [RTF Export](tools/rtf_export.md)

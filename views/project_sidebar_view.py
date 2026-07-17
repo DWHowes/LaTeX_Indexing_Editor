@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QTabWidget, QWidget
 from views.file_tree_view import FileTreeView
 from views.index_tree_view import IndexTreeView
 from views.entry_modifier_list import EntryModifierList
+from views.cross_reference_list import CrossReferenceList
 
 class ProjectSidebarView(QTabWidget):
     """
@@ -26,6 +27,14 @@ class ProjectSidebarView(QTabWidget):
         """Instantiates system views and mounts them into clean vertical tab rows."""
         self.tree_files = FileTreeView(self)
         self.entry_modifier_panel = EntryModifierList(self)
+        self.cross_reference_panel = CrossReferenceList(self)
+
+        # Edit Entries hosts its own horizontal (North) sub-tab strip --
+        # "Index" (the existing entry table) and "Cross-References" (xref
+        # creation/editing) -- distinct from this outer West-oriented strip.
+        self.edit_entries_tabs = QTabWidget(self)
+        self.edit_entries_tabs.addTab(self.entry_modifier_panel, "Index")
+        self.edit_entries_tabs.addTab(self.cross_reference_panel, "Cross-References")
 
         # IndexTreeView requires an injected model engine contract at boot time.
         # We start with a blank container so tab numbers (0, 1, 2) stay locked.
@@ -34,7 +43,7 @@ class ProjectSidebarView(QTabWidget):
         # Mount child components inside clean, syntax-safe presentation tab panes
         self.addTab(self.tree_files, "📂 Workspace Files")
         self.addTab(placeholder_widget, "📌 Index References")
-        self.addTab(self.entry_modifier_panel, "📝 Edit Entries")
+        self.addTab(self.edit_entries_tabs, "📝 Edit Entries")
 
     def replace_index_tree_view(self, fully_built_index_view: IndexTreeView):
         """
@@ -77,3 +86,6 @@ class ProjectSidebarView(QTabWidget):
     
     def get_entry_table_view(self)->EntryModifierList:
         return self.entry_modifier_panel
+
+    def get_cross_reference_view(self)->CrossReferenceList:
+        return self.cross_reference_panel
