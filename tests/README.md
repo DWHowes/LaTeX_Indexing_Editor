@@ -73,7 +73,36 @@ tests/
   plain Python lists, but `FileTreePersistence.update_reference_field`
   expects a pre-serialized JSON string and silently fails the write
   otherwise, so every dirty-rename flush for a freshly-scraped project was
-  failing). Prefer real collaborators over stubs
+  failing), and the rest of `IndexEditController`'s surface beyond rename/
+  single-delete: the table-originated edit path (`handle_entry_table_edit`/
+  `_reconcile_heading_node`, including range-partner heading sync; see
+  `test_index_edit_controller_table_edit.py`), bulk node deletion
+  (`handle_node_deletion`/`count_refs_under_node`/`_prune_subtree_and_ancestors`,
+  including a real, now-fixed bug — see `test_index_edit_controller_bulk_deletion.py`),
+  and the two session-discard rollback paths (`discard_uncommitted_entry`,
+  `discard_dirty_edits`; see `test_index_edit_controller_discard.py`). The
+  table-edit file also needed the real `IndexTreeModelEngine` rather than a
+  bare `_active_headings`-only fake, since `_reconcile_heading_node`
+  re-attaches entries via `IndexTreeView.append_entry`, which calls the
+  engine's real `sanitize_hierarchical_input`/`evaluate_node_type` parsing
+  helpers — a `repository_model=None` engine is safe there because that
+  call site always passes `suppress_transaction=True`, so the one method
+  that would need a real repo (`compile_transaction_record`) never runs.
+  Two more real, pre-existing bugs surfaced and were fixed while writing
+  this coverage: `IndexTreeView.__init__` never initialized
+  `_suppress_transaction_compilation` (only ever assigned inside
+  `populate_hierarchy_tree`), so any code path reaching `append_entry`
+  before that method's first run crashed with `AttributeError`; and
+  `IndexEditController._prune_subtree_and_ancestors`'s ancestor sweep only
+  ever checked whether an ancestor node still had tree *children*, never
+  whether it still carried its own direct `\index` reference — deleting a
+  node's only child silently vanished a parent that still had, say,
+  `\index{Sports}` of its own the moment `\index{Sports!Football}` was its
+  last child, removing it from both the tree and `_active_headings` even
+  though the macro and DB row were untouched (see
+  `test_index_edit_controller_bulk_deletion.py`'s
+  `test_deleting_only_the_child_node_leaves_the_parents_own_reference_intact`).
+  Prefer real collaborators over stubs
   where they're cheap and side-effect-free — a stub view can silently mask a
   mismatch between what the controller assumes about the view's interface
   and what it actually is, which is exactly the kind of gap layer 4 exists
