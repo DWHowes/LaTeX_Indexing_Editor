@@ -1,3 +1,4 @@
+import json
 import os
 from PySide6.QtCore import QObject, Signal
 
@@ -272,7 +273,21 @@ class EntryModifierModel(QObject):
                 failure_count += 1
                 continue
 
-            ok = self._persistence.update_reference_field(entry_id, record)
+            # In-memory records carry see_references/seealso_references as
+            # real Python lists (set that way at parse time by
+            # LatexIndexParser._build_see_reference_payload, or by a prior
+            # DB read that already deserialized them) -- but
+            # update_reference_field does NOT JSON-encode on write (see its
+            # own docstring/tests), it expects a pre-serialized string.
+            # Passing the raw list through fails the sqlite bind and was
+            # silently swallowed as a flush failure, defeating this
+            # method's whole purpose of persisting renames to the DB.
+            write_record = dict(record)
+            for key in ("see_references", "seealso_references"):
+                if isinstance(write_record.get(key), list):
+                    write_record[key] = json.dumps(write_record[key])
+
+            ok = self._persistence.update_reference_field(entry_id, write_record)
             if ok:
                 success_count += 1
                 # Keeps the shared project_headings row's own text in sync

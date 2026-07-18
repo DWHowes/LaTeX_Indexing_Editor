@@ -1433,7 +1433,11 @@ class AppPipelineController(QObject):
         if tex_success or db_success:
             self._tree_modified = False
             self.backup_manager.clear_session_backups()
-            self.window.status_bar.showMessage("Workspace saved successfully.", 3000)
+            # Don't stomp the dirty-flush warning set above -- it would
+            # otherwise be overwritten in the same call stack before the
+            # user ever sees it, silently hiding a real save failure.
+            if not dirty_failures:
+                self.window.status_bar.showMessage("Workspace saved successfully.", 3000)
         else:
             self.window.status_bar.showMessage("No uncommitted modifications detected.", 2000)
 
