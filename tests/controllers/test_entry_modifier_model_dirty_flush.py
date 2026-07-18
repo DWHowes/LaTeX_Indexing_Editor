@@ -17,6 +17,16 @@ freshly-scraped project silently failed the DB write. That's exactly the
 class of data-loss bug execute_project_save_workflow's own docstring
 says was already fixed once ("renamed headings and shifted coordinates
 were silently lost on the next project load").
+
+The same root cause turned out to have a second, independent instance:
+EntryModifierModel.register_new_entry() -> FileTreePersistence.
+insert_reference() has the identical gap (no JSON-encoding of these two
+fields), found while writing tests/gui_smoke/test_duplicate_references.py
+-- AppPipelineController._build_duplicate_entry_dict copies
+see_references/seealso_references straight from an already-loaded
+original record (a real list), so duplicating any reference loaded from
+a freshly-scraped project crashed the DB insert. Fixed the same way, in
+register_new_entry.
 """
 from models.entry_modifier_model import EntryModifierModel
 
@@ -91,3 +101,39 @@ def test_flush_still_updates_heading_raw_text_alongside_see_references(fresh_per
     model.flush_dirty_to_db()
 
     assert fresh_persistence.fetch_reference_row(1)["heading_raw_text"] == "Renamed"
+
+
+def test_register_new_entry_serializes_list_valued_see_references(fresh_persistence, qtbot):
+    """
+    Mirrors the duplicate-reference bug: a "new" entry_dict built by
+    copying fields off an existing, already-parsed record (as
+    AppPipelineController._build_duplicate_entry_dict does) carries
+    see_references as a real list, not None.
+    """
+    model = EntryModifierModel(persistence=fresh_persistence)
+
+    model.register_new_entry(_record(uid=1, see=[], seealso=["Other"]))
+
+    row = fresh_persistence.fetch_reference_row(1)
+    assert row["see_references"] == []
+    assert row["seealso_references"] == ["Other"]
+
+
+def test_register_new_entry_leaves_none_valued_see_references_untouched(fresh_persistence, qtbot):
+    """The live-insertion path (LatexIndexController) always sends None, not a list -- must keep working."""
+    model = EntryModifierModel(persistence=fresh_persistence)
+
+    model.register_new_entry(_record(uid=1, see=None, seealso=None))
+
+    row = fresh_persistence.fetch_reference_row(1)
+    assert row["see_references"] is None
+    assert row["seealso_references"] is None
+
+
+def test_register_new_entry_keeps_the_in_memory_cache_as_a_real_list(fresh_persistence, qtbot):
+    """The DB write is serialized on a copy -- the cached record itself must stay a list, not a JSON string."""
+    model = EntryModifierModel(persistence=fresh_persistence)
+
+    model.register_new_entry(_record(uid=1, see=["Alpha"]))
+
+    assert model._records[1]["see_references"] == ["Alpha"]

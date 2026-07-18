@@ -102,6 +102,22 @@ tests/
   though the macro and DB row were untouched (see
   `test_index_edit_controller_bulk_deletion.py`'s
   `test_deleting_only_the_child_node_leaves_the_parents_own_reference_intact`).
+  Also covers the rest of `EntryModifierController`'s surface beyond the
+  staging live-preview slice: real row-finalize-on-focus-loss
+  (`_finalize_row_edit`, driven the way a real user edit does — via the
+  real view's own `dataChanged` → `entry_modifier_edit_committed` signal
+  chain, not a hand-called `_on_cell_edited`), context-menu delete
+  (`handle_context_menu_delete_request`, single/batch/declined/
+  dirty-in-progress-edit), and `invert_headings_for_selected` (see
+  `test_entry_modifier_controller_edit_delete_invert.py`). Found a third
+  instance of the see_references/seealso_references JSON-serialization
+  bug here too: `EntryModifierModel.register_new_entry` → `FileTreePersistence.
+  insert_reference` has the identical gap as `flush_dirty_to_db` above —
+  `AppPipelineController._build_duplicate_entry_dict` (the "Duplicate
+  reference(s)" action, see layer 5 below) copies these fields straight
+  from an already-loaded record, a real list, crashing the DB insert.
+  Fixed the same way, in `register_new_entry`; regression coverage added
+  to `test_entry_modifier_model_dirty_flush.py` alongside the original fix.
   Prefer real collaborators over stubs
   where they're cheap and side-effect-free — a stub view can silently mask a
   mismatch between what the controller assumes about the view's interface
@@ -188,7 +204,15 @@ tests/
   whenever a tabs widget exists at all, even with nothing to save, so the
   save workflow's "No uncommitted modifications detected." message is
   unreachable in practice — always reports "Workspace saved successfully."
-  instead. Use
+  instead. Also covers the "Duplicate reference(s)" context-menu action
+  (`AppPipelineController._handle_duplicate_references_request` — a
+  standalone entry, a real `|(`/`|)` range pair (the sample project's
+  "Widgets" entry, whose `range_partner_id` linking comes for free from
+  `ProjectLoadWorker`'s real FIFO pairing at load time — no manual record
+  patching needed), a lone range closer being skipped, and a batch of
+  both; see `test_duplicate_references.py`). This is where the third
+  instance of the see_references/seealso_references JSON-serialization
+  bug was found (see layer 3 above). Use
   `qtbot.waitUntil` (not `waitSignal` on the load thread directly) to wait
   for a background load to finish — polling an observable end-state (the
   tree populating) sidesteps having to reason precisely about the thread's
