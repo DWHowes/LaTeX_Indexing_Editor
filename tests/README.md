@@ -62,8 +62,11 @@ tests/
   `fresh_persistence` fixture), and `help_content_model.py` (`load_toc`,
   and `render_topic_html`'s Markdown-to-HTML conversion, heading-id
   slugification, path-traversal refusal, and style templating — real
-  files under `tmp_path`, no `QTextBrowser`). No new bugs found in any of
-  these four — all held up cleanly.
+  files under `tmp_path`, no `QTextBrowser`), and `theme_config_model.py`
+  (`ThemeConfigModel` — mirrors `IndexPrefsConfigModel`'s update/serialize/
+  seed/load/persist pattern for the dark/light colour dataclasses; see
+  `test_theme_config_model.py`). No new bugs found in any of these five —
+  all held up cleanly.
 - **Layer 2 (persistence)** — `FileTreePersistence` (real sqlite, real
   temp files, no `QApplication` needed) and the synchronous, non-threaded
   parts of `ProjectLoadWorker` (`scan_file_tree`, `load_tree_from_db`,
@@ -192,7 +195,71 @@ tests/
   the actual threaded worker via `qtbot.waitUntil`; see
   `test_advanced_search_window.py`). No bugs found in either — this
   entire feature area had zero coverage before today despite being a
-  real, user-facing feature. Prefer real collaborators over stubs
+  real, user-facing feature.
+
+  Also covers `context_menu_subsystem.py`'s three real right-click menus
+  (`IndexTreeContextMenuManager`, `FileTreeContextMenuManager`,
+  `EditEntryContextMenuManager`) — the signal-WIRING side of this exact
+  module already caused two historical bugs
+  (`prune_file_triggered`/`set_root_file_triggered` built but never
+  connected, caught structurally by `test_signal_wiring.py`), but the
+  menu-BUILDING logic itself (which actions appear, with what data,
+  enabled/disabled under which conditions) had never been tested: the
+  conditional Prune-action omission for the current root file, the
+  multi-selection-vs-clicked-row resolution shared by
+  delete/duplicate/invert-headings, and the Sub2-disables-Invert-headings
+  guard. See `test_context_menu_subsystem.py` — `populate_menu_actions`
+  is called directly and an action's `.trigger()` fires its handler
+  synchronously, so every case is covered without ever calling the real,
+  modal `QMenu.exec()`.
+
+  Also covers the view-layer logic directly backing table/tree editing:
+  `EntryModifierList`'s hierarchy-validation gate (`_validate_hierarchy`/
+  `_on_cell_data_changed`/`_restore_row_from_stash` — this is the FIRST
+  gate any table-originated edit passes through before
+  `entry_modifier_edit_committed` can fire and drive the whole staging →
+  `.tex` write → DB flush pipeline; see
+  `test_entry_modifier_list_hierarchy_validation.py`), and
+  `IndexTreeView.append_entry`/`remove_last_entry`/`reinsert_entry` (the
+  tree's own undo/redo for a fresh live insertion, plus `append_entry`'s
+  `suppress_transaction`-gated DB-staging call, previously only ever
+  exercised with `suppress_transaction=True`; see
+  `test_index_tree_view_undo_redo.py`). **Found and fixed another real
+  bug of the exact same shape** as the one already fixed in
+  `IndexEditController._prune_subtree_and_ancestors` (see layer 3's bulk-
+  deletion coverage above): `remove_last_entry`'s ancestor-pruning loop
+  also only checked for tree *children*, never an ancestor's own direct
+  reference. Undoing a fresh insertion that reused an existing ancestor
+  node (one with its own, unrelated `\index` reference) silently deleted
+  that ancestor from the tree too, the instant its only child — the
+  just-undone insertion — was removed. Fixed the same way, via a new
+  `_node_has_own_refs` helper on `IndexTreeView`.
+
+  Also covers the theme/preferences controller stack, all previously
+  zero-coverage: `PreferencesPersistence` (the global QSettings-backed
+  store — two one-time migrations that run on every construction, a
+  legacy QSettings org/app location and a legacy `ist_*`→`fmt_*` key
+  rename, plus `load_application_preferences`'s type coercion and
+  `geometry`/`state`/`splitter_state` hex-`QByteArray` round-tripping;
+  see `test_preferences_persistence.py`), `ThemeConfigController` (global-
+  vs-project routing for both loading and saving colours, and reapplying
+  the currently-active theme mode on acceptance; see
+  `test_theme_config_controller.py`), and `IndexPrefsConfigController`
+  (the same global-vs-project seed/load/persist orchestration, plus
+  delegating theme colours to `ThemeConfigController`; see
+  `test_index_prefs_config_controller.py`). **Found and fixed a real bug**
+  in `PreferencesPersistence.load_index_prefs`: its `coerce()` helper
+  compared `dataclasses.fields()`'s `.type` (an actual type object,
+  `bool`/`int`/`str`, since this module has no `from __future__ import
+  annotations`) against the *string* literals `"bool"`/`"int"` — never
+  matching, so every loaded value silently came back as a plain `str`
+  regardless of its real type. Harmless in practice today (the only real
+  caller, `IndexPrefsConfigModel.update_data()`, re-coerces from either
+  strings or already-typed values on the way in) but a real bug in this
+  method's own contract nonetheless — fixed by comparing against the
+  actual type objects (`t is bool`/`t is int`).
+
+  Prefer real collaborators over stubs
   where they're cheap and side-effect-free — a stub view can silently mask a
   mismatch between what the controller assumes about the view's interface
   and what it actually is, which is exactly the kind of gap layer 4 exists
@@ -253,6 +320,26 @@ tests/
   `TestCommitAllOpenBuffers`) — `setPlainText()` alone will silently
   leave `isModified()` `False` and any code gated on it (like
   `commit_all_open_buffers`) will skip the tab entirely.
+
+  **`QMenu.exec()` cannot be reliably monkeypatched** — found while
+  writing `test_context_menu_subsystem.py`.
+  `monkeypatch.setattr(QMenu, "exec", lambda self, *a, **k: ...)` looked
+  like it should intercept the real, blocking modal call, but it didn't
+  take effect (same class of issue as `QTimer.singleShot` above — a
+  C++-bound method PySide6 doesn't let a plain Python attribute
+  assignment override at the actual call site) and the test hung the
+  whole run waiting for a popup click that could never come headlessly.
+  Don't drive a code path that reaches a real `QMenu.exec()`/`.exec_()`
+  call at all — test the menu-building logic directly instead
+  (`populate_menu_actions(menu, index)`, then inspect `menu.actions()` or
+  call `action.trigger()` to fire its handler synchronously without ever
+  showing the menu). If you must exercise the small guard code
+  *before* `exec()` (e.g. "an invalid index shows no menu at all"), only
+  drive the branch that returns before `exec()` is ever reached — never
+  the branch that gets there. If a background/foreground test run of
+  this kind of code ever seems to hang with no output, don't wait it out —
+  it's almost certainly a real modal; kill the process and fix the test
+  to avoid the modal entirely rather than trying to suppress it.
 
   **A real, pre-existing app bug found while writing
   `test_live_insertion_persistence.py`** (not a test-harness-only
