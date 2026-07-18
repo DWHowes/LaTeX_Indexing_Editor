@@ -85,6 +85,15 @@ class IndexTreeView(QTreeView):
         super().__init__(parent)
         self.engine = model_engine  # Injected data model engine layer
 
+        # Gates whether append_entry/_populate_row_metadata stage a new-entry
+        # DB transaction (see append_entry's docstring) -- only ever flipped
+        # True/False for the duration of populate_hierarchy_tree, but must
+        # exist before that first runs: a re-attach via append_entry
+        # (IndexEditController._reconcile_heading_node, reachable from a
+        # table-originated edit) can in principle happen before this view's
+        # first populate_hierarchy_tree call.
+        self._suppress_transaction_compilation = False
+
         # Configure the primary structural data model columns
         self.base_model = QStandardItemModel(self)
         self.base_model.setHorizontalHeaderLabels(["Index Terms", "References"])

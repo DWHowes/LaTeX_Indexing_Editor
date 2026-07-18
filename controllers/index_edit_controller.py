@@ -807,10 +807,29 @@ class IndexEditController(QObject):
             if ancestor is None:
                 continue  # already pruned above, or as a side effect of an entry delete
 
-            if ancestor.rowCount() > 0:
-                break  # still has live children — nothing shallower needs pruning either
+            # An ancestor can carry its own direct \index reference AND
+            # have children at the same time (e.g. both \index{Sports} and
+            # \index{Sports!Football} legitimately exist) -- unlike nodes
+            # WITHIN the just-deleted subtree (which are guaranteed to have
+            # had every one of their own references deleted already, see
+            # this method's docstring), an ancestor's own ref list was
+            # never touched by that deletion. Checking only rowCount()
+            # here would prune a still-referenced ancestor the moment its
+            # last CHILD is removed, silently vanishing it from the tree
+            # and _active_headings even though its own \index macro is
+            # still on disk and still tracked in the DB.
+            if ancestor.rowCount() > 0 or self._node_has_own_refs(ancestor):
+                break  # still has live children or its own reference — nothing shallower needs pruning either
 
             self._prune_single_node(sub_parts, engine)
+
+    def _node_has_own_refs(self, node: QStandardItem) -> bool:
+        """Whether node's own column-1 sibling still carries any reference."""
+        parent = node.parent() or self._tree.base_model.invisibleRootItem()
+        sibling_col1 = parent.child(node.row(), 1)
+        if sibling_col1 is None:
+            return False
+        return bool(sibling_col1.data(Qt.ItemDataRole.UserRole + 1))
 
     def _prune_node_subtree_bottom_up(self, node: QStandardItem) -> None:
         r"""
