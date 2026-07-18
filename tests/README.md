@@ -44,7 +44,26 @@ tests/
   the documented two-token "Mac Donald" form). Both are now fixed, with
   `test_two_token_mac_space_form_combines` and
   `test_del_connector_does_not_crash` in `test_name_inverter.py` as
-  permanent regression coverage (no longer `xfail`).
+  permanent regression coverage (no longer `xfail`). Also covers
+  `session_backup_manager.py` (real files under `tmp_path` throughout —
+  register/revert/restore-single/clear-all backup sequencing, no
+  os/shutil mocking, since the sequencing itself is the whole point),
+  `latex_entry_model.py` (`IndexEntryModel`/`ReferenceCarrier` — 
+  `process_field`'s `@`/`\textit`/`\textbf`/`\string` sort-key rules,
+  `normalized_parts`/`chain`, and `metadata`'s exact dict shape, all in
+  isolation beyond what `test_latex_index_controller_insert.py` exercises
+  end-to-end), `index_prefs_config_model.py` (`update_data`'s bool/int
+  coercion and legacy `ist_*`→`fmt_*` key migration, the `.ist`/`.xdy`
+  style-file generators and preamble/printindex snippet builders — exact
+  generated strings captured empirically from the real running code
+  rather than guessed, since the escaping is easy to get subtly wrong by
+  inspection alone — and the `seed_project_from_globals`/
+  `load_from_project`/`persist_to_project` round trip via the real
+  `fresh_persistence` fixture), and `help_content_model.py` (`load_toc`,
+  and `render_topic_html`'s Markdown-to-HTML conversion, heading-id
+  slugification, path-traversal refusal, and style templating — real
+  files under `tmp_path`, no `QTextBrowser`). No new bugs found in any of
+  these four — all held up cleanly.
 - **Layer 2 (persistence)** — `FileTreePersistence` (real sqlite, real
   temp files, no `QApplication` needed) and the synchronous, non-threaded
   parts of `ProjectLoadWorker` (`scan_file_tree`, `load_tree_from_db`,
