@@ -137,6 +137,44 @@ tests/
   from an already-loaded record, a real list, crashing the DB insert.
   Fixed the same way, in `register_new_entry`; regression coverage added
   to `test_entry_modifier_model_dirty_flush.py` alongside the original fix.
+  Also covers custom LaTeX command creation/management:
+  `LatexCommandRegistryModel` (the global, `QSettings`-backed command
+  registry — save/list/exists/remove/clear, and the static
+  `filter_indexing_newcommands` classifier; see
+  `test_latex_command_registry_model.py`), `CreateCommandController` (name/
+  body normalization and persistence in `_on_save_requested`, dialog
+  reuse, and a real dialog→controller→registry signal round trip; see
+  `test_create_command_controller.py`), and
+  `ProjectCommandManagerController` (bridging the global registry and a
+  project's own `project_custom_commands` table — add/remove,
+  `commands_changed` emission, and dialog list population; see
+  `test_project_command_manager_controller.py`). `QSettings` is
+  process-global state (the real Windows registry, or an `.ini` file
+  under `IniFormat`) — every file here has its own autouse fixture
+  redirecting it to a per-test `tmp_path` via `IniFormat`, the same
+  redirection `booted_app` does for the whole app, so these tests never
+  touch the real developer machine's registry. No new bugs found in any
+  of the three. Finally, `DocumentIOController` itself now has a
+  dedicated file (`test_document_io_controller.py`) rather than only
+  ever being exercised as a dependency of other controllers' tests:
+  `check_unsaved_tex_changes`, `save_tex_file_to_disk`,
+  `discard_unsaved_changes`, `handle_file_save_as_resolution`,
+  `commit_all_open_buffers` (including the multi-tab and
+  partial-write-failure cases), `compute_byte_offset` (both the
+  `buffer_text`-supplied and real-file-read paths, including a
+  multi-byte-UTF-8 case verifying actual byte math, not character
+  count), `write_generated_file`, and the base-file splice injectors
+  (`inject_latex_settings`/`inject_project_commands`/`inject_head_note`,
+  each including their idempotent-rerun and missing-anchor-fails cases —
+  `inject_cross_references` itself is already covered at the gui_smoke
+  layer, see below, so isn't duplicated here). Most importantly, this is
+  the first file to cover the **open-editor-tab branch** every write
+  primitive (`rewrite_macro_span`, `insert_macro_at_position`,
+  `read_macro_span`, `write_generated_file`, the splice injectors) has via
+  `_find_open_editor` — every other test that drives these methods
+  elsewhere in the suite only ever hits the on-disk branch, since none of
+  those stacks open the target file in a real tab. No app bugs found;
+  everything here is real, pre-existing behavior, correctly implemented.
   Prefer real collaborators over stubs
   where they're cheap and side-effect-free — a stub view can silently mask a
   mismatch between what the controller assumes about the view's interface
@@ -163,6 +201,41 @@ tests/
   `RuntimeError: Internal C++ object ... already deleted` pointing at a
   `theme_mutated`-connected lambda, this is why, and the fixture is the
   first place to check.
+
+  **A different flavor of the same "already deleted" error**, found
+  while writing `test_document_io_controller.py`: `EditorTab.__init__`
+  defers its `LatexHighlighter`'s first `rehighlight()` via
+  `QTimer.singleShot(0, ...)`. Harmless in the real app (the event loop
+  is always spinning), but a test that constructs an `EditorTab`, does
+  nothing to pump the event loop, and lets the test end has that 0ms
+  timer still pending at teardown — it can end up firing during a
+  *later* test's event processing, against an already-destroyed
+  `LatexHighlighter`/`EditorTab`. If you construct an `EditorTab` in a
+  test, call `qtbot.wait(50)` right after (see
+  `test_document_io_controller.py`'s `_open_tab` helper) so the deferred
+  rehighlight fires safely while the widget is still alive, instead of
+  leaking a pending timer into whatever test runs next.
+
+  **Also from that same file**: never call `qtbot.addWidget()` on both a
+  container (e.g. a `QTabWidget`) *and* a child you're about to
+  `addTab()`/reparent into it. Qt parent-child ownership already
+  guarantees the child's cleanup once the container is destroyed;
+  registering both makes pytest-qt try to `.close()` the child a second
+  time after the container's own teardown already deleted its C++
+  object, raising the same `RuntimeError: Internal C++ object ...
+  already deleted`. Register only the outermost container.
+
+  **`QPlainTextEdit.setPlainText()`/`EditorTab.load_document_content()`
+  do NOT mark the document modified** — they're both "load fresh
+  content" operations and explicitly leave `isModified()` `False`. A
+  test that wants to simulate a real in-progress user edit (as opposed
+  to loading a document) needs an actual incremental edit
+  (`cursor.insertText(...)`, see `test_project_save_workflow.py`) or an
+  explicit `editor.document().setModified(True)` right after
+  `setPlainText()` (see `test_document_io_controller.py`'s
+  `TestCommitAllOpenBuffers`) — `setPlainText()` alone will silently
+  leave `isModified()` `False` and any code gated on it (like
+  `commit_all_open_buffers`) will skip the tab entirely.
   A `QMessageBox.warning`/similar real modal call reachable from a failure
   path needs monkeypatching before you drive that path in a test — it
   blocks forever waiting for a click that can never come headlessly (see

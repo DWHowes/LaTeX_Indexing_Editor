@@ -71,7 +71,7 @@ pytest
 That's it. It will print a line for every test file it runs, then finish with a summary like:
 
 ```
-575 passed in 24.0s
+671 passed in 24.0s
 ```
 
 That means everything checked out — the app is behaving as expected. Green/passing output like this is what you want to see both before you start changing anything and after you're done.
