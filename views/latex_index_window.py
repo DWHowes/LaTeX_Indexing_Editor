@@ -285,6 +285,7 @@ class LatexIndexWindow(QDockWidget):
     def _attach_completer(self, field: QLineEdit, completions: list[str]) -> None:
         existing = self._completion_helpers.get(field)
         if existing is not None:
+            existing.detach()
             existing.deleteLater()
 
         self._completion_helpers[field] = LatexEntryAutoCompleter(field, completions, parent=self)

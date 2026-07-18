@@ -1659,7 +1659,31 @@ class AppPipelineController(QObject):
         else:
             entry_dict["heading_id"] = None
 
-        self.window.latex_index_window.add_completion_entry(parts_list)            
+        self.window.latex_index_window.add_completion_entry(parts_list)
+
+        # Any reference already cached for this file, positioned after
+        # where this new macro was just inserted, has a stale absolute_
+        # position/absolute_end the moment the new macro's bytes land in
+        # front of it -- LatexIndexController.insert_latex only computes
+        # coordinates for the entry it's inserting, it never shifts
+        # anything else. Every OTHER coordinate-changing path (rename,
+        # table edit, delete, duplicate) already calls shift_coordinates_
+        # after right after its own rewrite; a fresh live insertion never
+        # did, so a second \index insertion earlier in the same open file
+        # silently desynced every later entry's cached location from
+        # where its macro actually landed -- the next rename/delete of
+        # one of those entries would then target the wrong byte span.
+        if (
+            entry_dict["file_path"]
+            and entry_dict["absolute_position"] is not None
+            and entry_dict["absolute_end"] is not None
+        ):
+            delta = entry_dict["absolute_end"] - entry_dict["absolute_position"]
+            shifted_ids = self.entry_modifier_ctrl.model.shift_coordinates_after(
+                entry_dict["file_path"], entry_dict["absolute_position"], delta
+            )
+            for shifted_id in shifted_ids:
+                self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
 
         # Only the opener goes to the tree and undo stack
         if not entry_dict["is_range_closer"]:
