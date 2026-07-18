@@ -37,6 +37,7 @@ class LatexEntryAutoCompleter(QObject):
         self.field = field
         self.completer = None
         self._popup_filter = None
+        self._text_changed_connection = None
         self._build(completions)
 
     def _build(self, completions: list[str]) -> None:
@@ -46,7 +47,7 @@ class LatexEntryAutoCompleter(QObject):
         self.completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self.completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
 
-        self.field.textChanged.connect(
+        self._text_changed_connection = self.field.textChanged.connect(
             lambda text, c=self.completer: c.complete() if len(text) >= 2 else c.popup().hide()
         )
 
@@ -55,6 +56,29 @@ class LatexEntryAutoCompleter(QObject):
         popup = self.completer.popup()
         self._popup_filter = TabCompletionEventFilter(self.completer, self.field, self)
         popup.installEventFilter(self._popup_filter)
+
+    def detach(self) -> None:
+        """
+        Disconnects this helper's textChanged handler before it's replaced
+        (see LatexIndexWindow._attach_completer, called on every project
+        (re)load/resync). field.setCompleter() -- called for the
+        replacement helper's own completer -- deletes THIS completer
+        immediately (it was constructed with field as its parent, and Qt
+        auto-deletes the previous completer when a new one is set), but
+        that leaves this closure's `c=self.completer` reference dangling
+        while the closure itself stays connected to field.textChanged
+        (field is never destroyed, only re-attached to). deleteLater()
+        alone doesn't help -- it schedules THIS QObject for deletion, but
+        the lambda is still live and still connected right up until then,
+        and the next keystroke fires it against an already-deleted
+        QCompleter ("Internal C++ object ... already deleted").
+        """
+        if self._text_changed_connection is not None:
+            try:
+                self.field.textChanged.disconnect(self._text_changed_connection)
+            except (RuntimeError, TypeError):
+                pass
+            self._text_changed_connection = None
 
     # def _handle_text_changed(self, text: str) -> None:
     #     if len(text) >= 2:

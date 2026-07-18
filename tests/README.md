@@ -236,6 +236,25 @@ tests/
   `TestCommitAllOpenBuffers`) — `setPlainText()` alone will silently
   leave `isModified()` `False` and any code gated on it (like
   `commit_all_open_buffers`) will skip the tab entirely.
+
+  **A real, pre-existing app bug found while writing
+  `test_live_insertion_persistence.py`** (not a test-harness-only
+  artifact — this could crash the real running app too):
+  `LatexEntryAutoCompleter`'s `field.textChanged` handler was a raw
+  lambda closing over `self.completer`. `LatexIndexWindow.
+  _attach_completer` re-runs on every project (re)load/resync, and
+  `field.setCompleter(new_completer)` for the replacement immediately
+  deletes the OLD `QCompleter` (it was parented to `field`, which Qt
+  auto-deletes-and-replaces on `setCompleter`) — but the OLD lambda
+  stayed connected to `field.textChanged` (never explicitly
+  disconnected, and `deleteLater()` on the *helper* object doesn't
+  touch it since the closure lives on the signal connection itself, not
+  the object being deleted). Typing into the Main/Sub1/Sub2 field after
+  a couple of project reloads fired every accumulated stale lambda,
+  crashing on the dangling `QCompleter` reference. Fixed by giving
+  `LatexEntryAutoCompleter` a `detach()` method that explicitly
+  disconnects its `textChanged` connection, called by `_attach_completer`
+  right before replacing it.
   A `QMessageBox.warning`/similar real modal call reachable from a failure
   path needs monkeypatching before you drive that path in a test — it
   blocks forever waiting for a click that can never come headlessly (see
@@ -304,7 +323,26 @@ tests/
   patching needed), a lone range closer being skipped, and a batch of
   both; see `test_duplicate_references.py`). This is where the third
   instance of the see_references/seealso_references JSON-serialization
-  bug was found (see layer 3 above). Use
+  bug was found (see layer 3 above). Also covers the live-insertion
+  pipeline end to end — a real "Insert Index Tag" click
+  (`LatexIndexController.handle_insert`) through
+  `AppPipelineController._handle_manual_index_insertion`'s bookkeeping,
+  all the way to what's actually in the database, both immediately and
+  after an explicit save, plus the discard-rollback path (see
+  `test_live_insertion_persistence.py`). No earlier test drove this full
+  chain — coverage previously stopped at the `.tex` macro text
+  (`test_latex_index_controller_insert.py`) or started from an
+  already-loaded record. Driving it for real found a genuine,
+  previously-unknown bug: `_handle_manual_index_insertion` never called
+  `EntryModifierModel.shift_coordinates_after` for a fresh live
+  insertion, unlike every other coordinate-changing path (rename, table
+  edit, delete, duplicate). Inserting a second `\index` entry earlier in
+  the same open file than an existing one silently desynced that
+  existing entry's cached `absolute_position`/`absolute_end` from where
+  its macro actually landed — the next rename or delete of it would then
+  target the wrong byte span. Fixed by shifting every other cached
+  reference in the same file, mirroring what
+  `_handle_duplicate_references_request` already did. Use
   `qtbot.waitUntil` (not `waitSignal` on the load thread directly) to wait
   for a background load to finish — polling an observable end-state (the
   tree populating) sidesteps having to reason precisely about the thread's
