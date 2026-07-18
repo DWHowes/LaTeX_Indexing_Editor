@@ -34,7 +34,9 @@ tests/
   originated there), `range_consistency_model.py`, `text_sanitizer.py`,
   `macro_id_generator.py`, `rtf_export_model.py` (pure/file-based methods
   only — `compile_to_aux`/`generate_ind_file` shell out to a real LaTeX
-  toolchain and are out of scope here), `name_inverter.py`'s offline
+  toolchain and remain the only genuinely out-of-scope pieces of the RTF
+  export pipeline; the controller/threading layer built around them is
+  now covered too, see layer 3 below), `name_inverter.py`'s offline
   rule-based logic (`_fast_invert` and friends — the VIAF/LC network-calling
   methods are likewise out of scope), and `cross_reference_model.py`.
   Two real, pre-existing bugs in `_fast_invert` were found and confirmed
@@ -258,6 +260,26 @@ tests/
   strings or already-typed values on the way in) but a real bug in this
   method's own contract nonetheless — fixed by comparing against the
   actual type objects (`t is bool`/`t is int`).
+
+  `test_rtf_export_controller.py` covers `IndexExportController`,
+  `RtfExportWorker`, and `RtfExportThread` — the RTF export pipeline's own
+  orchestration and threading, as distinct from `RtfExportEngine`'s
+  `compile_to_aux`/`generate_ind_file`, which shell out to a real
+  pdflatex/makeindex/xindy install and stay out of scope (see layer 1
+  above). `compile_to_aux`/`generate_ind_file` are monkeypatched at the
+  INSTANCE level to synthesize each stage's expected on-disk artifact (or
+  deliberately not), exercising every guard branch of
+  `export_project_to_rtf` — missing root file, missing aux with/without a
+  log tail, missing/empty `.idx`, an invalid `.ind`, a `parse_ind`
+  `FileNotFoundError` race, an `.ind` with no recognized entries — plus
+  the full success path (a real `.rtf` file is written and its content
+  checked), the `progress_callback` stage-ordering, and custom output
+  filenames. `RtfExportWorker.process()` is called directly for
+  deterministic signal-emission checks, and `RtfExportThread` is driven
+  through two real threaded runs via `qtbot.waitSignal` to prove the
+  `moveToThread`/signal-relay/`quit()`+`wait()` wiring itself, not just
+  the logic it wraps. No bugs were found in this layer — the
+  orchestration and threading held up cleanly.
 
   Prefer real collaborators over stubs
   where they're cheap and side-effect-free — a stub view can silently mask a
