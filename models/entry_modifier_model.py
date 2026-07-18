@@ -101,7 +101,20 @@ class EntryModifierModel(QObject):
             )
 
         if self._persistence is not None:
-            success = self._persistence.insert_reference(entry_dict)
+            # Same list-vs-JSON-string gotcha as flush_dirty_to_db above:
+            # insert_reference does not JSON-encode see_references/
+            # seealso_references either, and a duplicated entry (see
+            # AppPipelineController._build_duplicate_entry_dict) copies
+            # these fields straight from an already-loaded record, where
+            # they're real Python lists (LatexIndexParser always returns a
+            # list, never None, even for a plain \index{...} entry with no
+            # cross-references).
+            write_dict = dict(entry_dict)
+            for key in ("see_references", "seealso_references"):
+                if isinstance(write_dict.get(key), list):
+                    write_dict[key] = json.dumps(write_dict[key])
+
+            success = self._persistence.insert_reference(write_dict)
             if not success:
                 print(f"[MODEL WARNING] insert_reference failed for ID {unique_id}")
         else:
