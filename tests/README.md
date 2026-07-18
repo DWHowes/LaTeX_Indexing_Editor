@@ -175,7 +175,24 @@ tests/
   elsewhere in the suite only ever hits the on-disk branch, since none of
   those stacks open the target file in a real tab. No app bugs found;
   everything here is real, pre-existing behavior, correctly implemented.
-  Prefer real collaborators over stubs
+  Two more previously-zero-coverage areas: `IndexEditStagingModel` (the
+  session-only staging layer nearly every other controller test in this
+  suite already exercises indirectly via `stage_edit`/`commit`/`discard`,
+  but never for its own edge cases — the "stage back to the original
+  value still emits but clears dirty" case, auto-registration of an
+  unstaged id, `commit()`'s lack of a dirty guard; see
+  `test_index_edit_staging_model.py`, no bugs found), and Advanced Search
+  (`SearchWorker`'s exact/fuzzy line-by-line matching — called directly
+  and synchronously rather than through the real `SafeSearchThread`
+  QThread wrapper, same "drive the sync logic directly" approach as
+  `ProjectLoadWorker`, including column-offset accuracy on indented
+  lines and an unreadable-file-mid-scan case; see `test_search_worker.py`
+  — plus `AdvancedSearchWindow`'s own guards, result-tree grouping, and
+  navigation-signal wiring, including one real end-to-end run through
+  the actual threaded worker via `qtbot.waitUntil`; see
+  `test_advanced_search_window.py`). No bugs found in either — this
+  entire feature area had zero coverage before today despite being a
+  real, user-facing feature. Prefer real collaborators over stubs
   where they're cheap and side-effect-free — a stub view can silently mask a
   mismatch between what the controller assumes about the view's interface
   and what it actually is, which is exactly the kind of gap layer 4 exists
