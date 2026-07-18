@@ -195,14 +195,22 @@ class PreferencesPersistence(QObject):
         from dataclasses import asdict, fields
 
         defaults = asdict(IndexPrefsData())
+        # dataclasses.fields() gives f.type as the actual type OBJECT here
+        # (this module has no `from __future__ import annotations`), not a
+        # string -- comparing it against the string literals "bool"/"int"
+        # below never matched, silently returning every value as a plain
+        # str regardless of its real type. Harmless in practice today
+        # (IndexPrefsConfigModel.update_data() re-coerces from either
+        # strings or already-typed values on the way in), but a real bug
+        # in this method's own contract nonetheless.
         field_types = {f.name: f.type for f in fields(IndexPrefsData())}
 
         def coerce(key, raw):
-            t = field_types.get(key, "str")
+            t = field_types.get(key, str)
             try:
-                if t == "bool":
+                if t is bool:
                     return str(raw).lower() == "true"
-                elif t == "int":
+                elif t is int:
                     return int(raw)
                 else:
                     return str(raw)

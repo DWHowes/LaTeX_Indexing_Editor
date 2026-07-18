@@ -293,16 +293,37 @@ class IndexTreeView(QTreeView):
                     return  # path not found — nothing to remove
                 parent_item = found
 
-            # Remove the leaf, then prune empty ancestors bottom-up
-            for ancestor, row in reversed(node_chain):
+            # Remove the leaf, then prune empty ancestors bottom-up. The
+            # leaf itself (i == 0) is always removed unconditionally --
+            # it's exactly the node this undo is targeting. Every
+            # ancestor above it, though, can be a pre-existing node this
+            # insertion merely reused (e.g. undoing a fresh
+            # "Sports!Football" insertion that attached under an already-
+            # existing "Sports" node with its own \index{Sports}
+            # reference) -- checking only for tree CHILDREN here (as
+            # IndexEditController._prune_subtree_and_ancestors originally
+            # did too, see that method's own fix) would prune "Sports"
+            # away the moment its only child is removed, even though its
+            # own reference, macro, and DB row are all still there and
+            # completely unrelated to the entry being undone.
+            for depth, (ancestor, row) in enumerate(reversed(node_chain)):
                 child = ancestor.child(row, 0)
                 if child is None or child.rowCount() > 0:
                     break  # stop pruning — node still has children
+                if depth > 0 and self._node_has_own_refs(ancestor, row):
+                    break  # an ancestor's own reference must never be pruned away
                 ancestor.removeRow(row)
         finally:
             self.setSortingEnabled(True)
             self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
             self.expandAll()
+
+    def _node_has_own_refs(self, parent_item: QStandardItem, row: int) -> bool:
+        """Whether the node at parent_item.child(row, 0) still carries any reference of its own."""
+        sibling_col1 = parent_item.child(row, 1)
+        if sibling_col1 is None:
+            return False
+        return bool(sibling_col1.data(Qt.ItemDataRole.UserRole + 1))
 
     def reinsert_entry(self, parts_list: list, refs: list) -> None:
         """Re-inserts an entry that was removed by undo. Called by the redo stack."""
