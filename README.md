@@ -56,7 +56,20 @@ No Python, no setup — just download and run the installer.
 
    Find "LaTeX Indexing Editor" in your Start Menu (or on your Desktop, if you checked that option during install) and open it.
 
-This is an early alpha — expect rough edges, and please report anything that looks wrong.
+#### Reporting problems
+
+This is an early alpha — things will break. When they do, please report it here:
+
+**[📝 Report an issue](https://github.com/DWHowes/LaTeX_Indexing_Editor/issues/new)**
+
+You don't need any GitHub experience to use this — just:
+
+1. Click the link above (you'll need a free GitHub account; it'll prompt you to sign up/log in if you're not already)
+2. Give it a short title describing the problem (e.g. "Crash when opening a project with no base file set")
+3. In the description box, say what you did, what you expected to happen, and what happened instead — a screenshot helps if it's something visual
+4. Click **"Submit new issue"**
+
+That's it — no special formatting or process required. If you're not sure whether something is a real bug or expected behavior, report it anyway; it's easier to close a non-issue than to miss a real one.
 
 # 
 
