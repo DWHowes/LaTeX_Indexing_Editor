@@ -1,4 +1,3 @@
-import os
 import sys
 from PySide6.QtWidgets import QApplication
 
@@ -8,6 +7,7 @@ from models.preferences_persistence import PreferencesPersistence
 from models.text_sanitizer import TextSanitizer
 from models.session_backup_manager import SessionBackupManager
 from models.name_inverter import NameInverter
+from models.app_paths import get_app_root
 
 # Import all core operational controllers
 from controllers.app_pipeline_controller import AppPipelineController
@@ -48,7 +48,7 @@ if __name__ == "__main__":
         text_sanitizer = TextSanitizer()
         backup_manager = SessionBackupManager()
 
-        viaf_cache = os.path.join(os.path.dirname(__file__), "data", "name_cache.db")
+        viaf_cache = str(get_app_root() / "data" / "name_cache.db")
         name_inverter = NameInverter(viaf_cache_path=viaf_cache, viaf_enabled=True)
 
         # Initialize the main visual window shell

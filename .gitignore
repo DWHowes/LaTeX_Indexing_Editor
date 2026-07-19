@@ -16,3 +16,6 @@ documentation
 .pytest_cache
 .coverage
 htmlcov
+build
+dist
+dist_installer

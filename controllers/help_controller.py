@@ -1,9 +1,8 @@
-from pathlib import Path
-
 from PySide6.QtCore import QObject, Slot
 
 from views.help_viewer_window import HelpViewerWindow
 from controllers.app_style_configuration import AppStyleConfiguration
+from models.app_paths import get_app_root
 
 
 class HelpController(QObject):
@@ -12,16 +11,14 @@ class HelpController(QObject):
     controllers in this app, help content is fixed relative to the app's
     own install location, not per-project -- so there's no
     set_active_project counterpart here, and the window stays usable with
-    no project open (mirrors main.py's os.path.join(os.path.dirname(
-    __file__), "data", ...) convention for locating a bundled resource,
-    just two directories up instead of one, since this file lives in
-    controllers/ rather than at the project root).
+    no project open. Uses get_app_root() (not __file__) so this still
+    resolves correctly in a frozen/packaged build.
     """
 
     def __init__(self, window, parent=None):
         super().__init__(parent or window)
         self._window = window
-        self._help_root = Path(__file__).resolve().parent.parent / "help"
+        self._help_root = get_app_root() / "help"
         self.dialog = None
 
         AppStyleConfiguration.event_broker().theme_mutated.connect(self._on_theme_changed)

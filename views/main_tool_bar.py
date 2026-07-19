@@ -5,6 +5,7 @@ from PySide6.QtCore import QSize, Qt, Signal, Slot
 from PySide6.QtGui import QFont, QIcon
 
 from controllers.app_style_configuration import AppStyleConfiguration
+from models.app_paths import get_app_root
 
 class MainToolBar(QToolBar):
     """
@@ -137,7 +138,8 @@ class MainToolBar(QToolBar):
         self.dark_toggle.setChecked(is_dark_mode)
         self.dark_toggle.blockSignals(False)
         
-        target_path = "icons/light-mode.png" if is_dark_mode else "icons/night-mode.png"
+        icon_name = "light-mode.png" if is_dark_mode else "night-mode.png"
+        target_path = str(get_app_root() / "icons" / icon_name)
         tool_tip_text = "Switch to Light Mode (Ctrl+Shift+D)" if is_dark_mode else "Switch to Dark Mode (Ctrl+Shift+D)"
         self.dark_toggle.setToolTip(tool_tip_text)
 
