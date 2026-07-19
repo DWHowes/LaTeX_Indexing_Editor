@@ -60,10 +60,15 @@ class IndexPrefsConfigDialog(QDialog):
         self.chk_imakeidx_nonep = QCheckBox("Prevent New Page Before Index (nonewpage)")
         self.spn_imakeidx_cols = QSpinBox()
         self.spn_imakeidx_cols.setRange(1, 4)
+        self.txt_imakeidx_title = QLineEdit()
+        self.txt_imakeidx_title.setPlaceholderText("(default \\indexname heading)")
+        self.chk_imakeidx_intoc = QCheckBox("Add Index to Table of Contents (intoc)")
         lay_imakeidx.addRow(self.chk_imakeidx)
         lay_imakeidx.addRow(self.chk_imakeidx_noauto)
         lay_imakeidx.addRow(self.chk_imakeidx_nonep)
         lay_imakeidx.addRow("Number of Columns:", self.spn_imakeidx_cols)
+        lay_imakeidx.addRow("Index Title/Heading:", self.txt_imakeidx_title)
+        lay_imakeidx.addRow(self.chk_imakeidx_intoc)
         
         # --- sub-tab: idxlayout ---
         self.tab_idxlayout = QWidget()
@@ -233,6 +238,8 @@ class IndexPrefsConfigDialog(QDialog):
         self.chk_imakeidx_noauto.setEnabled(state)
         self.chk_imakeidx_nonep.setEnabled(state)
         self.spn_imakeidx_cols.setEnabled(state)
+        self.txt_imakeidx_title.setEnabled(state)
+        self.chk_imakeidx_intoc.setEnabled(state)
 
     def _toggle_idxlayout_widgets(self, state: bool) -> None:
         self.chk_idxlayout_unbal.setEnabled(state)
@@ -277,6 +284,8 @@ class IndexPrefsConfigDialog(QDialog):
         self.chk_imakeidx_noauto.setChecked(data.get("imakeidx_noautomatic", True))
         self.chk_imakeidx_nonep.setChecked(data.get("imakeidx_nonewpage", True))
         self.spn_imakeidx_cols.setValue(data.get("imakeidx_columns", 2))
+        self.txt_imakeidx_title.setText(data.get("imakeidx_title", ""))
+        self.chk_imakeidx_intoc.setChecked(data.get("imakeidx_intoc", False))
         self._toggle_imakeidx_widgets(self.chk_imakeidx.isChecked())
         
         self.chk_idxlayout.setChecked(data.get("use_idxlayout", True))
@@ -341,6 +350,8 @@ class IndexPrefsConfigDialog(QDialog):
             "imakeidx_noautomatic": self.chk_imakeidx_noauto.isChecked(),
             "imakeidx_nonewpage": self.chk_imakeidx_nonep.isChecked(),
             "imakeidx_columns": self.spn_imakeidx_cols.value(),
+            "imakeidx_title": self.txt_imakeidx_title.text().strip(),
+            "imakeidx_intoc": self.chk_imakeidx_intoc.isChecked(),
             "use_idxlayout": self.chk_idxlayout.isChecked(),
             "idxlayout_unbalanced": self.chk_idxlayout_unbal.isChecked(),
             "idxlayout_justified": self.chk_idxlayout_just.isChecked(),
