@@ -193,25 +193,13 @@ class FileTreeView(QTreeView):
         if file_path:
             self.file_prune_requested.emit(file_path)
 
-    def _apply_tree_view_theme(self, is_dark: bool):
-        tree_view_stylesheet = AppStyleConfiguration.get_tree_view_stylesheet(is_dark)
-        self.setStyleSheet(tree_view_stylesheet)
-        self.viewport().setStyleSheet(tree_view_stylesheet)
-        self.viewport().setAutoFillBackground(True)
-
-        app = QApplication.instance()
-        base_color = (
-            app.palette().color(QPalette.ColorRole.Window)
-            if app is not None
-            else QColor("#2b2b2b" if is_dark else "#ffffff")
-        )
-
-        palette = self.viewport().palette()
-        palette.setColor(QPalette.ColorRole.Base, base_color)
-        self.viewport().setPalette(palette)
-        
     def _on_theme_mutated(self, is_dark_mode: bool):
-        self._apply_tree_view_theme(bool(is_dark_mode))
+        # No stylesheet/palette overrides here -- this view relies entirely
+        # on the app-wide QPalette set by AppStyleConfiguration.configure_
+        # application_theme(), same as IndexTreeView. A previous per-widget
+        # stylesheet + manual viewport-palette override for a bespoke
+        # "tree_background" colour repeatedly fell out of sync with the
+        # real theme (stale QSettings values, palette-vs-stylesheet
+        # precedence bugs) -- removed rather than patched again.
         self._refresh_root_indicators(self.base_model.invisibleRootItem())
         self.viewport().update()
-        

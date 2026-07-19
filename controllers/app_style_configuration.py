@@ -61,23 +61,6 @@ class AppStyleConfiguration:
         """
 
     @staticmethod
-    def get_tree_view_stylesheet(colours) -> str:
-        """
-        colours: a DarkThemeColours or LightThemeColours instance.
-        Callers that previously passed is_dark_mode: bool should migrate to
-        passing the colours object; the bool overload is retained for safety.
-        """
-        if isinstance(colours, bool):
-            # Legacy call path — build a temporary default colours object
-            colours = DarkThemeColours() if colours else LightThemeColours()
-
-        return (
-            f"QTreeView {{ background-color: {colours.tree_background}; color: {colours.window_text}; }} "
-            f"QHeaderView::section {{ background-color: {colours.tree_header_bg}; "
-            f"color: {colours.window_text}; border: 1px solid {colours.tree_header_border}; }}"
-        )
-
-    @staticmethod
     def get_tab_pane_stylesheet(colours) -> str:
         """colours: a DarkThemeColours or LightThemeColours instance (or legacy bool)."""
         if isinstance(colours, bool):
@@ -168,12 +151,12 @@ class AppStyleConfiguration:
             QLineEdit, QSpinBox, QComboBox {{
                 background-color: {colours.base};
                 color: {colours.text};
-                border: 1px solid {colours.tree_header_border};
+                border: 1px solid {colours.tab_pane_border};
             }}
             QListWidget {{
                 background-color: {colours.base};
                 color: {colours.text};
-                border: 1px solid {colours.tree_header_border};
+                border: 1px solid {colours.tab_pane_border};
             }}
             QListWidget::item:selected {{
                 background-color: {colours.highlight};
@@ -185,7 +168,7 @@ class AppStyleConfiguration:
             QDialogButtonBox QPushButton {{
                 background-color: {colours.button};
                 color: {colours.button_text};
-                border: 1px solid {colours.tree_header_border};
+                border: 1px solid {colours.tab_pane_border};
                 padding: 4px 12px;
             }}
             QLabel {{

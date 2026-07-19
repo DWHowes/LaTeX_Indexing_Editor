@@ -19,7 +19,7 @@ Changing any of these only updates what the editor has stored — it doesn't tou
 
 ## UI Themes
 
-Separate colour editors for **Dark Theme** and **Light Theme** — window background, text, highlight colour, and several more specific fields (tree background, header colours, and so on), each a click-to-pick colour swatch with a live preview alongside it. **Restore Tab Defaults** on a tab resets just that theme back to its factory colours.
+Separate colour editors for **Dark Theme** and **Light Theme** — window background, text, highlight colour, tab pane background, and so on — each a click-to-pick colour swatch with a live preview alongside it. **Restore Tab Defaults** on a tab resets just that theme back to its factory colours.
 
 Colour changes apply immediately across the whole application as soon as you accept the dialog — no restart needed.
 

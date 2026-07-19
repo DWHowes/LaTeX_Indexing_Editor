@@ -10,6 +10,11 @@ class IndexPrefsData:
     imakeidx_noautomatic: bool = True
     imakeidx_nonewpage: bool = True
     imakeidx_columns: int = 2
+    # Per-index \makeindex[...] keys. Empty title means "omit the key",
+    # which leaves the index heading at whatever the document class's
+    # \indexname default is.
+    imakeidx_title: str = ""
+    imakeidx_intoc: bool = False
     use_idxlayout: bool = True
     idxlayout_unbalanced: bool = True
     idxlayout_justified: bool = False
@@ -336,7 +341,14 @@ class IndexPrefsConfigModel:
                     cli_flags.append("-p")
                 cli_flags.append(f"-s {style_file}")
                 cli_opts = " ".join(cli_flags)
-            lines.append(f"\\makeindex[columns={d.imakeidx_columns}, options={{{cli_opts}}}]")
+
+            makeindex_opts = [f"columns={d.imakeidx_columns}"]
+            if d.imakeidx_title:
+                makeindex_opts.append(f"title={{{d.imakeidx_title}}}")
+            if d.imakeidx_intoc:
+                makeindex_opts.append("intoc")
+            makeindex_opts.append(f"options={{{cli_opts}}}")
+            lines.append(f"\\makeindex[{', '.join(makeindex_opts)}]")
 
         if d.use_idxlayout:
             idx_opts = []

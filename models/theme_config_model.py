@@ -16,9 +16,6 @@ class DarkThemeColours:
     highlight_text:   str = "#000000"
     placeholder_text: str = "#a0a0a0"
     # Per-widget stylesheet overrides
-    tree_background:  str = "#191919"
-    tree_header_bg:   str = "#353535"
-    tree_header_border: str = "#444444"
     tab_pane_bg:      str = "#252525"
     tab_pane_border:  str = "#444444"
 
@@ -37,9 +34,6 @@ class LightThemeColours:
     highlight_text:   str = "#ffffff"
     placeholder_text: str = "#767676"
     # Per-widget stylesheet overrides
-    tree_background:  str = "#ffffff"
-    tree_header_bg:   str = "#f0f0f0"
-    tree_header_border: str = "#cccccc"
     tab_pane_bg:      str = "#f0f0f0"
     tab_pane_border:  str = "#cccccc"
 
@@ -58,9 +52,6 @@ THEME_FIELD_LABELS: Dict[str, str] = {
     "highlight_text":     "Selected Text",
     "placeholder_text":   "Placeholder Text",
     # Stylesheet
-    "tree_background":    "Tree View Background",
-    "tree_header_bg":     "Tree Header Background",
-    "tree_header_border": "Tree Header Border",
     "tab_pane_bg":        "Tab Pane Background",
     "tab_pane_border":    "Tab Pane Border",
 }
@@ -73,7 +64,6 @@ THEME_FIELD_GROUPS: Dict[str, list] = {
         "placeholder_text",
     ],
     "Widget Stylesheet Overrides": [
-        "tree_background", "tree_header_bg", "tree_header_border",
         "tab_pane_bg", "tab_pane_border",
     ],
 }

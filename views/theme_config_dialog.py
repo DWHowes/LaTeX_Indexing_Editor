@@ -206,17 +206,6 @@ class _PreviewPanel(QFrame):
         self._lbl_highlight.setContentsMargins(4, 2, 4, 2)
         layout.addWidget(self._lbl_highlight)
 
-        # Tree simulation
-        tree_box = QGroupBox("Tree View")
-        tree_layout = QVBoxLayout(tree_box)
-        tree_layout.setSpacing(2)
-        tree_layout.setContentsMargins(4, 4, 4, 4)
-        self._lbl_tree_header = QLabel("▸ Header row")
-        self._lbl_tree_body   = QLabel("   ├ Item one\n   └ Item two")
-        tree_layout.addWidget(self._lbl_tree_header)
-        tree_layout.addWidget(self._lbl_tree_body)
-        layout.addWidget(tree_box)
-
         # Tab pane simulation
         self._lbl_tab_pane = QLabel("Tab pane background")
         self._lbl_tab_pane.setContentsMargins(4, 4, 4, 4)
@@ -236,21 +225,13 @@ class _PreviewPanel(QFrame):
         self.setStyleSheet(f"QFrame {{ background-color: {c.get('window','#353535')}; }}")
 
         self._lbl_window.setStyleSheet(css(c.get("window","#353535"), c.get("window_text","#ffffff")))
-        self._lbl_base.setStyleSheet(css(c.get("base","#353535"), c.get("text","#ffffff"), c.get("tree_header_border","#444")))
+        self._lbl_base.setStyleSheet(css(c.get("base","#353535"), c.get("text","#ffffff"), "#444444"))
         self._lbl_alt.setStyleSheet(css(c.get("alternate_base","#353535"), c.get("text","#ffffff")))
         self._btn_preview.setStyleSheet(
             f"background-color:{c.get('button','#353535')}; color:{c.get('button_text','#ffffff')}; "
-            f"border: 1px solid {c.get('tree_header_border','#444')}; border-radius:3px; padding: 3px 10px;"
+            f"border: 1px solid #444444; border-radius:3px; padding: 3px 10px;"
         )
         self._lbl_highlight.setStyleSheet(css(c.get("highlight","#2a82da"), c.get("highlight_text","#000000")))
-
-        tree_border = c.get("tree_header_border","#444")
-        self._lbl_tree_header.setStyleSheet(
-            css(c.get("tree_header_bg","#353535"), c.get("window_text","#ffffff"), tree_border)
-        )
-        self._lbl_tree_body.setStyleSheet(
-            css(c.get("tree_background","#191919"), c.get("text","#ffffff"))
-        )
 
         self._lbl_tab_pane.setStyleSheet(
             css(c.get("tab_pane_bg","#252525"), c.get("window_text","#ffffff"), c.get("tab_pane_border","#444"))
