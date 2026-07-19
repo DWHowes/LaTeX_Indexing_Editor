@@ -38,11 +38,27 @@ A high-performance desktop application built with Python and PySide6 (Qt) design
 
 ### For indexer end users
 
-Packaging of the app as a standalone installer isn't done yet — this section is a placeholder until a packaged build is available.
+No Python, no setup — just download and run the installer.
 
-## Packaging the application
+1. **Download the installer**
 
-A description of how to package the project for distribution and the creation of an installation program.
+   **[⬇ Download LatexIndexingEditor-Setup-0.1.0-alpha.exe](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases/download/v0.1.0-alpha/LatexIndexingEditor-Setup-0.1.0-alpha.exe)**
+
+   (Windows only. See the [release page](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases/tag/v0.1.0-alpha) for release notes, or the [full list of releases](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases) for other versions.)
+
+2. **Run the installer**
+
+   Double-click the downloaded `.exe` and follow the prompts. It installs just for your own user account — no administrator rights needed, and no other software (Python included) is required beforehand.
+
+   Windows may show a **"Windows protected your PC"** SmartScreen warning, since this alpha build isn't yet code-signed. This is expected for a new, unsigned installer — click **"More info"**, then **"Run anyway"** to proceed.
+
+3. **Launch it**
+
+   Find "LaTeX Indexing Editor" in your Start Menu (or on your Desktop, if you checked that option during install) and open it.
+
+This is an early alpha — expect rough edges, and please report anything that looks wrong.
+
+# 
 
 ## Running the test suite
 
