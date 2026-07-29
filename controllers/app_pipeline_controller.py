@@ -70,6 +70,11 @@ class AppPipelineController(QObject):
         self._tree_modified = False
         self._load_thread = None
         self._search_window = None
+        # Every .tex file the active project tracks for external-change
+        # detection, captured at load time so the save path can re-stamp
+        # checksums without a file_tree_payload to walk -- see
+        # _collect_tex_file_paths and _refresh_file_sync_checksums.
+        self._project_tex_paths: list = []
 
         self.index_model_engine = None  # Will be initialized in the index subsystem setup
 
@@ -285,6 +290,7 @@ class AppPipelineController(QObject):
         # --- Sub-Controller Bridges ---
         self.lc_ctrl.editor_metrics_updated.connect(self.window.status_bar.set_status_text)
         self.doc_io.save_error_encountered.connect(self._display_document_io_error)
+        self.doc_io.content_shifted.connect(self._handle_injected_content_shift)
         self.lc_ctrl.tab_changes_saved.connect(self._confirm_pending_insertions)
         self.lc_ctrl.tab_changes_discarded.connect(self._discard_pending_insertions)
 
@@ -435,6 +441,13 @@ class AppPipelineController(QObject):
         self._pending_insertions_by_file.pop(norm_path, None)
         if norm_path and self.entry_modifier_model:
             self.entry_modifier_model.flush_dirty_to_db(norm_path)
+
+        # Closing a tab with "Save" is a real edit-to-disk path of its own,
+        # not just a step on the way to a project save, so re-stamp here
+        # too. No-ops (leaving the file pending for a later save) if
+        # anything else is still unflushed -- see
+        # _refresh_file_sync_checksums.
+        self._refresh_file_sync_checksums()
 
     def _confirm_all_pending_insertions(self) -> None:
         """Called on a whole-project save — every file's pending insertions become permanent."""
@@ -748,6 +761,10 @@ class AppPipelineController(QObject):
         # matches the new project's, so without this a smaller or
         # differently-keyed project would leave stale entries behind.
         self.index_edit_staging_model.clear()
+        # Likewise drop any write tracking left over from a previously open
+        # project — its paths mean nothing to this project's checksums.
+        if self.doc_io:
+            self.doc_io.clear_write_tracking()
         self.entry_modifier_model.set_persistence(self.scope_ctrl.get_persistence_model())
         self.entry_modifier_model.load_records(references)
 
@@ -843,10 +860,14 @@ class AppPipelineController(QObject):
         detected and its stale \\index coordinates healed. See
         _handle_external_file_change.
         """
+        # Cached here rather than only handed to the watcher, since the save
+        # path needs the same list and has no file_tree_payload of its own.
+        self._project_tex_paths = self._collect_tex_file_paths(file_tree_payload)
+
         watcher = self.lc_ctrl.file_watcher
         if not watcher:
             return
-        for path in self._collect_tex_file_paths(file_tree_payload):
+        for path in self._project_tex_paths:
             watcher.register_file_path(path)
 
     def _update_file_sync_checksums(self, file_tree_payload: list) -> None:
@@ -865,6 +886,84 @@ class AppPipelineController(QObject):
         tex_paths = self._collect_tex_file_paths(file_tree_payload)
         checksums = ProjectLoadWorker.compute_file_checksums(tex_paths)
         persistence.replace_file_sync_checksums(checksums)
+
+    @Slot(str, list)
+    def _handle_injected_content_shift(self, file_path: str, edits: list) -> None:
+        r"""
+        Keeps the DB's cached \index coordinates in step with a block
+        injection. DocumentIOController's splice helpers report every edit
+        they made as an ordered (after_position, delta) list; replaying
+        them through EntryModifierModel.shift_coordinates_after is the same
+        thing the index-edit pipeline already does after every macro
+        rewrite.
+
+        Order matters: each pair is expressed in the coordinate space the
+        previous one left behind, so they must be applied as given rather
+        than combined or sorted.
+
+        Without this, inserting the LaTeX settings/custom commands/head
+        note/cross-references block silently invalidated every \index
+        coordinate after the insertion point -- navigation landed at stale
+        positions and the rewrite guard rejected later edits to those
+        entries -- until a manual resync rebuilt them.
+        """
+        if not edits or not self.entry_modifier_model:
+            return
+
+        for after_position, delta in edits:
+            shifted_ids = self.entry_modifier_model.shift_coordinates_after(
+                file_path, after_position, delta
+            )
+            for shifted_id in shifted_ids:
+                self.entry_modifier_model.mark_dirty(shifted_id)
+
+    def _refresh_file_sync_checksums(self) -> None:
+        """
+        Re-stamps project_file_sync_state for the files this app itself has
+        written since the last stamp, so its own edits don't come back as
+        "Files Changed Outside the Editor" on the next project load. Called
+        wherever the DB and disk are known to have just been brought into
+        agreement: after a save, after a project close, and on a clean
+        shutdown with nothing outstanding.
+
+        Only files DocumentIOController reports as still coordinate-synced
+        are stamped (see consume_synced_write_paths) -- a file changed by a
+        block injection or an editor-tab undo/redo has genuinely stale
+        \\index coordinates in the DB, so its old checksum is left in
+        place on purpose and the drift prompt still fires for it.
+        Untouched files are never stamped here either, which is what keeps
+        a real external edit detectable.
+        """
+        persistence = self.scope_ctrl.get_persistence_model()
+        if not persistence or not self.doc_io:
+            return
+
+        # A stamp asserts the DB matches disk, so it must not be taken while
+        # index edits are still sitting unflushed in memory -- callers other
+        # than execute_project_save_workflow can reach here with a dirty
+        # model (project close, shutdown). Leaving the paths pending means a
+        # later save still stamps them.
+        has_unsaved_db = bool(self.idx_ctrl.has_unsaved_changes()) if self.idx_ctrl else False
+        has_dirty_edits = bool(self.entry_modifier_model.has_dirty_records()) if self.entry_modifier_model else False
+        if has_unsaved_db or has_dirty_edits:
+            return
+
+        written = self.doc_io.consume_synced_write_paths()
+        if not written:
+            return
+
+        # project_file_sync_state is keyed by the exact path strings
+        # _collect_tex_file_paths produces, so map DocumentIOController's
+        # normalized forms back onto those rather than inserting a second
+        # row for the same file under a different spelling.
+        tracked_by_norm = {os.path.normpath(p): p for p in self._project_tex_paths}
+        targets = [tracked_by_norm[p] for p in written if p in tracked_by_norm]
+        if not targets:
+            return
+
+        persistence.upsert_file_sync_checksums(
+            ProjectLoadWorker.compute_file_checksums(targets)
+        )
 
     def _check_for_external_drift_and_prompt(self, file_tree_payload: list) -> None:
         """
@@ -1068,6 +1167,12 @@ class AppPipelineController(QObject):
         # doesn't immediately re-flag them.
         checksums = ProjectLoadWorker.compute_file_checksums(worker.get_scanned_tex_file_paths())
         persistence.replace_file_sync_checksums(checksums)
+
+        # Every file's DB/disk relationship was just re-established from
+        # scratch, so nothing this session wrote is still pending -- and no
+        # file is still considered desynced.
+        if self.doc_io:
+            self.doc_io.clear_write_tracking()
 
         if self.idx_ctrl:
             self.idx_ctrl.clear_staged_entries()
@@ -1380,6 +1485,12 @@ class AppPipelineController(QObject):
             self.lc_ctrl.file_watcher.unregister_all()
 
         self.index_edit_staging_model.clear()
+        # Stamp before the persistence model goes away below, then drop the
+        # tracking along with the rest of this project's state.
+        self._refresh_file_sync_checksums()
+        if self.doc_io:
+            self.doc_io.clear_write_tracking()
+        self._project_tex_paths = []
 
         # self.index_tree_widget.clear()
         # self.file_tree_widget.clear()
@@ -1429,6 +1540,12 @@ class AppPipelineController(QObject):
         db_success = self.idx_ctrl.commit_staged_changes_to_db() if self.idx_ctrl else False
         db_success = db_success or dirty_success > 0
         self._confirm_all_pending_insertions()
+
+        # DB and disk now agree for everything this app wrote, so record
+        # that fact -- without this the next project load compares the
+        # files against checksums taken before any of this session's edits
+        # and reports the user's own work as an external change.
+        self._refresh_file_sync_checksums()
 
         if tex_success or db_success:
             self._tree_modified = False
@@ -1504,11 +1621,20 @@ class AppPipelineController(QObject):
                     self._discard_all_pending_insertions()
                     if self.backup_manager:
                         self.backup_manager.revert_session_changes()
+                    # Files are back to the content their stored checksums
+                    # were taken from, so this session's writes must not be
+                    # stamped on top of them.
+                    if self.doc_io:
+                        self.doc_io.clear_write_tracking()
                     self.safely_terminate_application_lifecycle()
                 elif clicked == cancel_btn:
                     self.window.status_bar.showMessage("Shutdown aborted. Returned to active workspace.", 2000)
                     return
             else:
+                # Nothing outstanding, but writes that never needed a save
+                # (e.g. a bulk delete that went straight to disk and to the
+                # DB) can still be waiting to be stamped.
+                self._refresh_file_sync_checksums()
                 if self.backup_manager:
                     self.backup_manager.clear_session_backups()
                 self.safely_terminate_application_lifecycle()

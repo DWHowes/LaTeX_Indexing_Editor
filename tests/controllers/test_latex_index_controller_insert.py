@@ -1,6 +1,6 @@
 """
 LatexIndexController's core entry-creation path -- handle_insert /
-insert_latex / _attach_byte_coordinates. This is the app's central
+insert_latex / _attach_span_coordinates. This is the app's central
 feature (turning the Index Entry panel into a live \\index{...} macro in
 the active editor tab) and had zero coverage anywhere in the suite before
 this file: every other controller test only ever exercises *existing*
@@ -11,9 +11,14 @@ LatexIndexWindow view -- both are cheap, side-effect-free Qt widgets, and
 a stubbed view/editor pair could easily mask a mismatch between what the
 controller assumes about cursor/document behavior and what Qt actually
 does (selection direction, block/column arithmetic, etc). A real
-DocumentIOController is used for the byte-offset math, but its
-compute_byte_offset call is fed the live in-memory buffer_text (exactly
-as the controller does), so no file ever needs to exist on disk.
+DocumentIOController is bound because the controller requires one to
+record coordinates at all, but nothing here needs a file on disk.
+
+The coordinates recorded are **character** offsets into the
+newline-normalized document text -- the convention every consumer uses
+(LatexIndexParser, _rewrite_on_disk's str slicing, _rewrite_in_document's
+QTextCursor positions). See TestNonAsciiCoordinates for the regression
+that pinned this down.
 
 The three outbound request signals (nextIdRequested / syncRequested /
 saveRequested) are normally answered by AppPipelineController; here
@@ -137,7 +142,7 @@ class TestStandardInsert:
         assert metadata["is_range_closer"] is False
         assert metadata["command_name"] == "index"
 
-    def test_byte_offsets_match_the_inserted_macro_span(self, tmp_path, qtbot):
+    def test_recorded_span_matches_the_inserted_macro(self, tmp_path, qtbot):
         controller, view, editor, recorder = _build_stack(tmp_path, qtbot, "Hello world")
         _place_cursor(editor, 5)
         _fill_entry(view, main="Main")
@@ -314,3 +319,83 @@ class TestMissingDocIo:
         _parts, metadata = recorder.calls[0]
         assert metadata["absolute_position"] is None
         assert metadata["absolute_end"] is None
+
+
+class TestNonAsciiCoordinates:
+    r"""
+    Regression: this path used to convert the cursor's character offsets
+    into UTF-8 *byte* offsets before recording them, while every consumer
+    of absolute_position/absolute_end works in characters
+    (LatexIndexParser.parse_file emits match.start() into a str;
+    DocumentIOController._rewrite_on_disk slices content[pos:end] on a str;
+    _rewrite_in_document calls QTextCursor.setPosition). The two agree
+    only while the text before the macro is pure ASCII -- one accented
+    character earlier in the file skewed the stored span by one byte per
+    non-ASCII character.
+
+    The consequence was silent: rewrite_macro_span's "does this span look
+    like a macro" guard rejected the misaligned slice and aborted, so
+    editing or deleting such an entry did nothing at all, and the bad
+    coordinates persisted in the DB across reopens (project load trusts
+    the DB) until a manual resync.
+
+    Line endings were never part of this -- both producer and consumer
+    normalize CRLF to LF -- so these cases vary only the encoding.
+    """
+
+    def test_accented_text_before_the_macro_does_not_skew_the_span(self, tmp_path, qtbot):
+        body = "Caf\u00e9 Ren\u00e9. "  # two non-ASCII chars, two UTF-8 bytes each
+        controller, view, editor, recorder = _build_stack(tmp_path, qtbot, body + "tail")
+        _place_cursor(editor, len(body))
+        _fill_entry(view, main="Main")
+
+        controller.handle_insert()
+
+        _parts, metadata = recorder.calls[0]
+        macro_text = r"\index{Main}"
+        assert metadata["absolute_position"] == len(body)
+        assert metadata["absolute_end"] == len(body) + len(macro_text)
+        # The real contract: the recorded span must slice back to the macro
+        # out of the same text DocumentIOController would be working with.
+        text = editor.toPlainText()
+        assert text[metadata["absolute_position"]:metadata["absolute_end"]] == macro_text
+
+    def test_the_recorded_span_survives_a_real_rewrite(self, tmp_path, qtbot):
+        """
+        End-to-end proof that the units line up: feed the recorded
+        coordinates straight back into rewrite_macro_span (the consumer
+        that used to silently abort here) and require the rewrite to land.
+        """
+        body = "\u00c5ngstr\u00f6m and M\u00fcller. "
+        controller, view, editor, recorder = _build_stack(tmp_path, qtbot, body + "tail")
+        _place_cursor(editor, len(body))
+        _fill_entry(view, main="Main")
+        controller.handle_insert()
+        _parts, metadata = recorder.calls[0]
+
+        delta = controller.doc_io.rewrite_macro_span(
+            editor.get_absolute_path(),
+            metadata["absolute_position"],
+            metadata["absolute_end"],
+            r"\index{Renamed}",
+        )
+
+        assert delta is not None, "rewrite_macro_span rejected the recorded span"
+        assert r"\index{Renamed}" in editor.toPlainText()
+
+    def test_range_entry_spans_are_also_character_offsets(self, tmp_path, qtbot):
+        body = "Se\u00f1or. "
+        controller, view, editor, recorder = _build_stack(tmp_path, qtbot, body + "selected tail")
+        cursor = editor.textCursor()
+        cursor.setPosition(len(body))
+        cursor.setPosition(len(body) + 8, QTextCursor.MoveMode.KeepAnchor)
+        editor.setTextCursor(cursor)
+        _fill_entry(view, main="Main")
+
+        controller.handle_insert()
+
+        text = editor.toPlainText()
+        opener = recorder.calls[0][1]
+        closer = recorder.calls[1][1]
+        assert text[opener["absolute_position"]:opener["absolute_end"]] == r"\index{Main|(}"
+        assert text[closer["absolute_position"]:closer["absolute_end"]] == r"\index{Main|)}"

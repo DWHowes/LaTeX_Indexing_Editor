@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QTextCursor
 
@@ -22,6 +24,20 @@ class LatexIndexController(QObject):
     def set_doc_io(self, doc_io) -> None:
         """Binds the DocumentIOController after construction."""
         self.doc_io = doc_io
+
+    @contextmanager
+    def _pipeline_edit(self, path: str):
+        """
+        Delegates to DocumentIOController.pipeline_edit when one is bound,
+        and is a plain no-op otherwise (doc_io is injected after
+        construction, and _attach_span_coordinates already tolerates it
+        being absent).
+        """
+        if self.doc_io is None:
+            yield
+            return
+        with self.doc_io.pipeline_edit(path):
+            yield
 
     def handle_insert(self):
         editor = self.tab_widget.currentWidget()
@@ -100,18 +116,23 @@ class LatexIndexController(QObject):
             # which caused it to be duplicated when re-inserted below.
             cursor.setPosition(open_abs_start)
             cursor.setPosition(selection_end, QTextCursor.MoveMode.KeepAnchor)
-            cursor.removeSelectedText()
 
-            cursor.insertText(start_tag)
-            open_abs_end = cursor.position()
+            # Declared as a pipeline edit so DocumentIOController doesn't
+            # read these document mutations as raw typing -- the records
+            # emitted below keep the DB's coordinates in step with them.
+            with self._pipeline_edit(path):
+                cursor.removeSelectedText()
 
-            # Selected text between macros
-            cursor.insertText(selected_text)
+                cursor.insertText(start_tag)
+                open_abs_end = cursor.position()
 
-            # Closing macro
-            close_abs_start = cursor.position()
-            cursor.insertText(end_tag)
-            close_abs_end = cursor.position()
+                # Selected text between macros
+                cursor.insertText(selected_text)
+
+                # Closing macro
+                close_abs_start = cursor.position()
+                cursor.insertText(end_tag)
+                close_abs_end = cursor.position()
 
             editor.setTextCursor(cursor)
 
@@ -122,7 +143,7 @@ class LatexIndexController(QObject):
             open_dict = entry.metadata(assigned_id, path, open_line, open_col)
             open_dict["range_partner_id"] = close_id
             open_dict["is_range_closer"]  = False
-            self._attach_byte_coordinates(doc, open_dict, path, open_abs_start, open_abs_end)
+            self._attach_span_coordinates(doc, open_dict, path, open_abs_start, open_abs_end)
             self.view.indexInserted.emit(entry.normalized_parts(), open_dict)
 
             # Closing record — hidden from views, coordinate record only
@@ -132,7 +153,7 @@ class LatexIndexController(QObject):
             close_dict = entry.metadata(close_id, path, close_line, close_col)
             close_dict["range_partner_id"] = assigned_id
             close_dict["is_range_closer"]  = True
-            self._attach_byte_coordinates(doc, close_dict, path, close_abs_start, close_abs_end)
+            self._attach_span_coordinates(doc, close_dict, path, close_abs_start, close_abs_end)
             self.view.indexInserted.emit(entry.normalized_parts(), close_dict)
 
         else:
@@ -140,7 +161,8 @@ class LatexIndexController(QObject):
             absolute_start = cursor.position()
             macro_tag = (f"\\{entry.command_name}{{{chain}|{entry.page_style}}}"
                         if entry.page_style else f"\\{entry.command_name}{{{chain}}}")
-            cursor.insertText(macro_tag)
+            with self._pipeline_edit(path):
+                cursor.insertText(macro_tag)
             absolute_end = cursor.position()
             editor.setTextCursor(cursor)
 
@@ -151,24 +173,42 @@ class LatexIndexController(QObject):
             uid_dict = entry.metadata(assigned_id, path, true_line, true_col)
             uid_dict["range_partner_id"] = None
             uid_dict["is_range_closer"]  = False
-            self._attach_byte_coordinates(doc, uid_dict, path, absolute_start, absolute_end)
+            self._attach_span_coordinates(doc, uid_dict, path, absolute_start, absolute_end)
             self.view.indexInserted.emit(entry.normalized_parts(), uid_dict)
 
         self.view.reset_ui()
 
-    def _attach_byte_coordinates(self, doc, uid_dict: dict, path: str,
+    def _attach_span_coordinates(self, doc, uid_dict: dict, path: str,
                                 abs_start: int, abs_end: int) -> None:
-        """Converts QTextDocument character offsets to file byte offsets."""
+        r"""
+        Records the inserted macro's span as **character** offsets into the
+        newline-normalized document text -- the convention every consumer of
+        absolute_position/absolute_end actually uses:
+
+        - LatexIndexParser.parse_file emits match.start() into text it read
+          with read_text() and then normalized CRLF/CR to LF.
+        - DocumentIOController._rewrite_on_disk slices content[pos:end] on a
+          str opened in text mode, i.e. universal newlines -- same thing.
+        - _rewrite_in_document uses QTextCursor.setPosition on a
+          QTextDocument, which is likewise newline-normalized.
+
+        abs_start/abs_end arrive here already in exactly that form (they are
+        QTextCursor positions in this document), so there is nothing to
+        convert. This previously ran them through
+        DocumentIOController.compute_byte_offset and stored UTF-8 **byte**
+        offsets instead, which silently disagreed with every one of the
+        consumers above by one per non-ASCII character earlier in the file
+        -- see the regression test in
+        tests/controllers/test_latex_index_controller_insert.py. Line
+        endings were never the problem: both sides normalize.
+
+        The doc_io guard is kept as-is: it means "this controller is fully
+        wired", and callers/tests rely on coordinates being None when it
+        isn't.
+        """
         if self.doc_io is not None:
-            block = doc.findBlock(abs_start)
-            line = block.blockNumber() + 1
-            col  = abs_start - block.position()
-            buffer_text = doc.toPlainText()
-            byte_start = self.doc_io.compute_byte_offset(path, line, col, buffer_text=buffer_text)
-            macro_text = buffer_text[abs_start:abs_end]
-            byte_end   = byte_start + len(macro_text.encode('utf-8'))
-            uid_dict["absolute_position"] = byte_start
-            uid_dict["absolute_end"]      = byte_end
+            uid_dict["absolute_position"] = abs_start
+            uid_dict["absolute_end"]      = abs_end
         else:
             print(f"[LATEX INDEX CTRL] doc_io not injected — coordinates unavailable for {path}")
             uid_dict["absolute_position"] = None

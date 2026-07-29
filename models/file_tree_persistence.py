@@ -867,6 +867,30 @@ class FileTreePersistence:
         except sqlite3.Error as err:
             print(f"[DB ERROR] Failed to write project_file_sync_state: {err}")
 
+    def upsert_file_sync_checksums(self, checksums: dict[str, str]) -> None:
+        """
+        Partial counterpart to replace_file_sync_checksums: updates only the
+        named files' rows and leaves every other row untouched. Used on save,
+        where only the files this app actually wrote -- and whose DB records
+        are still known to match them -- may be re-stamped; any other file's
+        stored checksum has to survive so a genuine external edit is still
+        detected on the next project load.
+        """
+        if not self.db_path or not checksums:
+            return
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.executemany(
+                    "INSERT INTO project_file_sync_state (file_path, checksum, synced_at) "
+                    "VALUES (?, ?, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT(file_path) DO UPDATE SET "
+                    "checksum = excluded.checksum, synced_at = CURRENT_TIMESTAMP;",
+                    list(checksums.items())
+                )
+                conn.commit()
+        except sqlite3.Error as err:
+            print(f"[DB ERROR] Failed to update project_file_sync_state: {err}")
+
     def fetch_index_manifest(self) -> tuple[list[dict], list[dict]]:
         """
         Thread-safe read of project_headings and project_references.

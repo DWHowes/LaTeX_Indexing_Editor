@@ -213,6 +213,18 @@ class WorkspaceLifecycleController(QObject):
             lambda modified: close_btn.setIcon(build_tab_close_icon(modified))
         )
 
+        # Content-sync tracking. Deliberately connected AFTER
+        # load_document_content() above, so seeding the tab with the file's
+        # existing text isn't mistaken for an edit. DocumentIOController
+        # filters out the changes it makes itself -- what reaches it from
+        # here is a Ctrl+Z/Ctrl+Y (the only buffer mutation EditorTab's key
+        # whitelist still allows), which moves \index positions with
+        # nothing updating the project DB's cached coordinates to match.
+        if self.doc_io:
+            editor_tab.document().contentsChanged.connect(
+                lambda: self.doc_io.note_document_edited(editor_tab.get_absolute_path())
+            )
+
         # Connect position metrics monitors
         editor_tab.cursorPositionChanged.connect(
             lambda: self.editor_metrics_updated.emit(

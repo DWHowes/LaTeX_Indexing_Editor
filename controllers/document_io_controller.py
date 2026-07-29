@@ -1,4 +1,5 @@
 import os
+from contextlib import contextmanager
 from PySide6.QtCore import QObject, Signal, Slot
 from views.editor_tab import EditorTab
 
@@ -8,13 +9,128 @@ class DocumentIOController(QObject):
     Strict MVC Compliance: Free of hasattr checks; relies on public object interfaces.
     """
     save_error_encountered = Signal(str, str)
+    # (file_path, edits) where edits is an ordered list of (after_position,
+    # delta) pairs describing how a block injection moved the rest of the
+    # file. Consumed by AppPipelineController, which replays them through
+    # EntryModifierModel.shift_coordinates_after so the DB's cached \index
+    # coordinates follow the text. Each pair is expressed in the coordinate
+    # space left by the pair before it, so they must be applied in order.
+    # Emitted as a signal rather than folded into the inject_* return value
+    # so those keep their established bool contract.
+    content_shifted = Signal(str, list)
 
     def __init__(self, backup_manager, text_sanitizer, tabs_widget, parent_view=None):
         super().__init__(parent_view)
         self.backup_manager = backup_manager
         self.text_sanitizer = text_sanitizer
         self.tabs = tabs_widget
-        # self.parent_view = parent_view 
+        # self.parent_view = parent_view
+
+        # ---- Content-sync write tracking -------------------------------
+        # Records which project files this app itself has changed since the
+        # last time project_file_sync_state was stamped, split by whether
+        # the change kept the DB's cached \index coordinates valid:
+        #
+        #   _synced_write_paths   -- changed through the coordinate-
+        #       maintaining index-edit pipeline (rewrite_macro_span /
+        #       insert_macro_at_position, whose callers immediately follow
+        #       up with EntryModifierModel.shift_coordinates_after), or
+        #       flushed out of a tab buffer. Safe to re-stamp on save.
+        #   _desynced_paths -- changed in a way that shifts \index
+        #       positions with nothing updating the DB to match: the block
+        #       injectors, whole-file generation, and an undo/redo in an
+        #       editor tab (EditorTab is a restricted, near-read-only view
+        #       -- typing/cut/paste are blocked, so Ctrl+Z/Ctrl+Y is the
+        #       only buffer mutation a user can still reach, and
+        #       _handle_index_undo/_handle_index_redo only touch the tree
+        #       node, never the model's coordinates). Deliberately NOT
+        #       re-stamped, so the next project load still offers to
+        #       resync -- see AppPipelineController.
+        #       _check_for_external_drift_and_prompt.
+        #
+        # _pipeline_edit_depth suppresses the hook below while the pipeline
+        # is the one editing a live QTextDocument, since both routes
+        # surface identically as QTextDocument.contentsChanged.
+        self._synced_write_paths: set[str] = set()
+        self._desynced_paths: set[str] = set()
+        self._pipeline_edit_depth = 0
+
+    # ------------------------------------------------------------------
+    # Content-sync write tracking
+    # ------------------------------------------------------------------
+
+    def _note_synced_write(self, file_path: str) -> None:
+        """Records a write that left the DB's cached coordinates valid."""
+        if file_path:
+            self._synced_write_paths.add(os.path.normpath(file_path))
+
+    @contextmanager
+    def pipeline_edit(self, file_path: str = ""):
+        """
+        Brackets a coordinate-maintaining edit to a live QTextDocument, so
+        note_document_edited doesn't mistake the resulting contentsChanged
+        for raw user typing, and records the write as still synced on the
+        way out. Public so edits made outside this controller but still
+        followed by EntryModifierModel.shift_coordinates_after (notably
+        LatexIndexController.insert_latex) can declare themselves the same
+        way -- an unbracketed document edit is treated as desyncing.
+        """
+        self._pipeline_edit_depth += 1
+        try:
+            yield
+        finally:
+            self._pipeline_edit_depth -= 1
+            self._note_synced_write(file_path)
+
+    def note_content_desynced(self, file_path: str) -> None:
+        """
+        Records a change to file_path that invalidated the DB's cached
+        \\index coordinates for it. Public because the block injectors are
+        not the only desyncing route -- note_document_edited below funnels
+        editor-tab undo/redo here too.
+        """
+        if file_path:
+            self._desynced_paths.add(os.path.normpath(file_path))
+
+    def note_document_edited(self, file_path: str) -> None:
+        """
+        Hook for an editor tab's QTextDocument.contentsChanged. Ignored
+        while the index-edit pipeline is the one doing the editing (it
+        maintains coordinates itself); anything else reaching here does
+        not. In practice that means an undo/redo -- EditorTab blocks
+        typing, cut and paste, so Ctrl+Z/Ctrl+Y is the only buffer
+        mutation a user can reach, and it moves \\index positions without
+        anything re-deriving the model's coordinates.
+        """
+        if self._pipeline_edit_depth > 0:
+            return
+        self.note_content_desynced(file_path)
+
+    def consume_synced_write_paths(self) -> list[str]:
+        """
+        Returns and clears the set of files this app wrote whose DB records
+        are still known to match, for the caller to re-stamp in
+        project_file_sync_state. Desynced files are excluded and their
+        desynced status is retained -- only a real resync clears that.
+        """
+        pending = sorted(self._synced_write_paths - self._desynced_paths)
+        self._synced_write_paths.clear()
+        return pending
+
+    def clear_write_tracking(self, file_path: str | None = None) -> None:
+        """
+        Forgets tracked writes -- for one file (after its tab's edits are
+        discarded and it is restored from its session backup) or for all of
+        them (after a full revert or a resync, which re-establishes the
+        DB/disk relationship from scratch).
+        """
+        if file_path is None:
+            self._synced_write_paths.clear()
+            self._desynced_paths.clear()
+            return
+        norm_path = os.path.normpath(file_path)
+        self._synced_write_paths.discard(norm_path)
+        self._desynced_paths.discard(norm_path)
 
     def check_unsaved_tex_changes(self) -> bool:
         """Scans the open view collection to check for uncommitted changes."""
@@ -39,8 +155,13 @@ class DocumentIOController(QObject):
         try:
             with open(cleaned_path, 'w', encoding='utf-8') as f:
                 f.write(editor.toPlainText())
-            
+
             editor.document().setModified(False)
+
+            # The buffer is now on disk. Whether the DB still matches it
+            # depends on how the buffer got edited, which note_document_edited
+            # has already recorded independently.
+            self._note_synced_write(cleaned_path)
 
             return True
             
@@ -61,6 +182,10 @@ class DocumentIOController(QObject):
             self.backup_manager.restore_file_from_backup(file_path)
 
         editor.document().setModified(False)
+
+        # Back to the content the DB was last stamped against, so neither
+        # half of this session's write tracking applies to it any more.
+        self.clear_write_tracking(file_path)
 
     def handle_file_save_as_resolution(self, editor: EditorTab, resolved_file_path: str) -> str:
         """Updates path trackers and triggers a disk flush transaction."""
@@ -168,7 +293,8 @@ class DocumentIOController(QObject):
             from PySide6.QtGui import QTextCursor
             cursor = QTextCursor(doc)
             cursor.setPosition(absolute_position)
-            cursor.insertText(macro_text)
+            with self.pipeline_edit(file_path):
+                cursor.insertText(macro_text)
             open_editor.setTextCursor(cursor)
             open_editor.document().setModified(True)
 
@@ -199,6 +325,7 @@ class DocumentIOController(QObject):
                 self.save_error_encountered.emit("Duplicate Reference Error", f"Could not write file:\n{e}")
                 return None
 
+            self._note_synced_write(file_path)
             line_number = content.count("\n", 0, absolute_position) + 1
             line_start = content.rfind("\n", 0, absolute_position) + 1
             column_offset = absolute_position - line_start
@@ -306,7 +433,8 @@ class DocumentIOController(QObject):
             return None
 
         delta = len(new_macro_text) - (absolute_end - absolute_position)
-        cursor.insertText(new_macro_text)
+        with self.pipeline_edit(editor.get_absolute_path()):
+            cursor.insertText(new_macro_text)
         editor.setTextCursor(cursor)
         editor.document().setModified(True)
         return delta
@@ -363,6 +491,7 @@ class DocumentIOController(QObject):
             return None
 
         delta = len(new_macro_text) - (absolute_end - absolute_position)
+        self._note_synced_write(file_path)
         print(
             f"[IO] Rewrote macro in {os.path.basename(file_path)} "
             f"at {absolute_position}:{absolute_end} "
@@ -423,6 +552,10 @@ class DocumentIOController(QObject):
         Returns True on success. On failure (disk write error), emits
         save_error_encountered and returns False.
         """
+        # Replacing a whole file moves every \index position in it without
+        # anything updating the DB to match -- see note_content_desynced.
+        self.note_content_desynced(file_path)
+
         open_editor = self._find_open_editor(file_path)
         if open_editor:
             from PySide6.QtGui import QTextCursor
@@ -492,7 +625,8 @@ class DocumentIOController(QObject):
                 self.save_error_encountered.emit("Insert Settings Error", f"Could not read base file:\n{e}")
                 return False
 
-        new_text = self._splice_generated_blocks(original_text, preamble_body, printindex_body)
+        edits: list = []
+        new_text = self._splice_generated_blocks(original_text, preamble_body, printindex_body, edits)
         if new_text is None:
             self.save_error_encountered.emit(
                 "Insert Settings Error",
@@ -500,30 +634,107 @@ class DocumentIOController(QObject):
             )
             return False
 
+        if not self._commit_spliced_text(file_path, open_editor, new_text, "Insert Settings Error"):
+            return False
+
+        self.content_shifted.emit(file_path, edits)
+        return True
+
+    def _commit_spliced_text(self, file_path: str, open_editor, new_text: str, error_title: str) -> bool:
+        """
+        Shared tail of the four block injectors: writes new_text back,
+        through the live QTextDocument when the file is open in a tab and
+        straight to disk otherwise.
+
+        Declared as a pipeline edit either way. Splicing does move \\index
+        positions, but the caller pairs it with a content_shifted emission
+        that keeps the DB's coordinates in step, so this is a
+        coordinate-maintaining write and its file stays eligible for a
+        checksum re-stamp on save -- unlike write_generated_file, which
+        replaces a whole file with nothing reconciling it.
+        """
         if open_editor:
             from PySide6.QtGui import QTextCursor
             cursor = QTextCursor(open_editor.document())
             cursor.select(QTextCursor.SelectionType.Document)
-            cursor.insertText(new_text)
+            with self.pipeline_edit(file_path):
+                cursor.insertText(new_text)
             open_editor.document().setModified(True)
-        else:
-            self.backup_manager.register_file_for_session(file_path)
-            try:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(new_text)
-            except Exception as e:
-                self.save_error_encountered.emit("Insert Settings Error", f"Could not write base file:\n{e}")
-                return False
+            return True
 
+        self.backup_manager.register_file_for_session(file_path)
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(new_text)
+        except Exception as e:
+            self.save_error_encountered.emit(error_title, f"Could not write base file:\n{e}")
+            return False
+
+        self._note_synced_write(file_path)
         return True
 
-    def _splice_generated_blocks(self, text: str, preamble_body: str, printindex_body: str) -> "str | None":
+    # ------------------------------------------------------------------
+    # Splice bookkeeping shared by the four block injectors
+    # ------------------------------------------------------------------
+    #
+    # Every injector does the same two kinds of edit -- strip any
+    # previously-injected block, then insert the new one at an anchor --
+    # and every one of those edits moves the \index macros that follow it.
+    # These two helpers perform the edit AND record the matching
+    # (after_position, delta) pair, so the position arithmetic lives in one
+    # place instead of being re-derived per injector.
+    #
+    # Offsets are character offsets into newline-normalized text, matching
+    # LatexIndexParser and both rewrite paths -- see
+    # LatexIndexController._attach_span_coordinates for why that convention
+    # and not byte offsets.
+
+    @staticmethod
+    def _strip_recording(text: str, pattern, edits: list) -> str:
+        r"""
+        Removes every match of pattern, appending one shift event each.
+
+        The event is anchored at the LAST character of the removed span
+        (end - 1), so only entries genuinely after the block move --
+        shift_coordinates_after shifts strictly-greater positions, so
+        anything inside the removed block is left alone rather than being
+        dragged backwards into nonsense.
+        """
+        while True:
+            match = pattern.search(text)
+            if not match:
+                return text
+            start, end = match.span()
+            edits.append((end - 1, -(end - start)))
+            text = text[:start] + text[end:]
+
+    @staticmethod
+    def _insert_recording(text: str, position: int, block: str, edits: list) -> str:
+        """
+        Inserts block at position, appending the matching shift event.
+
+        Anchored at position - 1 so that an entry starting exactly AT the
+        insertion point still moves: it is now sitting after the inserted
+        text. (position - 1 == -1 for an insert at offset 0 is fine --
+        no real coordinate is <= -1, so everything shifts, which is right.)
+        """
+        edits.append((position - 1, len(block)))
+        return text[:position] + block + text[position:]
+
+    def _splice_generated_blocks(self, text: str, preamble_body: str, printindex_body: str,
+                                 edits: "list | None" = None) -> "str | None":
         r"""
         Pure string-manipulation helper for inject_latex_settings(). Returns
         the updated full document text, or None if \begin{document}/
         \end{document} can't both be located.
+
+        When `edits` is supplied, the (after_position, delta) pair for each
+        of the up-to-four edits made here is appended to it in application
+        order -- see _strip_recording/_insert_recording.
         """
         import re
+
+        edits = edits if edits is not None else []
 
         preamble_re = re.compile(
             re.escape(self._PREAMBLE_BLOCK_BEGIN) + r".*?" + re.escape(self._PREAMBLE_BLOCK_END) + r"\n?",
@@ -536,8 +747,8 @@ class DocumentIOController(QObject):
 
         # Strip any previously-injected blocks first (wherever they landed)
         # so re-running this doesn't accumulate duplicates.
-        text = preamble_re.sub("", text)
-        text = printindex_re.sub("", text)
+        text = self._strip_recording(text, preamble_re, edits)
+        text = self._strip_recording(text, printindex_re, edits)
 
         # \begin{document} must be the FIRST such occurrence (the true start
         # of the document body), but \end{document} must be the LAST one --
@@ -551,14 +762,17 @@ class DocumentIOController(QObject):
         begin_doc_idx = text.find("\\begin{document}")
         end_doc_idx = text.rfind("\\end{document}")
         if begin_doc_idx == -1 or end_doc_idx == -1 or end_doc_idx < begin_doc_idx:
+            # Bail out without leaving half-recorded edits behind: the
+            # caller aborts the whole injection, so nothing moved.
+            edits.clear()
             return None
 
         preamble_block = f"{self._PREAMBLE_BLOCK_BEGIN}\n{preamble_body}\n{self._PREAMBLE_BLOCK_END}\n"
         printindex_block = f"{self._PRINTINDEX_BLOCK_BEGIN}\n{printindex_body}\n{self._PRINTINDEX_BLOCK_END}\n"
 
-        text = text[:begin_doc_idx] + preamble_block + text[begin_doc_idx:]
+        text = self._insert_recording(text, begin_doc_idx, preamble_block, edits)
         end_doc_idx += len(preamble_block)  # shifted by the preamble insertion above
-        text = text[:end_doc_idx] + printindex_block + text[end_doc_idx:]
+        text = self._insert_recording(text, end_doc_idx, printindex_block, edits)
 
         return text
 
@@ -591,7 +805,8 @@ class DocumentIOController(QObject):
                 self.save_error_encountered.emit("Insert Commands Error", f"Could not read base file:\n{e}")
                 return False
 
-        new_text = self._splice_commands_block(original_text, commands_body)
+        edits: list = []
+        new_text = self._splice_commands_block(original_text, commands_body, edits)
         if new_text is None:
             self.save_error_encountered.emit(
                 "Insert Commands Error",
@@ -599,30 +814,24 @@ class DocumentIOController(QObject):
             )
             return False
 
-        if open_editor:
-            from PySide6.QtGui import QTextCursor
-            cursor = QTextCursor(open_editor.document())
-            cursor.select(QTextCursor.SelectionType.Document)
-            cursor.insertText(new_text)
-            open_editor.document().setModified(True)
-        else:
-            self.backup_manager.register_file_for_session(file_path)
-            try:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(new_text)
-            except Exception as e:
-                self.save_error_encountered.emit("Insert Commands Error", f"Could not write base file:\n{e}")
-                return False
+        if not self._commit_spliced_text(file_path, open_editor, new_text, "Insert Commands Error"):
+            return False
 
+        self.content_shifted.emit(file_path, edits)
         return True
 
-    def _splice_commands_block(self, text: str, commands_body: str) -> "str | None":
+    def _splice_commands_block(self, text: str, commands_body: str,
+                               edits: "list | None" = None) -> "str | None":
         r"""
         Pure string-manipulation helper for inject_project_commands().
         Returns the updated full document text, or None if
         \begin{document} can't be located.
+
+        See _splice_generated_blocks for the `edits` contract.
         """
         import re
+
+        edits = edits if edits is not None else []
 
         commands_re = re.compile(
             re.escape(self._CUSTOM_COMMANDS_BLOCK_BEGIN) + r".*?" + re.escape(self._CUSTOM_COMMANDS_BLOCK_END) + r"\n?",
@@ -631,14 +840,15 @@ class DocumentIOController(QObject):
 
         # Strip any previously-injected block first (wherever it landed) so
         # re-running this doesn't accumulate duplicate command definitions.
-        text = commands_re.sub("", text)
+        text = self._strip_recording(text, commands_re, edits)
 
         begin_doc_idx = text.find("\\begin{document}")
         if begin_doc_idx == -1:
+            edits.clear()
             return None
 
         commands_block = f"{self._CUSTOM_COMMANDS_BLOCK_BEGIN}\n{commands_body}\n{self._CUSTOM_COMMANDS_BLOCK_END}\n"
-        return text[:begin_doc_idx] + commands_block + text[begin_doc_idx:]
+        return self._insert_recording(text, begin_doc_idx, commands_block, edits)
 
     def inject_head_note(self, file_path: str, head_note_body: str, printindex_command_name: str = "printindex") -> bool:
         r"""
@@ -675,7 +885,8 @@ class DocumentIOController(QObject):
                 self.save_error_encountered.emit("Insert Head Note Error", f"Could not read base file:\n{e}")
                 return False
 
-        new_text = self._splice_head_note_block(original_text, head_note_body, printindex_command_name)
+        edits: list = []
+        new_text = self._splice_head_note_block(original_text, head_note_body, printindex_command_name, edits)
         if new_text is None:
             self.save_error_encountered.emit(
                 "Insert Head Note Error",
@@ -683,30 +894,24 @@ class DocumentIOController(QObject):
             )
             return False
 
-        if open_editor:
-            from PySide6.QtGui import QTextCursor
-            cursor = QTextCursor(open_editor.document())
-            cursor.select(QTextCursor.SelectionType.Document)
-            cursor.insertText(new_text)
-            open_editor.document().setModified(True)
-        else:
-            self.backup_manager.register_file_for_session(file_path)
-            try:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(new_text)
-            except Exception as e:
-                self.save_error_encountered.emit("Insert Head Note Error", f"Could not write base file:\n{e}")
-                return False
+        if not self._commit_spliced_text(file_path, open_editor, new_text, "Insert Head Note Error"):
+            return False
 
+        self.content_shifted.emit(file_path, edits)
         return True
 
-    def _splice_head_note_block(self, text: str, head_note_body: str, printindex_command_name: str) -> "str | None":
+    def _splice_head_note_block(self, text: str, head_note_body: str, printindex_command_name: str,
+                                edits: "list | None" = None) -> "str | None":
         r"""
         Pure string-manipulation helper for inject_head_note(). Returns the
         updated full document text, or None if no valid anchor point
         (printindex block, raw printindex call, or \end{document}) exists.
+
+        See _splice_generated_blocks for the `edits` contract.
         """
         import re
+
+        edits = edits if edits is not None else []
 
         head_note_re = re.compile(
             re.escape(self._HEAD_NOTE_BLOCK_BEGIN) + r".*?" + re.escape(self._HEAD_NOTE_BLOCK_END) + r"\n?",
@@ -716,7 +921,7 @@ class DocumentIOController(QObject):
         # Strip any previously-injected head note first (wherever it
         # landed) so re-running this (editing and re-saving) updates it
         # in place instead of accumulating duplicates.
-        text = head_note_re.sub("", text)
+        text = self._strip_recording(text, head_note_re, edits)
 
         anchor_idx = text.find(self._PRINTINDEX_BLOCK_BEGIN)
         if anchor_idx == -1:
@@ -726,10 +931,11 @@ class DocumentIOController(QObject):
         if anchor_idx == -1:
             anchor_idx = text.rfind("\\end{document}")
         if anchor_idx == -1:
+            edits.clear()
             return None
 
         head_note_block = f"{self._HEAD_NOTE_BLOCK_BEGIN}\n{head_note_body}\n{self._HEAD_NOTE_BLOCK_END}\n"
-        return text[:anchor_idx] + head_note_block + text[anchor_idx:]
+        return self._insert_recording(text, anchor_idx, head_note_block, edits)
 
     def inject_cross_references(self, file_path: str) -> bool:
         r"""
@@ -761,7 +967,8 @@ class DocumentIOController(QObject):
                 self.save_error_encountered.emit("Insert Cross-References Error", f"Could not read base file:\n{e}")
                 return False
 
-        new_text = self._splice_cross_references_block(original_text)
+        edits: list = []
+        new_text = self._splice_cross_references_block(original_text, edits)
         if new_text is None:
             self.save_error_encountered.emit(
                 "Insert Cross-References Error",
@@ -769,24 +976,13 @@ class DocumentIOController(QObject):
             )
             return False
 
-        if open_editor:
-            from PySide6.QtGui import QTextCursor
-            cursor = QTextCursor(open_editor.document())
-            cursor.select(QTextCursor.SelectionType.Document)
-            cursor.insertText(new_text)
-            open_editor.document().setModified(True)
-        else:
-            self.backup_manager.register_file_for_session(file_path)
-            try:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(new_text)
-            except Exception as e:
-                self.save_error_encountered.emit("Insert Cross-References Error", f"Could not write base file:\n{e}")
-                return False
+        if not self._commit_spliced_text(file_path, open_editor, new_text, "Insert Cross-References Error"):
+            return False
 
+        self.content_shifted.emit(file_path, edits)
         return True
 
-    def _splice_cross_references_block(self, text: str) -> "str | None":
+    def _splice_cross_references_block(self, text: str, edits: "list | None" = None) -> "str | None":
         r"""
         Pure string-manipulation helper for inject_cross_references().
         Returns the updated full document text, or None if
@@ -796,8 +992,12 @@ class DocumentIOController(QObject):
         _splice_generated_blocks, which anchor before it) -- the user's
         spec places this block immediately following the start of the
         document body, not in the preamble.
+
+        See _splice_generated_blocks for the `edits` contract.
         """
         import re
+
+        edits = edits if edits is not None else []
 
         cross_refs_re = re.compile(
             re.escape(self._CROSS_REFS_BLOCK_BEGIN) + r".*?" + re.escape(self._CROSS_REFS_BLOCK_END) + r"\n?",
@@ -806,13 +1006,14 @@ class DocumentIOController(QObject):
 
         # Strip any previously-injected block first (wherever it landed) so
         # re-running this doesn't accumulate duplicate \input lines.
-        text = cross_refs_re.sub("", text)
+        text = self._strip_recording(text, cross_refs_re, edits)
 
         begin_doc_marker = "\\begin{document}"
         begin_doc_idx = text.find(begin_doc_marker)
         if begin_doc_idx == -1:
+            edits.clear()
             return None
 
         insertion_point = begin_doc_idx + len(begin_doc_marker)
         cross_refs_block = f"\n{self._CROSS_REFS_BLOCK_BEGIN}\n\\input{{cross_refs.tex}}\n{self._CROSS_REFS_BLOCK_END}"
-        return text[:insertion_point] + cross_refs_block + text[insertion_point:]
+        return self._insert_recording(text, insertion_point, cross_refs_block, edits)
