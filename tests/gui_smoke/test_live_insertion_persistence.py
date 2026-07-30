@@ -35,8 +35,7 @@ def _clean_pipeline_state(opened_project):
     pipeline_ctrl._tree_modified = False
     pipeline_ctrl.entry_modifier_model.clear_dirty()
     pipeline_ctrl.idx_ctrl.model_engine._staged_db_entries.clear()
-    pipeline_ctrl._index_undo_stack.clear()
-    pipeline_ctrl._index_redo_stack.clear()
+    pipeline_ctrl._index_commands.clear()
     pipeline_ctrl._pending_insertions_by_file.clear()
     for i in range(pipeline_ctrl.window.tabs.count()):
         tab = pipeline_ctrl.window.tabs.widget(i)

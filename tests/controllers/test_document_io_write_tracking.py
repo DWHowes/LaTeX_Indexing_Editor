@@ -187,14 +187,21 @@ class TestDesyncedWriteTracking:
         # preceded it left the DB's coordinates stale, so it is withheld.
         assert doc_io.consume_synced_write_paths() == []
 
-    def test_undoing_a_pipeline_edit_in_a_tab_desyncs_the_file(self, tmp_path, qtbot):
-        """
-        The real user-reachable case. EditorTab blocks typing, cut and
-        paste, so Ctrl+Z/Ctrl+Y is the only way a user can still change a
-        tab's buffer -- and undoing a macro rewrite puts the old text back
-        without anything restoring the model's coordinates to match, so
-        the file must come out desynced even though the edit being undone
-        was itself a properly-declared pipeline edit.
+    def test_ctrl_z_no_longer_mutates_the_buffer_behind_the_model(self, tmp_path, qtbot):
+        r"""
+        Ctrl+Z used to run Qt's document undo, putting the old macro text
+        back with nothing restoring the model's coordinates to match --
+        which is why an undo had to be treated as a desync here.
+
+        That is no longer what the key does. EditorTab does not delegate
+        Ctrl+Z to QPlainTextEdit at all; it emits undo_performed, and
+        AppPipelineController reverses the whole operation through the
+        same primitives that made it (see test_undo_redo_pipeline.py).
+        So at this layer the keypress must leave the buffer completely
+        alone, and the file must keep the stamp its pipeline edit earned.
+
+        This is the regression guard for that: re-adding a
+        super().keyPressEvent() call for Ctrl+Z fails here.
         """
         tabs = QTabWidget()
         qtbot.addWidget(tabs)
@@ -209,8 +216,45 @@ class TestDesyncedWriteTracking:
         doc_io.rewrite_macro_span(str(f), 0, 13, r"\index{Beta}")
         qtbot.keyClick(editor, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
 
-        assert editor.toPlainText() == r"\index{Alpha} tail"  # the undo really landed
-        assert doc_io.consume_synced_write_paths() == []
+        assert editor.toPlainText() == r"\index{Beta} tail"
+        assert doc_io.consume_synced_write_paths() == [_norm(f)]
+
+    def test_calling_undo_directly_does_not_touch_the_document(self, tmp_path, qtbot):
+        """
+        The same guarantee for code rather than keystrokes: EditorTab
+        overrides undo()/redo() so a stray call routes to the index
+        command stack instead of the document. This is what makes the
+        decoupling structural rather than a convention about which key
+        handlers remember not to call super().
+        """
+        tabs = QTabWidget()
+        qtbot.addWidget(tabs)
+        f = tmp_path / "a.tex"
+        f.write_text(r"\index{Alpha} tail", encoding="utf-8")
+        doc_io = _doc_io(tabs)
+        editor = _open_tab(tabs, qtbot, f, r"\index{Alpha} tail")
+
+        doc_io.rewrite_macro_span(str(f), 0, 13, r"\index{Beta}")
+
+        with qtbot.waitSignal(editor.undo_performed, timeout=1000):
+            editor.undo()
+
+        assert editor.toPlainText() == r"\index{Beta} tail"
+
+    def test_document_undo_stays_enabled_for_modified_tracking(self, qtbot):
+        """
+        The document's own undo is left enabled even though nothing can
+        reach it. Disabling it breaks QTextDocument's modified tracking,
+        which is tied to undo-stack position: with no stack, the syntax
+        highlighter's format-only pass flips isModified() to True and
+        every freshly opened tab reports unsaved changes.
+        """
+        tabs = QTabWidget()
+        qtbot.addWidget(tabs)
+        editor = _open_tab(tabs, qtbot, "irrelevant.tex", "content")
+
+        assert editor.document().isUndoRedoEnabled() is True
+        assert editor.document().isModified() is False
 
     def test_navigation_keys_do_not_desync_the_file(self, tmp_path, qtbot):
         """

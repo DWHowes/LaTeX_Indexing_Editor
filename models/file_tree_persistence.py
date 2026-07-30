@@ -1324,6 +1324,28 @@ class FileTreePersistence:
             print(f"[DB ERROR] insert_reference failed for ID {entry_dict.get('unique_id_number')}: {e}")
             return False
 
+    def resolve_heading_path(self, heading_text: str) -> int | None:
+        """
+        Resolves (creating if needed) the heading row for heading_text
+        together with its parent chain, and returns its id.
+
+        Depth and parent text come from index_tag_grammar, so an encap or
+        a braced "!" never inflates the depth. Every caller that needs a
+        heading_id for an entry goes through here -- a fresh live
+        insertion, the shared new-entry tail, and undoing a deletion --
+        so the three cannot disagree about what row an entry belongs to.
+        """
+        depth = grammar.depth_of(heading_text)
+        parent_id = None
+        if depth > 0:
+            parent_text = grammar.parent_path(heading_text)
+            parent_id = self.resolve_or_insert_heading(
+                heading_text=parent_text, name=parent_text, depth=depth - 1, parent_id=None
+            )
+        return self.resolve_or_insert_heading(
+            heading_text=heading_text, name=heading_text, depth=depth, parent_id=parent_id
+        )
+
     def resolve_or_insert_heading(self, heading_text: str, name: str, depth: int, parent_id: int | None = None) -> int | None:
         """Returns the id of an existing matching heading, or inserts and returns a new one."""
         try:

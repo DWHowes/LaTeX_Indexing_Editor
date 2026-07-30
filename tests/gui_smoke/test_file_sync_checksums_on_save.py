@@ -220,35 +220,38 @@ class TestChecksumsAreStampedOnSave:
 
 
 class TestDesyncingChangesAreNotStamped:
-    def test_undoing_an_edit_in_a_tab_still_leaves_the_file_flagged(self, opened_project, qtbot):
-        """
-        The only buffer mutation a user can actually reach: EditorTab
-        blocks typing, cut and paste, leaving Ctrl+Z/Ctrl+Y. Undoing a
-        macro rewrite puts the old text back and shifts every \\index
-        position after it, while _handle_index_undo only pops the undo
-        stack and touches the tree node -- nothing restores the model's
-        coordinates. So this file's stale checksum has to survive the
-        save; the next load's resync offer is the only thing that repairs
-        those coordinates.
+    def test_undoing_an_edit_in_a_tab_keeps_the_file_stampable(self, opened_project, qtbot):
+        r"""
+        Ctrl+Z used to run Qt's document undo, putting the old macro text
+        back while the DB row, the cached coordinates and the tree all
+        kept the post-edit state -- so an undo had to be treated as a
+        desync and the file's stale checksum had to survive the save.
+
+        It is now the index's own undo: AppPipelineController reverses the
+        whole operation through the same primitives that made it, so the
+        file comes back coordinate-synced and stampable, and the DB agrees
+        with the text. This is the end-to-end proof of that -- it fails if
+        undo ever again reverses the buffer without the record.
         """
         pipeline_ctrl, project_dir = opened_project
         intro_path = project_dir / "01.Intro" / "intro.tex"
         tab = _open_tab(pipeline_ctrl, intro_path)
-        stored_before = _stored_checksum(pipeline_ctrl, intro_path)
         original_text = tab.toPlainText()
         entry_id = _first_entry_id_in(pipeline_ctrl, intro_path)
 
         pipeline_ctrl.index_edit_ctrl.handle_entry_deletion(entry_id)
         assert tab.toPlainText() != original_text
         assert _is_desynced(pipeline_ctrl, intro_path) is False  # a declared pipeline edit
-        qtbot.keyClick(tab, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
-        assert tab.toPlainText() == original_text  # the undo really landed
 
-        assert _is_desynced(pipeline_ctrl, intro_path) is True
+        qtbot.keyClick(tab, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+
+        assert tab.toPlainText() == original_text          # the macro text is back
+        assert entry_id in pipeline_ctrl.entry_modifier_model._records  # and so is the record
+        assert _is_desynced(pipeline_ctrl, intro_path) is False
 
         pipeline_ctrl.execute_project_save_workflow()
 
-        assert _stored_checksum(pipeline_ctrl, intro_path) == stored_before
+        assert _stored_checksum(pipeline_ctrl, intro_path) == _on_disk_checksum(intro_path)
 
     def test_navigating_around_a_tab_does_not_cost_the_file_its_stamp(self, opened_project, qtbot):
         """
@@ -295,20 +298,27 @@ class TestDesyncingChangesAreNotStamped:
         assert _is_desynced(pipeline_ctrl, root_tex_file) is False
         assert _stored_checksum(pipeline_ctrl, root_tex_file) == _on_disk_checksum(root_tex_file)
 
-    def test_a_resync_clears_the_desynced_status(self, opened_project, qtbot):
+    def test_a_resync_clears_the_desynced_status(self, opened_project):
         """
-        A full resync rebuilds every record from disk, so the file an undo
-        desynced becomes stampable again. Asserted on the tracking state
-        rather than on checksums: an undo restores the file to
-        byte-identical content, so the checksums match either way and
-        would prove nothing.
+        A full resync rebuilds every record from disk, so a file whose
+        coordinates had drifted becomes stampable again.
+
+        The desync is induced by calling note_document_edited directly
+        rather than by driving a user action, because there is no longer
+        a user action that desyncs a .tex file: typing, cut and paste are
+        blocked, and Ctrl+Z now reverses the record along with the text
+        (see test_undoing_an_edit_in_a_tab_keeps_the_file_stampable).
+        The tracking remains as a defence against an *undeclared* buffer
+        mutation reaching the document some other way, and that is what
+        is being exercised here.
         """
         pipeline_ctrl, project_dir = opened_project
         intro_path = project_dir / "01.Intro" / "intro.tex"
-        tab = _open_tab(pipeline_ctrl, intro_path)
+        _open_tab(pipeline_ctrl, intro_path)
         entry_id = _first_entry_id_in(pipeline_ctrl, intro_path)
         pipeline_ctrl.index_edit_ctrl.handle_entry_deletion(entry_id)
-        qtbot.keyClick(tab, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+
+        pipeline_ctrl.doc_io.note_document_edited(str(intro_path))
         pipeline_ctrl.execute_project_save_workflow()
         assert _is_desynced(pipeline_ctrl, intro_path) is True
 

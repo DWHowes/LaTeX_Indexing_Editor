@@ -59,8 +59,17 @@ class EditorTab(QPlainTextEdit):
         self.setReadOnly(False)   # kept editable so cursor blinks
         self.setCursorWidth(1)
 
+        # Mirrors of the index command stack's state, pushed in by
+        # AppPipelineController._refresh_undo_actions. The context menu
+        # reads these instead of QTextDocument.isUndoAvailable(), which
+        # is now permanently False.
+        self._undo_available = False
+        self._redo_available = False
+        self._undo_label = ""
+        self._redo_label = ""
+
         # Harmonized single public tracker for file path mappings
-        self.file_path = "" 
+        self.file_path = ""
 
         # 2. Find dialog state trackers
         self.current_match_idx = 0
@@ -437,16 +446,18 @@ class EditorTab(QPlainTextEdit):
             event.accept()
             return
 
-        # Undo — let Qt handle the document, then notify controller
+        # Undo/redo are the index's, not the document's. super() is
+        # deliberately NOT called here: the controller reverses the whole
+        # operation -- macro text, DB row, coordinates and views together
+        # -- and a document-level undo running first would fight it.
         if ctrl and key == Qt.Key.Key_Z:
-            super().keyPressEvent(event)
             self.undo_performed.emit()
+            event.accept()
             return
 
-        # Redo — let Qt handle the document, then notify controller
         if ctrl and key == Qt.Key.Key_Y:
-            super().keyPressEvent(event)
             self.redo_performed.emit()
+            event.accept()
             return
 
         # Whitelist: navigation, selection, copy, select-all, find
@@ -463,15 +474,65 @@ class EditorTab(QPlainTextEdit):
         else:
             event.ignore()
 
+    # ------------------------------------------------------------------
+    # Undo/redo belong to the index, not to the document
+    # ------------------------------------------------------------------
+    #
+    # Qt's QTextDocument undo used to run alongside the index's own undo
+    # stack, each assuming it was the only one. Qt reversed the last
+    # *document* edit, whatever it happened to be, while the index stack
+    # popped an unrelated entry and reversed only its tree node. A single
+    # Ctrl+Z could half-reverse two different operations and leave an
+    # orphan DB row behind, and checksums could never catch it -- an undo
+    # that restores the buffer writes the file back byte-identical, so the
+    # drift check sees nothing to repair.
+    #
+    # Undo now belongs entirely to AppPipelineController's
+    # IndexCommandStack, which reverses the macro text, the DB row, the
+    # coordinates and the views together. These two overrides are what
+    # make that structural rather than a convention: keyPressEvent not
+    # calling super() closes the keyboard path, but any code calling
+    # tab.undo() -- ours or a future feature's -- lands here and gets the
+    # command stack too.
+    #
+    # The document's own undo is deliberately left ENABLED even though
+    # nothing can now reach it. Disabling it breaks QTextDocument's
+    # modified tracking, which is tied to undo-stack position: with no
+    # stack, the syntax highlighter's format-only pass flips isModified()
+    # to True and every freshly opened tab reports unsaved changes.
+
+    def undo(self) -> None:
+        """Routes to the index command stack instead of the document."""
+        self.undo_performed.emit()
+
+    def redo(self) -> None:
+        """Routes to the index command stack instead of the document."""
+        self.redo_performed.emit()
+
+    def set_undo_state(
+        self,
+        can_undo: bool,
+        can_redo: bool,
+        undo_label: str = "",
+        redo_label: str = "",
+    ) -> None:
+        """
+        Receives the index command stack's current state from
+        AppPipelineController._refresh_undo_actions. Called on every tab,
+        not just the active one, since the stack is global.
+        """
+        self._undo_available = bool(can_undo)
+        self._redo_available = bool(can_redo)
+        self._undo_label = undo_label or ""
+        self._redo_label = redo_label or ""
+
     def _canUndo(self) -> bool:
-        """Return whether an undo operation is available."""
-        doc = self.document()
-        return bool(doc and doc.isUndoAvailable())
+        """Whether an index operation is available to undo."""
+        return self._undo_available
 
     def _canRedo(self) -> bool:
-        """Return whether a redo operation is available."""
-        doc = self.document()
-        return bool(doc and doc.isRedoAvailable())
+        """Whether an index operation is available to redo."""
+        return self._redo_available
     
     def contextMenuEvent(self, event):
         """
@@ -480,14 +541,18 @@ class EditorTab(QPlainTextEdit):
         """
         menu = QMenu(self)
 
-        undo_action = QAction("Undo", self)
+        # These route to the index command stack via the same signals
+        # Ctrl+Z/Ctrl+Y use -- NOT to QPlainTextEdit.undo/redo, which
+        # bypassed every piece of index bookkeeping and was the one undo
+        # path with no reconciliation at all.
+        undo_action = QAction(f"Undo {self._undo_label}".strip(), self)
         undo_action.setEnabled(self._canUndo())
-        undo_action.triggered.connect(self.undo)
+        undo_action.triggered.connect(self.undo_performed.emit)
         menu.addAction(undo_action)
 
-        redo_action = QAction("Redo", self)
+        redo_action = QAction(f"Redo {self._redo_label}".strip(), self)
         redo_action.setEnabled(self._canRedo())
-        redo_action.triggered.connect(self.redo)
+        redo_action.triggered.connect(self.redo_performed.emit)
         menu.addAction(redo_action)
 
         menu.addSeparator()

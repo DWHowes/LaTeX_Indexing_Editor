@@ -4,6 +4,13 @@ from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import QMessageBox
 
 from models import index_tag_grammar as grammar
+from models.index_command_stack import (
+    EntrySnapshot,
+    HeadingChange,
+    MacroEdit,
+    deletion_command,
+    edit_command,
+)
 from views.index_tree_view import IndexTreeView
 from controllers.document_io_controller import DocumentIOController
 
@@ -30,6 +37,12 @@ class IndexEditController(QObject):
     entry_deleted = Signal(int)          # entry_id of a deleted reference
     heading_rename_conflict = Signal(str, list)  # old_raw_token, blocking entry ids
     entry_reverted = Signal(int, str)    # entry_id, reverted canonical heading (discard rollback)
+    # Emitted after any successful mutation, carrying the IndexCommand that
+    # reverses it. AppPipelineController owns the stack and pushes these;
+    # this controller stays unaware of undo depth or ordering. Nothing is
+    # emitted from apply_command itself -- replaying a command must not
+    # record a new one.
+    command_recorded = Signal(object)    # IndexCommand
 
     def __init__(
         self,
@@ -225,11 +238,12 @@ class IndexEditController(QObject):
 
         # Build the old and new macro text for each reference and rewrite
         success_count = 0
+        recorder: list = []
         self._rewriting = True
         try:
             for ref in affected_refs:
                 result = self._rewrite_single_reference(
-                    ref, old_raw_token, new_raw_token
+                    ref, old_raw_token, new_raw_token, recorder
                 )
                 if result:
                     success_count += 1
@@ -239,6 +253,16 @@ class IndexEditController(QObject):
         if success_count == 0:
             self._restore_item_text(item, old_raw_token)
             return
+
+        # One command for the whole sweep: renaming a heading is a single
+        # user action even though it rewrites every reference beneath it,
+        # possibly across several files.
+        if recorder:
+            self.command_recorded.emit(edit_command(
+                f"Rename heading to {new_raw_token}",
+                [edit for edit, _change in recorder],
+                [change for _edit, change in recorder],
+            ))
 
         # Update the node's ToolTipRole to the new raw token
         item.setData(new_raw_token, Qt.ItemDataRole.ToolTipRole)
@@ -330,7 +354,17 @@ class IndexEditController(QObject):
         ref: dict,
         old_raw_token: str,
         new_raw_token: str,
+        recorder: list | None = None,
     ) -> bool:
+        """
+        Rewrites one reference's macro for a heading rename.
+
+        ``recorder``, when given, collects this rewrite's (MacroEdit,
+        HeadingChange) pair. A rename sweeps every reference under a node
+        and is one user action, so _process_heading_rename accumulates the
+        whole sweep and records a single command for it rather than one
+        per reference.
+        """
         uid = int(ref.get("unique_id_number") or ref.get("id") or 0)
         if uid == 0:
             return False
@@ -364,6 +398,8 @@ class IndexEditController(QObject):
         # this entry's heading is" even while the write is in flight.
         self._staging_model.stage_edit(uid, new_heading)
 
+        old_macro = self._doc_io.read_macro_span(file_path, abs_pos, abs_end) or ""
+
         new_macro = f"\\{command_name}{{{new_heading}}}"
         delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro, expected_macro_name=command_name)
         if delta is None:
@@ -382,6 +418,12 @@ class IndexEditController(QObject):
             shifted_ids = self._entry_model.shift_coordinates_after(file_path, abs_pos, delta)
             for shifted_id in shifted_ids:
                 self._entry_model.mark_dirty(shifted_id)
+
+        if recorder is not None and old_macro:
+            recorder.append((
+                MacroEdit(uid, file_path, abs_pos, old_macro, new_macro, command_name),
+                HeadingChange(uid, current_heading, new_heading),
+            ))
 
         # .tex write confirmed successful — promote staged to original.
         self._staging_model.commit(uid)
@@ -576,10 +618,19 @@ class IndexEditController(QObject):
         record = self._entry_model._records.get(entry_id)
         command_name = record.get("macro_command", "index") if record else "index"
 
+        old_macro = self._doc_io.read_macro_span(file_path, abs_pos, abs_end) or ""
+
         new_macro = f"\\{command_name}{{{new_canonical_heading}}}"
         delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro, expected_macro_name=command_name)
         if delta is None:
             return False
+
+        if old_macro:
+            self.command_recorded.emit(edit_command(
+                "Edit index entry",
+                [MacroEdit(entry_id, file_path, abs_pos, old_macro, new_macro, command_name)],
+                [HeadingChange(entry_id, old_heading, new_canonical_heading)],
+            ))
 
         self._entry_model.update_entry_coordinates(
             entry_id, abs_pos, abs_pos + len(new_macro)
@@ -642,6 +693,12 @@ class IndexEditController(QObject):
         record = self._entry_model._records.get(entry_id)
         command_name = record.get("macro_command", "index") if record else "index"
 
+        # Snapshot before the write: the record, its heading and its tree
+        # path are all about to be torn down, and undo has to put every
+        # one of them back.
+        snapshot = self._snapshot_entry(entry_id)
+        old_macro = self._doc_io.read_macro_span(file_path, abs_pos, abs_end) or ""
+
         delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, "", expected_macro_name=command_name)
         if delta is None:
             return False
@@ -652,7 +709,34 @@ class IndexEditController(QObject):
                 self._entry_model.mark_dirty(shifted_id)
 
         self._cleanup_deleted_entry(entry_id, heading_text, heading_id)
+
+        if snapshot is not None and old_macro:
+            self.command_recorded.emit(deletion_command(
+                "Delete index entry",
+                [MacroEdit(entry_id, file_path, abs_pos, old_macro, "", command_name)],
+                [snapshot],
+            ))
         return True
+
+    def _snapshot_entry(self, entry_id: int):
+        """
+        Captures everything undo needs to recreate one reference: its full
+        record, the tree path it sits under, and its heading identity.
+        Returns None if the entry isn't in the cache.
+        """
+        record = self._entry_model._records.get(entry_id)
+        if record is None:
+            return None
+
+        heading_text = record.get("heading_raw_text", "")
+        return EntrySnapshot(
+            entry_id=entry_id,
+            record=record,
+            parts_list=tuple(grammar.level_path(heading_text)),
+            heading_text=heading_text,
+            heading_id=record.get("heading_id"),
+            is_range_closer=bool(record.get("is_range_closer")),
+        )
 
     def count_refs_under_node(self, target_item: QStandardItem) -> int:
         """
@@ -899,6 +983,198 @@ class IndexEditController(QObject):
                     self._reconcile_heading_node(entry_id, old_heading, db_heading)
 
             self.entry_reverted.emit(entry_id, db_heading)
+
+    # ------------------------------------------------------------------
+    # Undo/redo command execution
+    # ------------------------------------------------------------------
+
+    def apply_command(self, command) -> bool:
+        r"""
+        Executes one IndexCommand in the forward direction -- used for
+        both undo (the caller passes ``command.inverted()``) and redo (the
+        caller passes the command itself). This is the ONLY place an undo
+        touches the document, so every reversal goes through the same
+        primitives the original operation used and no undo path does its
+        own position math.
+
+        Order matters and mirrors the forward operations exactly:
+
+        1. Every macro edit is applied in sequence. Each one updates its
+           own entry's span and shifts every later reference in the same
+           file, precisely as rewrite_macro_span's callers already do.
+        2. Only then are records created or destroyed. A record must not
+           exist while the shift sweep for its own insertion runs
+           (shift_coordinates_after skips the entry AT the edit position,
+           not one that isn't there yet), and must still exist while the
+           sweep for its own deletion runs.
+
+        Returns False without leaving a partial write behind: an edit
+        whose span no longer holds the text the command recorded (the file
+        was changed underneath it) aborts the whole command, rolling back
+        any edits already applied. The caller leaves the stacks untouched
+        in that case, so the operation stays undoable once the cause is
+        resolved.
+        """
+        from models.index_command_stack import DELETE, EDIT, INSERT
+
+        applied: list = []
+        for edit in command.edits:
+            if not self._apply_macro_edit(edit):
+                self._roll_back_applied_edits(applied)
+                return False
+            applied.append(edit)
+
+        if command.kind == DELETE:
+            for snapshot in command.entries:
+                self._cleanup_deleted_entry(
+                    snapshot.entry_id, snapshot.heading_text, snapshot.heading_id
+                )
+        elif command.kind == INSERT:
+            for snapshot in command.entries:
+                self._recreate_entry(snapshot, command)
+        elif command.kind == EDIT:
+            for change in command.headings:
+                self._apply_heading_change(change)
+
+        return True
+
+    def _apply_macro_edit(self, edit) -> bool:
+        """
+        Writes one recorded span edit, then keeps every coordinate that
+        depends on it in step. Returns False if the span doesn't currently
+        hold what the edit expects to replace.
+        """
+        file_path = edit.file_path
+        position = edit.absolute_position
+        old_end = position + len(edit.before_text)
+
+        if edit.before_text:
+            current = self._doc_io.read_macro_span(file_path, position, old_end)
+            if current != edit.before_text:
+                print(
+                    f"[UNDO GUARD] span at {position} in {os.path.basename(file_path)} "
+                    f"holds {current!r}, expected {edit.before_text!r} — aborting"
+                )
+                return False
+            delta = self._doc_io.rewrite_macro_span(
+                file_path, position, old_end, edit.after_text,
+                expected_macro_name=edit.command_name,
+            )
+            if delta is None:
+                return False
+        else:
+            if self._doc_io.insert_macro_at_position(file_path, position, edit.after_text) is None:
+                return False
+            delta = len(edit.after_text)
+
+        # The edited entry's own span, when the record is there to update.
+        # It isn't for an insertion -- the record is created afterwards,
+        # already carrying these coordinates.
+        if edit.after_text and self._entry_model.get_location_metadata(edit.entry_id) is not None:
+            self._entry_model.update_entry_coordinates(edit.entry_id, position, edit.absolute_end)
+            self._entry_model.mark_dirty(edit.entry_id)
+
+        if delta:
+            for shifted_id in self._entry_model.shift_coordinates_after(file_path, position, delta):
+                self._entry_model.mark_dirty(shifted_id)
+
+        return True
+
+    def _roll_back_applied_edits(self, applied: list) -> None:
+        """
+        Puts back the edits of a command that failed partway. Walks them
+        in reverse for the same reason IndexCommand.inverted() does: each
+        edit shifted everything after it.
+        """
+        for edit in reversed(applied):
+            if not self._apply_macro_edit(edit.inverted()):
+                print(
+                    "[UNDO GUARD] rollback of a partially applied command failed — "
+                    f"{os.path.basename(edit.file_path)} may need a resync"
+                )
+
+    def _recreate_entry(self, snapshot, command) -> None:
+        """
+        Restores a record that a deletion removed: its DB row, cache
+        entry, staging baseline, heading row and tree node.
+
+        The heading may have been pruned when the last reference under it
+        went away, so it is resolved (and recreated if needed) rather than
+        assumed. Its id can legitimately differ from the one the snapshot
+        recorded -- SQLite assigns a fresh rowid when a deleted heading is
+        re-inserted -- so the restored record takes the resolved id, not
+        the remembered one.
+        """
+        record = dict(snapshot.record)
+
+        # Coordinates come from the edit that just re-wrote this entry's
+        # macro, not from the snapshot: everything around it may have
+        # moved between the deletion and this restore.
+        for edit in command.edits:
+            if edit.entry_id == snapshot.entry_id and edit.after_text:
+                record["absolute_position"] = edit.absolute_position
+                record["absolute_end"] = edit.absolute_end
+                break
+
+        heading_id = self._resolve_heading_for_restore(snapshot)
+        if heading_id is not None:
+            record["heading_id"] = heading_id
+
+        self._entry_model.register_new_entry(record)
+
+        if not snapshot.is_range_closer and snapshot.parts_list:
+            # suppress_transaction: this record is being re-attached with
+            # its DB row already written by register_new_entry above, not
+            # staged for a first-time insert.
+            self._tree.append_entry(list(snapshot.parts_list), [record], suppress_transaction=True)
+
+    def _resolve_heading_for_restore(self, snapshot) -> int | None:
+        """
+        Finds or recreates the heading a restored reference belongs under,
+        in the DB and in the engine's active-headings cache.
+        """
+        heading_text = snapshot.heading_text
+        if not heading_text:
+            return snapshot.heading_id
+
+        heading_id = None
+        persistence = getattr(self._entry_model, "_persistence", None)
+        if persistence is not None:
+            heading_id = persistence.resolve_heading_path(heading_text)
+        if heading_id is None:
+            heading_id = snapshot.heading_id
+
+        engine = getattr(self._tree, "engine", None)
+        if engine is not None and heading_id is not None:
+            known = {h.get("id") for h in engine._active_headings}
+            if heading_id not in known:
+                engine._active_headings.append({
+                    "id": heading_id,
+                    "parent_id": None,
+                    "heading_text": heading_text,
+                    "name": heading_text,
+                    "depth": grammar.depth_of(heading_text),
+                })
+
+        return heading_id
+
+    def _apply_heading_change(self, change) -> None:
+        """
+        Puts one entry's heading text back to a recorded value, in the
+        cache, the staging baseline and the tree. The macro text itself
+        was already rewritten by this command's edits.
+        """
+        record = self._entry_model._records.get(change.entry_id)
+        if record is None:
+            return
+
+        record["heading_raw_text"] = change.after_heading
+        self._staging_model.register_original(change.entry_id, change.after_heading)
+        self._entry_model.mark_dirty(change.entry_id)
+        self._reconcile_heading_node(
+            change.entry_id, change.before_heading, change.after_heading
+        )
+        self.entry_reverted.emit(change.entry_id, change.after_heading)
 
     def _cleanup_deleted_entry(self, entry_id: int, heading_text: str, heading_id) -> None:
         """

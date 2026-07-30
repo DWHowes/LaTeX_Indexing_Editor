@@ -87,6 +87,20 @@ pair to drift into another round-trip corruption; and
 `IndexEditController._substitute_token_in_heading` silently dropped a
 trailing `!` and used `.split("@")[0]`, which returns `"a{b"` for `a{b@c}d`.
 
+### `index_command_stack.py`
+
+The undo/redo records — `MacroEdit`, `EntrySnapshot`, `HeadingChange`,
+`IndexCommand` — and the stacks holding them. Pure data with no Qt and no
+I/O; execution lives in `IndexEditController.apply_command`, so the
+arithmetic every undo depends on is testable in isolation.
+
+The rule worth staring at is edit **ordering**: edits are applied front to
+back and each shifts everything after it, so `IndexCommand.inverted()` walks
+them backwards. Get that wrong and an undo writes to positions that no longer
+describe the text. `test_index_command_stack.py` pins it from both
+directions, including the range-pair case where a closer merged into its
+opener's command must come back off first.
+
 ### `latex_index_parser.py`
 
 The deepest coverage of any layer-1 module: highest historical defect density
@@ -545,6 +559,33 @@ resets `_tree_modified`, dirty records, staged DB entries and write tracking
 after every test, the same leakage risk `test_auto_resync_safety.py` guards
 against.
 
+### Undo/redo
+
+`test_undo_redo_pipeline.py` — the regression net for the worst defect this
+project has had. Two independent undo systems each assumed they were the only
+one: Qt's `QTextDocument` undo reversed the last *document* edit, whatever it
+happened to be, while a separate stack held only insertions and reversed only
+the tree node — never the DB row, never the coordinates. Checksums
+structurally could not catch any of it, since an undo that restores the
+buffer writes the file back byte-identical.
+
+One class per documented consequence, driven through real Ctrl+Z key events
+so the wiring is covered and not just the handler: an undone insertion drops
+its DB row; a later entry's coordinates are put back and still describe the
+real text; **insert, then delete a different entry, then Ctrl+Z reverses
+exactly the delete** and leaves the insertion alone in all three places; a
+range pair undoes as one; redo restores the record and not just the tree
+node; and the guard aborts (leaving the command undoable) when the recorded
+span no longer holds what it expects.
+
+Two bugs surfaced while writing it. `EditorTab`'s `undo_performed` signal was
+**never connected to anything** — `_rewire_undo_redo_signals` ran once at
+boot against an empty tab bar and was not wired to `currentChanged`, so no
+tab opened afterwards was ever connected and the old index stack was, in
+practice, never consulted at all. And `setUndoRedoEnabled(False)`, the
+obvious way to disable Qt's undo, silently breaks modified tracking (see
+[EditorTab is read-only](#editortab-is-read-only-including-undo)).
+
 ### Duplicate references
 
 `AppPipelineController._handle_duplicate_references_request` — a standalone
@@ -646,12 +687,25 @@ times:
 
 ## Gotchas when writing tests
 
-### `EditorTab` is near-read-only
+### `EditorTab` is read-only, including undo
 
-Its key whitelist blocks typing, cut and paste, so **Ctrl+Z/Ctrl+Y is the only
-buffer mutation a user can actually reach**. Tests that mutate a document with
-a bare `QTextCursor` are exercising the mechanism, not a reachable user
-action; write the undo case on its own terms when that is what you mean.
+Its key whitelist blocks typing, cut and paste. Ctrl+Z/Ctrl+Y used to be the
+one remaining way a user could change a buffer directly — they ran Qt's
+document undo. They no longer do: `EditorTab` does not delegate them to
+`QPlainTextEdit`, and `undo()`/`redo()` are overridden to emit
+`undo_performed`/`redo_performed` instead, so every path routes to the index
+command stack (see [Undo/redo](#undoredo)).
+
+**No user action mutates a `.tex` buffer outside a declared pipeline edit.**
+A test that mutates a document with a bare `QTextCursor` is exercising a
+mechanism, not a reachable user action — say so in the docstring when you do
+it.
+
+The document's own undo is deliberately left *enabled* even though nothing
+can reach it. Disabling it breaks `QTextDocument`'s modified tracking, which
+is tied to undo-stack position: with no stack, the syntax highlighter's
+format-only pass flips `isModified()` to `True` and every freshly opened tab
+reports unsaved changes. `test_document_io_write_tracking.py` pins this.
 
 ### The theme broker is a process-wide singleton
 

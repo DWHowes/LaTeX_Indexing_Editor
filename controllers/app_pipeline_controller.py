@@ -10,6 +10,12 @@ from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplicati
 from shiboken6 import isValid
 
 from models import index_tag_grammar as grammar
+from models.index_command_stack import (
+    EntrySnapshot,
+    IndexCommandStack,
+    MacroEdit,
+    insertion_command,
+)
 from models.latex_entry_model import ReferenceCarrier
 from models.index_tree_model_engine import IndexTreeModelEngine
 from models.macro_id_generator import MacroIDGenerator
@@ -184,10 +190,14 @@ class AppPipelineController(QObject):
         
         # Wire layout signals after all instances are completely finalized
         self._bind_signal_pipelines()
-        # Parallel undo/redo stacks for index tree operations
-        # Each entry: (parts_list, ref_records)
-        self._index_undo_stack = deque()
-        self._index_redo_stack = deque()
+        # The index's undo/redo authority. Every operation that mutates
+        # the index records one IndexCommand here, and Ctrl+Z/Ctrl+Y
+        # replay it through IndexEditController.apply_command. Qt's own
+        # QTextDocument undo is switched off on EditorTab entirely (see
+        # EditorTab.__init__) so it cannot reverse a document edit behind
+        # this stack's back -- that competition is what used to leave
+        # orphan DB rows and half-reversed pairs of unrelated operations.
+        self._index_commands = IndexCommandStack()
 
         # Tracks unique_id_numbers inserted into each file this session that
         # haven't yet survived an explicit Save. insert_reference/
@@ -301,6 +311,7 @@ class AppPipelineController(QObject):
 
         self.index_edit_ctrl.heading_rename_conflict.connect(self._handle_heading_rename_conflict)
         self.index_edit_ctrl.heading_renamed.connect(self._handle_heading_renamed)
+        self.index_edit_ctrl.command_recorded.connect(self._record_index_command)
 
         if self.idx_ctrl:
             self._index_context_manager.delete_tree_term_triggered.connect(self._handle_index_deletion_request)
@@ -314,7 +325,16 @@ class AppPipelineController(QObject):
 
         self.scope_ctrl.scope_mutated.connect(lambda: self.window.synchronize_window_title(self.scope_ctrl.active_project_name))
 
-        self._rewire_undo_redo_signals(self.window.tabs.currentIndex())  # Initial wiring for the first tab
+        # Tabs are created after boot (create_editor_tab sets the new tab
+        # current, which emits this), so without the connection the wiring
+        # below ran exactly once, against an empty tab bar, and no tab was
+        # ever actually connected. undo_performed therefore reached
+        # nothing: Ctrl+Z ran Qt's document undo alone, restoring the text
+        # while the DB row, the cached coordinates and the tree kept the
+        # post-edit state. The stack this replaces was, in practice, never
+        # consulted at all.
+        self.window.tabs.currentChanged.connect(self._rewire_undo_redo_signals)
+        self._rewire_undo_redo_signals(self.window.tabs.currentIndex())
 
     def _synchronize_initial_workspace_theme(self):
         """Pushes initial theme choices down to the view layout tree."""
@@ -369,59 +389,181 @@ class AppPipelineController(QObject):
 
     @Slot(int)
     def _rewire_undo_redo_signals(self, index: int) -> None:
+        """
+        Connects EVERY open tab to the undo/redo handlers, not just the
+        active one, and pushes the stack's current state out to all of
+        them.
+
+        This used to wire only the active tab, which made sense when the
+        stack was a queue of tree insertions -- but it never actually
+        scoped anything, because the stack was global: Ctrl+Z in one tab
+        popped a command belonging to a different file, while Qt undid
+        the focused document. The stack is still global (a heading rename
+        spans files and must undo as one), so the honest wiring is to let
+        any tab reach it and let the command itself decide what to touch.
+        """
         for i in range(self.window.tabs.count()):
             tab = self.window.tabs.widget(i)
-            if isinstance(tab, EditorTab):
-                try:
-                    tab.undo_performed.disconnect(self._handle_index_undo)
-                    tab.redo_performed.disconnect(self._handle_index_redo)
-                except RuntimeError:
-                    pass
+            if not isinstance(tab, EditorTab):
+                continue
+            try:
+                tab.undo_performed.disconnect(self._handle_index_undo)
+                tab.redo_performed.disconnect(self._handle_index_redo)
+            except RuntimeError:
+                pass
+            tab.undo_performed.connect(self._handle_index_undo)
+            tab.redo_performed.connect(self._handle_index_redo)
 
-        active_tab = self.window.tabs.widget(index)
-        if isinstance(active_tab, EditorTab):
-            active_tab.undo_performed.connect(self._handle_index_undo)
-            active_tab.redo_performed.connect(self._handle_index_redo)
+        self._refresh_undo_actions()
             
+    def _record_insertion_command(self, entry_dict: dict, parts_list: list, label: str) -> None:
+        r"""
+        Records a newly inserted \index macro so Ctrl+Z can remove it --
+        the .tex text, the DB row, and the tree node together.
+
+        The macro text is read back from the document rather than rebuilt
+        from the heading, so what undo removes is exactly what was
+        written, whatever produced it.
+
+        A range entry's closer is folded into the command its opener just
+        created (matched on range_partner_id) instead of pushing a second
+        one. The opener is always emitted first, so the closer's edit
+        lands after it in the command and comes back off first on undo --
+        which is what keeps the opener's recorded position valid.
+        """
+        file_path = entry_dict.get("file_path") or ""
+        position = entry_dict.get("absolute_position")
+        end = entry_dict.get("absolute_end")
+        entry_id = entry_dict.get("unique_id_number")
+
+        if not file_path or position is None or end is None or entry_id is None:
+            return
+
+        macro_text = self.doc_io.read_macro_span(file_path, position, end)
+        if not macro_text:
+            return
+
+        edit = MacroEdit(
+            entry_id=entry_id,
+            file_path=file_path,
+            absolute_position=position,
+            before_text="",
+            after_text=macro_text,
+            command_name=entry_dict.get("macro_command", "index"),
+        )
+        snapshot = EntrySnapshot(
+            entry_id=entry_id,
+            record=entry_dict,
+            parts_list=tuple(parts_list),
+            heading_text=entry_dict.get("heading_raw_text", ""),
+            heading_id=entry_dict.get("heading_id"),
+            is_range_closer=bool(entry_dict.get("is_range_closer")),
+        )
+
+        partner_id = entry_dict.get("range_partner_id")
+        top = self._index_commands.peek_undo()
+        is_closer_of_top = (
+            entry_dict.get("is_range_closer")
+            and partner_id is not None
+            and top is not None
+            and top.touches_entry(partner_id)
+        )
+        if is_closer_of_top:
+            self._index_commands.merge_into_top([edit], [snapshot])
+        else:
+            self._index_commands.push(insertion_command(label, [edit], [snapshot]))
+
+        self._tree_modified = True
+        self._refresh_undo_actions()
+
+    def _record_index_command(self, command) -> None:
+        """
+        Records a mutation IndexEditController just performed. Insertions
+        record themselves directly (see _record_insertion_command), since
+        their bookkeeping lives in this controller.
+        """
+        self._index_commands.push(command)
+        self._tree_modified = True
+        self._refresh_undo_actions()
+
     @Slot()
     def _handle_index_undo(self) -> None:
-        """Pops the last index insertion off the undo stack and removes it from the tree."""
-        if not self._index_undo_stack:
+        """
+        Reverses the most recent index operation in full: the .tex macro
+        text, the DB row, the in-memory cache, the coordinates of every
+        entry the change moved, and the tree/table views.
+
+        The command is only consumed once the work has actually landed --
+        a write that fails (because the file changed underneath the
+        recorded span, say) leaves the stack alone so the operation stays
+        undoable once the cause is resolved.
+        """
+        command = self._index_commands.peek_undo()
+        if command is None or self.index_edit_ctrl is None:
             return
-        parts_list, refs = self._index_undo_stack.pop()
-        self.index_tree_widget.remove_last_entry(parts_list)
-        self._index_redo_stack.append((parts_list, refs))
+
+        if not self.index_edit_ctrl.apply_command(command.inverted()):
+            self.window.status_bar.showMessage(
+                "Couldn't undo — the file no longer matches what was recorded. "
+                "Try 'Resync Index Data from Disk'.", 6000
+            )
+            return
+
+        self._index_commands.complete_undo()
         self._tree_modified = True
+        self._refresh_undo_actions()
+        self.window.status_bar.showMessage(f"Undone: {command.label}", 2500)
 
     @Slot()
     def _handle_index_redo(self) -> None:
-        """Pops from the redo stack and re-inserts the entry into the tree."""
-        if not self._index_redo_stack:
+        """Re-applies the most recently undone command. Mirror of _handle_index_undo."""
+        command = self._index_commands.peek_redo()
+        if command is None or self.index_edit_ctrl is None:
             return
-        parts_list, refs = self._index_redo_stack.pop()
-        self.index_tree_widget.reinsert_entry(parts_list, refs)
-        self._index_undo_stack.append((parts_list, refs))
+
+        if not self.index_edit_ctrl.apply_command(command):
+            self.window.status_bar.showMessage(
+                "Couldn't redo — the file no longer matches what was recorded. "
+                "Try 'Resync Index Data from Disk'.", 6000
+            )
+            return
+
+        self._index_commands.complete_redo()
         self._tree_modified = True
+        self._refresh_undo_actions()
+        self.window.status_bar.showMessage(f"Redone: {command.label}", 2500)
+
+    def _refresh_undo_actions(self) -> None:
+        """
+        Pushes the current undo/redo availability out to every open tab,
+        so their context menus enable/disable and label correctly. The
+        tabs no longer consult QTextDocument.isUndoAvailable() -- the
+        document's own undo is disabled, and this stack is the authority.
+        """
+        if not getattr(self.window, "tabs", None):
+            return
+        for i in range(self.window.tabs.count()):
+            tab = self.window.tabs.widget(i)
+            if isinstance(tab, EditorTab):
+                tab.set_undo_state(
+                    self._index_commands.can_undo,
+                    self._index_commands.can_redo,
+                    self._index_commands.undo_label(),
+                    self._index_commands.redo_label(),
+                )
 
     def _forget_index_undo_entry(self, entry_id: int) -> None:
         """
-        Scrubs a rolled-back entry_id out of the index undo/redo stacks.
+        Scrubs a rolled-back entry out of the undo/redo stacks.
 
-        Without this, a stale stack entry for a since-discarded insertion
-        could later be replayed by Ctrl+Z/Ctrl+Y: remove_last_entry is a
-        harmless no-op against an already-gone node, but reinsert_entry
-        (redo) only re-adds the *visual* tree node — it never re-inserts
-        into the DB or the entry-modifier model — so a stale redo would
-        resurrect a phantom tree entry with no backing record.
+        A command for a since-discarded insertion must never be replayed:
+        its recorded span positions describe a file that has been restored
+        from its session backup, and redoing it would resurrect a DB row
+        the rollback just removed. Any command touching the entry goes,
+        in both directions.
         """
-        self._index_undo_stack = deque(
-            item for item in self._index_undo_stack
-            if not any(ref.get("unique_id_number") == entry_id for ref in item[1])
-        )
-        self._index_redo_stack = deque(
-            item for item in self._index_redo_stack
-            if not any(ref.get("unique_id_number") == entry_id for ref in item[1])
-        )
+        self._index_commands.drop_commands_for_entries([entry_id])
+        self._refresh_undo_actions()
 
     def _confirm_pending_insertions(self, file_path: str) -> None:
         """
@@ -487,13 +629,23 @@ class AppPipelineController(QObject):
         if self.index_edit_ctrl and norm_path:
             self.index_edit_ctrl.discard_dirty_edits(norm_path)
 
+        # This file's whole buffer is being restored from its pristine
+        # session backup, so every span position any command recorded for
+        # it now describes text that no longer exists. Renames and table
+        # edits are dropped here as well as insertions -- _forget_index_
+        # undo_entry above only covers the ids being rolled back
+        # individually.
+        if norm_path:
+            self._index_commands.drop_commands_for_file(norm_path)
+            self._refresh_undo_actions()
+
         # _tree_modified is a broader, sticky "something in the tree changed
         # this session" flag also raised by renames, term pruning, and macro
         # substitution — those paths aren't part of this rollback and aren't
         # audited here. Only clear it when nothing else is tracked as
         # pending, so we don't mask a genuinely unsaved change from one of
         # those other sources.
-        if not self._pending_insertions_by_file and not self._index_undo_stack and not self._index_redo_stack:
+        if not self._pending_insertions_by_file and not self._index_commands.can_undo and not self._index_commands.can_redo:
             self._tree_modified = False
 
     def _discard_all_pending_insertions(self) -> None:
@@ -1188,8 +1340,8 @@ class AppPipelineController(QObject):
         self.entry_modifier_model.load_records(references)
         self.entry_table_widget.populate_entry_modifier_display(references)
 
-        self._index_undo_stack.clear()
-        self._index_redo_stack.clear()
+        self._index_commands.clear()
+        self._refresh_undo_actions()
         self._pending_insertions_by_file.clear()
         self._tree_modified = False
 
@@ -1758,29 +1910,15 @@ class AppPipelineController(QObject):
         # they share the opener's heading
         persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
         if persistence and not entry_dict["is_range_closer"]:
-            heading_text = entry_dict["heading_raw_text"]
-            # depth/parent come from the grammar module rather than
-            # heading_text.count("!") and a raw split. The two sibling
-            # paths here disagreed: this one derived the parent WITHOUT
-            # stripping the encap first, so a sub-entry carrying one
-            # ("Main!Sub|bold") got a parent heading row of "Main!Sub|bold"
-            # minus its last level -- a parent row that no other code path
-            # would ever resolve to again.
-            depth = grammar.depth_of(heading_text)
-            parent_id = None
-            if depth > 0:
-                parent_text = grammar.parent_path(heading_text)
-                parent_id = persistence.resolve_or_insert_heading(
-                    heading_text=parent_text,
-                    name=parent_text,
-                    depth=depth - 1,
-                    parent_id=None
-                )
-            entry_dict["heading_id"] = persistence.resolve_or_insert_heading(
-                heading_text=heading_text,
-                name=heading_text,
-                depth=depth,
-                parent_id=parent_id
+            # Heading resolution (depth, parent chain, own row) lives in
+            # FileTreePersistence.resolve_heading_path so this path, the
+            # shared new-entry tail below, and undo-of-a-deletion cannot
+            # disagree. These two sibling paths previously did: this one
+            # derived the parent WITHOUT stripping the encap first, so a
+            # sub-entry carrying one ("Main!Sub|bold") got a parent heading
+            # row no other code path would ever resolve to again.
+            entry_dict["heading_id"] = persistence.resolve_heading_path(
+                entry_dict["heading_raw_text"]
             )
         elif persistence and entry_dict["is_range_closer"]:
             # Closer shares the opener's heading_id — look it up via range_partner_id
@@ -1819,12 +1957,16 @@ class AppPipelineController(QObject):
             for shifted_id in shifted_ids:
                 self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
 
-        # Only the opener goes to the tree and undo stack
+        # Only the opener goes to the tree
         if not entry_dict["is_range_closer"]:
             self.index_tree_widget.append_entry(parts_list, [entry_dict])
-            self._index_undo_stack.append((parts_list, [entry_dict]))
-            self._index_redo_stack.clear()
             self._tree_modified = True
+
+        # Both halves are recorded, and a range pair becomes ONE command --
+        # the closer is emitted immediately after its opener and the two
+        # are a single user action. Undoing half a range pair was one of
+        # the ways the old stack corrupted the index.
+        self._record_insertion_command(entry_dict, parts_list, "Insert index entry")
 
         # Both opener and closer go to the entry modifier
         # (model caches both; view only shows opener)
@@ -2011,16 +2153,8 @@ class AppPipelineController(QObject):
         if heading_id_override is not None:
             entry_dict["heading_id"] = heading_id_override
         else:
-            heading_text = entry_dict["heading_raw_text"]
-            depth = grammar.depth_of(heading_text)
-            parent_id = None
-            if depth > 0:
-                parent_text = grammar.parent_path(heading_text)
-                parent_id = persistence.resolve_or_insert_heading(
-                    heading_text=parent_text, name=parent_text, depth=depth - 1, parent_id=None
-                )
-            entry_dict["heading_id"] = persistence.resolve_or_insert_heading(
-                heading_text=heading_text, name=heading_text, depth=depth, parent_id=parent_id
+            entry_dict["heading_id"] = persistence.resolve_heading_path(
+                entry_dict["heading_raw_text"]
             )
 
         parts_list = grammar.level_path(entry_dict["heading_raw_text"])
@@ -2028,9 +2162,9 @@ class AppPipelineController(QObject):
         if add_to_tree:
             self.window.latex_index_window.add_completion_entry(parts_list)
             self.index_tree_widget.append_entry(parts_list, [entry_dict])
-            self._index_undo_stack.append((parts_list, [entry_dict]))
-            self._index_redo_stack.clear()
             self._tree_modified = True
+
+        self._record_insertion_command(entry_dict, parts_list, "Duplicate reference")
 
         self.entry_modifier_ctrl.handle_new_entry_created(entry_dict)
 
