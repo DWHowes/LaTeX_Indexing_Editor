@@ -1,6 +1,5 @@
 import os
 from shiboken6 import isValid  # PySide6 C++ lifetime validator
-from collections import deque, defaultdict
 from pathlib import Path
 from typing import Optional, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -202,11 +201,6 @@ class AppPipelineController(QObject):
         # Tracks unique_id_numbers inserted into each file this session that
         # haven't yet survived an explicit Save. insert_reference/
         # resolve_or_insert_heading commit to the DB immediately on
-        # insertion (see models/file_tree_persistence.py), so if the user
-        # later discards this file's tab instead of saving, these entries
-        # must be rolled back out of the DB and views rather than just left
-        # in place. Keyed by normalized absolute file path.
-        self._pending_insertions_by_file: dict[str, list[int]] = defaultdict(list)
 
         self._synchronize_initial_workspace_theme()
 
@@ -657,36 +651,18 @@ class AppPipelineController(QObject):
                     self._index_commands.redo_label(),
                 )
 
-    def _forget_index_undo_entry(self, entry_id: int) -> None:
-        """
-        Scrubs a rolled-back entry out of the undo/redo stacks.
-
-        A command for a since-discarded insertion must never be replayed:
-        its recorded span positions describe a file that has been restored
-        from its session backup, and redoing it would resurrect a DB row
-        the rollback just removed. Any command touching the entry goes,
-        in both directions.
-        """
-        self._index_commands.drop_commands_for_entries([entry_id])
-        self._refresh_undo_actions()
-
     def _confirm_pending_insertions(self, file_path: str) -> None:
         """
         Called when a single tab's changes are explicitly saved (the
-        close-tab dialog's Save option). This file's session-pending index
-        insertions are already permanently committed to the DB (insertion
-        commits immediately — see _handle_manual_index_insertion), so
-        confirming them is just forgetting the rollback bookkeeping.
+        close-tab dialog's Save option).
 
-        This file's .tex buffer is now durably on disk, so any rename/edit
-        dirty records for entries in this specific file (see
-        EntryModifierModel.mark_dirty, driven by IndexEditController) can
-        also be flushed now — scoped to this file so a still-unsaved
-        rename in a DIFFERENT open tab isn't pushed to the DB ahead of its
-        own save.
+        This file's .tex buffer is now durably on disk, so every pending
+        change for entries in this specific file — insertions, renames and
+        edits alike — can be written now. Scoped to this file so a
+        still-unsaved rename in a DIFFERENT open tab isn't pushed to the
+        DB ahead of its own save.
         """
         norm_path = os.path.normpath(file_path) if file_path else ""
-        self._pending_insertions_by_file.pop(norm_path, None)
         if norm_path and self.entry_modifier_model:
             self.entry_modifier_model.flush_dirty_to_db(norm_path)
 
@@ -696,10 +672,6 @@ class AppPipelineController(QObject):
         # anything else is still unflushed -- see
         # _refresh_file_sync_checksums.
         self._refresh_file_sync_checksums()
-
-    def _confirm_all_pending_insertions(self) -> None:
-        """Called on a whole-project save — every file's pending insertions become permanent."""
-        self._pending_insertions_by_file.clear()
 
     def _discard_pending_insertions(self, file_path: str) -> None:
         """
@@ -723,23 +695,22 @@ class AppPipelineController(QObject):
         session backup.
         """
         norm_path = os.path.normpath(file_path) if file_path else ""
-        pending_ids = self._pending_insertions_by_file.pop(norm_path, [])
+        pending_ids = (
+            self.entry_modifier_model.pending_insert_ids_for_file(norm_path)
+            if self.entry_modifier_model else []
+        )
         for entry_id in pending_ids:
             if self.index_edit_ctrl:
                 self.index_edit_ctrl.discard_uncommitted_entry(entry_id)
-            if self.idx_ctrl:
-                self.idx_ctrl.discard_staged_entry(entry_id)
-            self._forget_index_undo_entry(entry_id)
 
         if self.index_edit_ctrl and norm_path:
             self.index_edit_ctrl.discard_dirty_edits(norm_path)
 
         # This file's whole buffer is being restored from its pristine
         # session backup, so every span position any command recorded for
-        # it now describes text that no longer exists. Renames and table
-        # edits are dropped here as well as insertions -- _forget_index_
-        # undo_entry above only covers the ids being rolled back
-        # individually.
+        # it now describes text that no longer exists. This stays even
+        # though the DB rollback went away: it is about the recorded
+        # positions, not about what was written.
         if norm_path:
             self._index_commands.drop_commands_for_file(norm_path)
             self._refresh_undo_actions()
@@ -750,20 +721,17 @@ class AppPipelineController(QObject):
         # audited here. Only clear it when nothing else is tracked as
         # pending, so we don't mask a genuinely unsaved change from one of
         # those other sources.
-        if not self._pending_insertions_by_file and not self._index_commands.can_undo and not self._index_commands.can_redo:
+        if not self._index_commands.can_undo and not self._index_commands.can_redo:
             self._tree_modified = False
 
     def _discard_all_pending_insertions(self) -> None:
         """
         Called on whole-app-exit Discard — rolls back every open file's
-        pending insertions AND dirty (unsaved) renames. The two are tracked
-        in separate places (_pending_insertions_by_file here vs.
-        EntryModifierModel._dirty_ids), so a file with only a dirty rename
-        and no insertion wouldn't be visited if this only looped the
-        former — take the union of both.
+        unwritten changes. Insertions and renames used to be tracked in
+        two separate places and had to be unioned here; the journal now
+        holds both, so one set of file paths covers everything.
         """
-        dirty_files = self.entry_modifier_model.get_dirty_file_paths() if self.entry_modifier_model else set()
-        all_files = set(self._pending_insertions_by_file.keys()) | dirty_files
+        all_files = self.entry_modifier_model.get_dirty_file_paths() if self.entry_modifier_model else set()
         for file_path in all_files:
             self._discard_pending_insertions(file_path)
 
@@ -1462,7 +1430,6 @@ class AppPipelineController(QObject):
 
         self._index_commands.clear()
         self._refresh_undo_actions()
-        self._pending_insertions_by_file.clear()
         self._tree_modified = False
 
         max_existing_id = self.scope_ctrl.get_max_unique_id()
@@ -1817,7 +1784,6 @@ class AppPipelineController(QObject):
         # now -- inserts, updates and deletes together. There is no
         # separate staged-entry commit to make.
         db_success = (dirty_success + heading_inserts[0] + heading_deletes[0]) > 0
-        self._confirm_all_pending_insertions()
 
         # DB and disk now agree for everything this app wrote, so record
         # that fact -- without this the next project load compares the
@@ -2096,13 +2062,6 @@ class AppPipelineController(QObject):
         # (model caches both; view only shows opener)
         self.entry_modifier_ctrl.handle_new_entry_created(entry_dict)
 
-        # Both opener and closer immediately commit a DB row (register_new_entry
-        # -> insert_reference, and resolve_or_insert_heading above), so both
-        # must be tracked for rollback if this file's tab is later discarded
-        # instead of saved.
-        norm_path = os.path.normpath(entry_dict["file_path"]) if entry_dict.get("file_path") else ""
-        if norm_path:
-            self._pending_insertions_by_file[norm_path].append(entry_dict["unique_id_number"])
 
     # ------------------------------------------------------------------
     # "Duplicate references" — reference table bulk action
@@ -2292,9 +2251,6 @@ class AppPipelineController(QObject):
 
         self.entry_modifier_ctrl.handle_new_entry_created(entry_dict)
 
-        norm_path = os.path.normpath(entry_dict["file_path"]) if entry_dict.get("file_path") else ""
-        if norm_path:
-            self._pending_insertions_by_file[norm_path].append(entry_dict["unique_id_number"])
 
     # ------------------------------------------------------------------
     # "Invert headings" — reference table bulk action

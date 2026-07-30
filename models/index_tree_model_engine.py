@@ -24,17 +24,6 @@ class IndexTreeModelEngine:
         self._heading_journal = PendingChangesJournal("heading")
         self._active_references: list = []
 
-    def discard_staged_entry(self, unique_id_number: int) -> None:
-        """
-        Retained as a no-op for the discard path.
-
-        There is no longer a separate staged-entry list to remove from:
-        EntryModifierModel's pending-changes journal is the single record
-        of unwritten work, and discarding an entry cancels it there when
-        the record itself is dropped.
-        """
-        return
-
     def clear_staged_entries(self) -> None:
         """Delegates to the full transaction reset for consistency."""
         self.reset_transaction_arrays()

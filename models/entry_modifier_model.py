@@ -396,6 +396,24 @@ class EntryModifierModel(QObject):
             if os.path.normpath((self._records.get(entry_id) or {}).get("file_path", "")) == norm_target
         ]
 
+    def pending_insert_ids_for_file(self, file_path: str) -> list[int]:
+        """
+        Entries in file_path whose row has not been written yet.
+
+        This is what a discard needs to roll back: an entry created since
+        the last save has no database row, but it does have an in-memory
+        record and tree/table rows, and its .tex macro is about to vanish
+        when the file is restored from its session backup.
+
+        The journal answers this directly, which is why the pipeline no
+        longer keeps a parallel _pending_insertions_by_file map.
+        """
+        norm_target = os.path.normpath(file_path) if file_path else ""
+        return [
+            entry_id for entry_id in self._journal.entity_ids(INSERT)
+            if os.path.normpath((self._records.get(entry_id) or {}).get("file_path", "")) == norm_target
+        ]
+
     def get_dirty_file_paths(self) -> set[str]:
         """Returns the (normalized) set of file paths with at least one dirty record."""
         return {
