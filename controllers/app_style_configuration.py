@@ -153,6 +153,16 @@ class AppStyleConfiguration:
                 color: {colours.text};
                 border: 1px solid {colours.tab_pane_border};
             }}
+            /* Styling these takes over from the native style, which draws
+               the focus ring -- so keyboard focus becomes invisible in
+               dark mode unless it is restored explicitly. This was already
+               true of every dialog using the shared sheet before the find
+               bar joined them; it just became noticeable there because a
+               find bar's input is focused the moment it opens. */
+            QLineEdit:focus, QSpinBox:focus, QComboBox:focus,
+            QTextEdit:focus, QPlainTextEdit:focus {{
+                border: 1px solid {colours.highlight};
+            }}
             QListWidget {{
                 background-color: {colours.base};
                 color: {colours.text};
@@ -165,13 +175,76 @@ class AppStyleConfiguration:
             QCheckBox {{
                 color: {colours.window_text};
             }}
-            QDialogButtonBox QPushButton {{
+            QPushButton {{
                 background-color: {colours.button};
                 color: {colours.button_text};
                 border: 1px solid {colours.tab_pane_border};
                 padding: 4px 12px;
             }}
+            /* Styling QPushButton at all takes over from the native style,
+               which is what draws the accent on a dialog's default button
+               -- so that affordance has to be restored explicitly or every
+               dark dialog loses which button is the confirming one. Light
+               mode returns "" above and keeps the native rendering. */
+            QPushButton:default {{
+                border: 1px solid {colours.highlight};
+            }}
+            QPushButton:disabled {{
+                color: {colours.placeholder_text};
+            }}
+            /* Flat, self-painted buttons (e.g. the find bar's vector
+               arrows) call super().paintEvent(), so the rule above would
+               hand them a background and border they are drawn without.
+               They opt out here rather than each dialog re-styling them. */
+            QPushButton:flat {{
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+            }}
+            QTextEdit, QPlainTextEdit {{
+                background-color: {colours.base};
+                color: {colours.text};
+                border: 1px solid {colours.tab_pane_border};
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QTreeWidget {{
+                background-color: {colours.base};
+                color: {colours.text};
+                border: 1px solid {colours.tab_pane_border};
+            }}
+            QTreeWidget::item:selected {{
+                background-color: {colours.highlight};
+                color: {colours.highlight_text};
+            }}
+            QRadioButton {{
+                color: {colours.window_text};
+            }}
+            QScrollArea {{
+                background-color: {colours.window};
+                border: none;
+            }}
+            /* Separator rules only -- frameShape 4 is HLine, 5 is VLine.
+               An unqualified QFrame rule would repaint every container
+               frame in the dialog as well. */
+            QFrame[frameShape="4"], QFrame[frameShape="5"] {{
+                color: {colours.tab_pane_border};
+            }}
             QLabel {{
                 color: {colours.window_text};
             }}
         """
+
+    @staticmethod
+    def get_dialog_stylesheet_for(is_dark: bool) -> str:
+        """
+        Convenience wrapper: picks the colour set for the current mode and
+        returns its dialog stylesheet.
+
+        Every themed dialog was repeating the same two lines to do this,
+        which meant each one also had to import both colour dataclasses.
+        """
+        from models.theme_config_model import DarkThemeColours, LightThemeColours
+        return AppStyleConfiguration.get_dialog_stylesheet(
+            DarkThemeColours() if is_dark else LightThemeColours()
+        )

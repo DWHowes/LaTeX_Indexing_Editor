@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QFrame,
 )
 
-from models.theme_config_model import DarkThemeColours, LightThemeColours
 from controllers.app_style_configuration import AppStyleConfiguration
 
 class LatexCommandWizardDialog(QDialog):
@@ -273,8 +272,7 @@ class LatexCommandWizardDialog(QDialog):
     # ------------------------------------------------------------------ #
 
     def apply_theme_configuration(self, is_dark: bool) -> None:
-        colours = DarkThemeColours() if is_dark else LightThemeColours()
-        self.setStyleSheet(AppStyleConfiguration.get_dialog_stylesheet(colours))
+        self.setStyleSheet(AppStyleConfiguration.get_dialog_stylesheet_for(is_dark))
         
     # ------------------------------------------------------------------ #
     # Lifecycle                                                          #

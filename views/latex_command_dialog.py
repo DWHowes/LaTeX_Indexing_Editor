@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from models.theme_config_model import DarkThemeColours, LightThemeColours
 
 from controllers.app_style_configuration import AppStyleConfiguration
 
@@ -102,5 +101,4 @@ class CreateCommandDialog(QDialog):
         self.name_input.setText(text)
 
     def apply_theme_configuration(self, is_dark: bool) -> None:
-        colours = DarkThemeColours() if is_dark else LightThemeColours()
-        self.setStyleSheet(AppStyleConfiguration.get_dialog_stylesheet(colours))
+        self.setStyleSheet(AppStyleConfiguration.get_dialog_stylesheet_for(is_dark))

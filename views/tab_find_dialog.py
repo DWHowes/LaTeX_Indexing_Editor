@@ -51,6 +51,9 @@ class TabFindDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent, Qt.WindowType.FramelessWindowHint | Qt.WindowType.SubWindow)
+        # Set before anything that can trigger changeEvent -- it routes
+        # straight into apply_theme_styles, which reads this guard.
+        self._applying_theme = False
         self.setObjectName("FindDialog")
         self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
         
@@ -114,16 +117,37 @@ class TabFindDialog(QDialog):
         layout.addWidget(self.close_btn)
 
     def apply_theme_styles(self):
-        """Observer Hook: Synchronizes sub-components whenever main window calls update."""
-        current_global_palette = QApplication.palette()
-        self.setPalette(current_global_palette)
-        
-        # Determine separator tracking lines visibility based on application style.
-        broker = AppStyleConfiguration.event_broker()
-        is_dark = bool(broker.get_property("is_dark_mode"))
+        """
+        Observer Hook: Synchronizes sub-components whenever main window calls update.
 
-        sep_style = "color: #555555;" if is_dark else "color: #d0d0d0;"
-        self.separator_line.setStyleSheet(sep_style)
+        Re-entrancy guarded, because changeEvent below routes palette
+        changes back here and setStyleSheet triggers a re-polish that
+        counts as one -- without the guard this recurses until the stack
+        blows.
+        """
+        if self._applying_theme:
+            return
+        self._applying_theme = True
+        try:
+            current_global_palette = QApplication.palette()
+            self.setPalette(current_global_palette)
+
+            broker = AppStyleConfiguration.event_broker()
+            is_dark = bool(broker.get_property("is_dark_mode"))
+
+            # The separator used to be a hardcoded #555555/#d0d0d0 pair
+            # here, which ignored the user's own theme colours. It now
+            # comes from the shared dialog stylesheet's QFrame separator
+            # rule, along with the rest of this bar's widgets.
+            sheet = AppStyleConfiguration.get_dialog_stylesheet_for(is_dark)
+            if sheet != self.styleSheet():
+                self.setStyleSheet(sheet)
+
+            self._sync_child_palettes(current_global_palette)
+        finally:
+            self._applying_theme = False
+
+    def _sync_child_palettes(self, current_global_palette):
         for child in self.findChildren(QWidget):
             child.setPalette(current_global_palette)
             child.update()

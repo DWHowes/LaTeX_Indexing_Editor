@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
 )
 
-from models.theme_config_model import DarkThemeColours, LightThemeColours
 from controllers.app_style_configuration import AppStyleConfiguration
 
 
@@ -54,5 +53,4 @@ class IndexStatisticsDialog(QDialog):
         self._xrefs_label.setText(str(stats.get("total_cross_references", 0)))
 
     def apply_theme_configuration(self, is_dark: bool) -> None:
-        colours = DarkThemeColours() if is_dark else LightThemeColours()
-        self.setStyleSheet(AppStyleConfiguration.get_dialog_stylesheet(colours))
+        self.setStyleSheet(AppStyleConfiguration.get_dialog_stylesheet_for(is_dark))

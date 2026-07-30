@@ -4,7 +4,6 @@ from pathlib import Path
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QLabel
 from PySide6.QtCore import Qt
 
-from models.theme_config_model import DarkThemeColours, LightThemeColours
 from controllers.app_style_configuration import AppStyleConfiguration
 
 # Matches the fixed RTF preamble RtfExportView.render() always emits, up to
@@ -167,5 +166,4 @@ class RtfViewerDialog(QDialog):
         self.text_view.setHtml(rtf_subset_to_html(raw_rtf))
 
     def apply_theme_configuration(self, is_dark: bool) -> None:
-        colours = DarkThemeColours() if is_dark else LightThemeColours()
-        self.setStyleSheet(AppStyleConfiguration.get_dialog_stylesheet(colours))
+        self.setStyleSheet(AppStyleConfiguration.get_dialog_stylesheet_for(is_dark))
