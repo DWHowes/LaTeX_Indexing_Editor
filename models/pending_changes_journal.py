@@ -160,8 +160,20 @@ class PendingChangesJournal:
         self._pending.clear()
 
     def snapshot(self) -> dict[int, str]:
-        """A plain copy, for logging or assertions."""
+        """A plain copy, for logging, assertions, or restore()."""
         return dict(self._pending)
+
+    def restore(self, snapshot: dict[int, str]) -> None:
+        """
+        Puts the journal back to a previous snapshot.
+
+        For a save that rolled back: the drain resolves entities as it
+        goes, so that one unwritable row cannot block every future save.
+        If the transaction then fails as a whole, nothing was written and
+        those resolutions have to be undone, or the changes the save
+        failed to write would be silently forgotten.
+        """
+        self._pending = dict(snapshot)
 
     def __repr__(self) -> str:
         counts = {op: 0 for op in VALID_OPS}

@@ -211,6 +211,43 @@ class TestResolution:
 
         assert journal.entity_ids() == [2]
 
+    def test_restore_undoes_resolutions_after_a_rolled_back_save(self, journal):
+        """
+        The drain resolves entities as it goes, so one unwritable row can't
+        block every future save. If the transaction then rolls back, those
+        resolutions have to be undone or the save would have silently
+        discarded the very changes it failed to write.
+        """
+        journal.mark_insert(1)
+        journal.mark_update(2)
+        journal.mark_delete(3)
+        snapshot = journal.snapshot()
+
+        journal.resolve([1, 2, 3])          # the drain, mid-save
+        assert len(journal) == 0
+
+        journal.restore(snapshot)           # ...then it raised
+
+        assert journal.snapshot() == {1: INSERT, 2: UPDATE, 3: DELETE}
+
+    def test_restore_replaces_rather_than_merging(self, journal):
+        journal.mark_insert(1)
+        snapshot = journal.snapshot()
+        journal.mark_delete(9)
+
+        journal.restore(snapshot)
+
+        assert journal.entity_ids() == [1]
+
+    def test_restore_takes_a_copy(self, journal):
+        journal.mark_insert(1)
+        snapshot = journal.snapshot()
+
+        journal.restore(snapshot)
+        snapshot[99] = UPDATE
+
+        assert 99 not in journal
+
     def test_clear_empties_everything(self, journal):
         journal.mark_insert(1)
         journal.mark_delete(2)

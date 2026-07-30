@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from contextlib import contextmanager
 
 from typing import List, Dict, Any
 from pathlib import Path
@@ -7,6 +8,39 @@ from pathlib import Path
 from PySide6.QtCore import QModelIndex, Qt
 
 from models import index_tag_grammar as grammar
+
+class _TransactionConnection:
+    """
+    Stands in for a sqlite3 connection while a transaction is open.
+
+    Forwards real work (execute, cursor, attribute reads and writes) to
+    the transaction's connection, but makes __enter__/__exit__, commit()
+    and close() no-ops so a `with self._get_connection() as conn:` block
+    inside the transaction cannot end it early. The transaction's own
+    context manager is what commits or rolls back.
+    """
+
+    def __init__(self, conn):
+        object.__setattr__(self, "_conn", conn)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False        # never suppress; never commit
+
+    def commit(self):
+        pass                # the enclosing transaction commits
+
+    def close(self):
+        pass                # ...and closes
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "_conn"), name)
+
+    def __setattr__(self, name, value):
+        setattr(object.__getattribute__(self, "_conn"), name, value)
+
 
 class FileTreePersistence:
     # Define roles as explicit class constants to isolate them from controllers
@@ -56,7 +90,59 @@ class FileTreePersistence:
         """Public contract for the model engine. FileTreePersistence is its own model."""
         return self        
     
-    def _get_connection(self) -> sqlite3.Connection:
+    #: The open transaction's connection, or None. Declared on the class
+    #: so it exists before __init__'s own schema work calls
+    #: _get_connection.
+    _tx_conn: "sqlite3.Connection | None" = None
+
+    @contextmanager
+    def transaction(self):
+        """
+        Runs everything inside the block against one connection, committed
+        once at the end and rolled back whole if anything raises.
+
+        Used by the save drain so a save is all-or-nothing: heading
+        inserts, reference inserts/updates/deletes and heading deletes
+        either all land or none do. Without it each write committed on its
+        own connection, so an interrupted save could leave references
+        pointing at headings that were never written.
+
+        Re-entrant: a nested call joins the transaction already open
+        rather than starting a second one.
+        """
+        if self._tx_conn is not None:
+            yield self._tx_conn
+            return
+
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        # Instance attribute only -- assigning on the class would make two
+        # FileTreePersistence instances share transaction state.
+        self._tx_conn = conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self._tx_conn = None
+            conn.close()
+
+    def _get_connection(self):
+        """
+        A connection for one operation, or a proxy joining the open
+        transaction.
+
+        Every method here uses `with self._get_connection() as conn:` and
+        most then call conn.commit() -- both of which would end a shared
+        transaction early. Inside one, this hands back a proxy that
+        forwards real work but makes enter/exit/commit/close no-ops, so
+        all of those methods join the transaction unchanged instead of
+        needing 23 call sites rewritten.
+        """
+        if self._tx_conn is not None:
+            return _TransactionConnection(self._tx_conn)
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn

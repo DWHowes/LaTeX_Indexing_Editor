@@ -419,6 +419,54 @@ class AppPipelineController(QObject):
 
         self._refresh_undo_actions()
             
+    def _drain_pending_changes(self, persistence, engine):
+        """
+        Writes every pending index change in one transaction.
+
+        Order is fixed and matters both ways round a reference flush:
+        heading inserts first, because a reference row names a heading_id
+        that has to exist; heading deletes last, because the references
+        pointing at a heading have to be gone before it is.
+
+        The whole drain is one transaction so a save is all-or-nothing.
+        If it raises, the journals are put back exactly as they were --
+        each flush resolves its entities as it goes (so one bad row can't
+        block every future save), which would otherwise mean a rolled-back
+        save silently discarded the very changes it failed to write.
+
+        Returns (heading_inserts, reference_successes, reference_failures,
+        heading_deletes).
+        """
+        if persistence is None:
+            return (0, 0), 0, 0, (0, 0)
+
+        reference_journal = self.entry_modifier_model._journal if self.entry_modifier_model else None
+        heading_journal = engine._heading_journal if engine else None
+        reference_backup = reference_journal.snapshot() if reference_journal else {}
+        heading_backup = heading_journal.snapshot() if heading_journal else {}
+
+        try:
+            with persistence.transaction():
+                heading_inserts = engine.flush_heading_inserts(persistence) if engine else (0, 0)
+                dirty_success, dirty_failures = (
+                    self.entry_modifier_model.flush_dirty_to_db()
+                    if self.entry_modifier_model else (0, 0)
+                )
+                heading_deletes = engine.flush_heading_deletes(persistence) if engine else (0, 0)
+        except Exception as exc:
+            if reference_journal is not None:
+                reference_journal.restore(reference_backup)
+            if heading_journal is not None:
+                heading_journal.restore(heading_backup)
+            print(f"[PIPELINE ERROR] save rolled back, pending changes kept: {exc}")
+            self.window.status_bar.showMessage(
+                "Save failed — nothing was written. Your changes are still here; "
+                "see the session log.", 6000
+            )
+            return (0, 0), 0, 1, (0, 0)
+
+        return heading_inserts, dirty_success, dirty_failures, heading_deletes
+
     def _has_pending_db_writes(self) -> bool:
         """
         Whether anything is still waiting to be written to the database.
@@ -1754,19 +1802,11 @@ class AppPipelineController(QObject):
         # shifted coordinates were silently lost on the next project load
         # (which reads straight from the DB, not by rescanning .tex files,
         # whenever the DB already has data).
-        # Headings first: a reference row names a heading_id, so the
-        # heading it points at has to exist before it does.
         persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
         engine = self.idx_ctrl.model_engine if self.idx_ctrl else None
-        heading_inserts = engine.flush_heading_inserts(persistence) if engine else (0, 0)
-
-        dirty_success, dirty_failures = (
-            self.entry_modifier_model.flush_dirty_to_db() if self.entry_modifier_model else (0, 0)
+        heading_inserts, dirty_success, dirty_failures, heading_deletes = self._drain_pending_changes(
+            persistence, engine
         )
-
-        # Headings last for deletions, the mirror of the same reason: the
-        # references pointing at a heading must be gone before it is.
-        heading_deletes = engine.flush_heading_deletes(persistence) if engine else (0, 0)
         dirty_failures += heading_inserts[1] + heading_deletes[1]
         if dirty_failures:
             self.window.status_bar.showMessage(
