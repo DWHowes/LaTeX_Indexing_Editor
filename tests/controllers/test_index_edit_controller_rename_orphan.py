@@ -30,9 +30,17 @@ from views.index_tree_view import IndexTreeView
 
 
 class _FakeEngine:
-    """Only what the rename path touches: a plain, mutable _active_headings list."""
+    """
+    Only what the rename path touches: a mutable _active_headings list,
+    plus the heading-removal journal hook (heading rows are written at
+    save time now, so the controller marks rather than deletes).
+    """
     def __init__(self):
         self._active_headings = []
+        self.deleted_heading_ids = []
+
+    def mark_heading_deleted(self, heading_id):
+        self.deleted_heading_ids.append(heading_id)
 
 
 def _parse_one_entry(tmp_path, tex_content: str) -> tuple[str, dict]:
@@ -221,15 +229,25 @@ class TestOrphanCleanupAfterDeletion:
 
         assert root.rowCount() == 0
 
-    def test_deleting_the_only_reference_removes_the_heading_row_from_the_db(self, tmp_path, qtbot):
+    def test_deleting_the_only_reference_marks_the_heading_row_for_removal(self, tmp_path, qtbot):
+        """
+        The heading row used to be deleted here and then. It is now
+        journalled on the engine and written at save, after the references
+        that pointed at it have gone -- so what this asserts is that the
+        orphan was recognised and recorded, not that the row has already
+        vanished.
+        """
         controller, _entry_model, persistence, uid, heading_id, _file_path = self._build_deletable_stack(tmp_path, qtbot)
 
         controller.handle_entry_deletion(uid)
 
+        assert controller._tree.engine.deleted_heading_ids == [heading_id]
+
+        # ...and until the save drain runs, the row is deliberately still there.
         import sqlite3
         with sqlite3.connect(persistence.db_path) as conn:
             row = conn.execute("SELECT COUNT(*) FROM project_headings WHERE id = ?", (heading_id,)).fetchone()
-        assert row[0] == 0
+        assert row[0] == 1
 
     def test_deleting_one_of_two_references_leaves_the_heading_and_node_intact(self, tmp_path, qtbot):
         """

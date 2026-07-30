@@ -907,7 +907,7 @@ class IndexEditController(QObject):
             engine._active_headings = [
                 h for h in engine._active_headings if h.get("id") != heading_id
             ]
-            self._entry_model.delete_heading_if_orphaned(heading_id)
+            engine.mark_heading_deleted(heading_id)
 
     def discard_uncommitted_entry(self, entry_id: int) -> bool:
         r"""
@@ -1151,10 +1151,6 @@ class IndexEditController(QObject):
         # about whether a heading exists -- this used to resolve the row in
         # the DB and then patch _active_headings separately.
         heading_id = engine.resolve_heading_path(heading_text)
-        if persistence is not None:
-            for pending in engine.take_pending_heading_rows():
-                persistence.insert_heading_with_id(pending)
-
         return heading_id if heading_id is not None else snapshot.heading_id
 
     def _apply_heading_change(self, change) -> None:
@@ -1394,7 +1390,7 @@ class IndexEditController(QObject):
         if parts:
             self._remove_tree_node_by_path(parts)
 
-        self._entry_model.delete_heading_if_orphaned(heading_id)
+        engine.mark_heading_deleted(heading_id)
 
     def _remove_reference_from_tree_display(self, entry_id: int, heading_text: str) -> None:
         """

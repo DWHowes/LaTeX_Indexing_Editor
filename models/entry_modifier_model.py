@@ -542,17 +542,10 @@ class EntryModifierModel(QObject):
         record["range_partner_id"] = new_partner_id
         self._journal.mark_update(entry_id)
 
-    def delete_heading_if_orphaned(self, heading_id: int) -> None:
-        """
-        Delegates to the persistence layer to remove a project_headings
-        row once IndexEditController has determined (via its in-memory
-        _active_headings check) that no reference points to it anymore.
-        No-ops quietly if there's no persistence layer bound, mirroring
-        the other persistence-stub methods in this class.
-        """
-        if self._persistence is None:
-            print(f"[MODEL STUB] No persistence layer — skipping heading cleanup for id={heading_id}")
-            return
-        self._persistence.delete_heading_if_orphaned(heading_id)
+    # Heading rows are no longer this model's concern: identity and
+    # pending state both live on IndexTreeModelEngine, which owns
+    # _active_headings. IndexEditController marks an orphaned heading
+    # there directly (engine.mark_heading_deleted) and the save drain
+    # writes it, after the references that pointed at it are gone.
 
         

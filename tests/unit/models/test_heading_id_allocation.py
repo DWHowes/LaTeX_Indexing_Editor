@@ -185,48 +185,116 @@ class TestParentChain:
         assert len(engine._active_headings) == 1
 
 
-class TestPendingRows:
-    def test_newly_created_headings_are_reported_as_pending(self):
+class _RecordingPersistence:
+    """Captures what the drain would write, without a database."""
+
+    def __init__(self, insert_ok=True, delete_ok=True):
+        self.inserted: list[dict] = []
+        self.deleted: list[int] = []
+        self._insert_ok = insert_ok
+        self._delete_ok = delete_ok
+
+    def insert_heading_with_id(self, heading: dict) -> bool:
+        self.inserted.append(dict(heading))
+        return self._insert_ok
+
+    def delete_heading_if_orphaned(self, heading_id: int) -> bool:
+        self.deleted.append(heading_id)
+        return self._delete_ok
+
+
+class TestPendingHeadingWrites:
+    def test_newly_created_headings_are_written_by_the_drain(self):
         engine = _engine()
         engine.resolve_heading_path("negligence!contributory")
+        db = _RecordingPersistence()
 
-        pending = engine.take_pending_heading_rows()
+        engine.flush_heading_inserts(db)
 
-        assert {p["heading_text"] for p in pending} == {
+        assert {h["heading_text"] for h in db.inserted} == {
             "negligence", "negligence!contributory"
         }
 
-    def test_already_loaded_headings_are_not_pending(self):
+    def test_already_loaded_headings_are_not_rewritten(self):
         engine = _engine([_heading(1, "negligence")])
         engine.resolve_heading_id("negligence")
+        db = _RecordingPersistence()
 
-        assert engine.take_pending_heading_rows() == []
+        engine.flush_heading_inserts(db)
 
-    def test_taking_clears_the_pending_set(self):
+        assert db.inserted == []
+
+    def test_draining_clears_the_journal(self):
         engine = _engine()
         engine.resolve_heading_id("negligence")
+        db = _RecordingPersistence()
 
-        engine.take_pending_heading_rows()
+        engine.flush_heading_inserts(db)
+        engine.flush_heading_inserts(db)
 
-        assert engine.take_pending_heading_rows() == []
+        assert len(db.inserted) == 1
+        assert engine.has_pending_heading_changes() is False
 
-    def test_pending_rows_carry_everything_a_write_needs(self):
+    def test_written_rows_carry_everything_the_insert_needs(self):
         engine = _engine()
         engine.resolve_heading_path("negligence!contributory")
+        db = _RecordingPersistence()
 
-        row = next(
-            p for p in engine.take_pending_heading_rows()
-            if p["heading_text"] == "negligence!contributory"
-        )
+        engine.flush_heading_inserts(db)
 
+        row = next(h for h in db.inserted if h["heading_text"] == "negligence!contributory")
         assert set(row) >= {"id", "parent_id", "heading_text", "name", "depth"}
         assert row["depth"] == 1
 
-    def test_pending_rows_are_copies(self):
+    def test_an_orphaned_heading_is_deleted_by_the_drain(self):
+        engine = _engine([_heading(1, "negligence")])
+        engine.mark_heading_deleted(1)
+        db = _RecordingPersistence()
+
+        engine.flush_heading_deletes(db)
+
+        assert db.deleted == [1]
+
+    def test_a_heading_created_and_orphaned_in_one_session_writes_nothing(self):
+        """
+        Its row never existed, so neither the insert nor the delete should
+        ever reach the database -- the journal cancels the pair, exactly as
+        it does for a reference.
+        """
+        engine = _engine()
+        new_id = engine.resolve_heading_id("negligence")
+        engine.mark_heading_deleted(new_id)
+        db = _RecordingPersistence()
+
+        engine.flush_heading_inserts(db)
+        engine.flush_heading_deletes(db)
+
+        assert db.inserted == []
+        assert db.deleted == []
+
+    def test_has_pending_heading_changes_tracks_both_directions(self):
+        engine = _engine([_heading(1, "negligence")])
+        assert engine.has_pending_heading_changes() is False
+
+        engine.mark_heading_deleted(1)
+        assert engine.has_pending_heading_changes() is True
+
+        engine.flush_heading_deletes(_RecordingPersistence())
+        assert engine.has_pending_heading_changes() is False
+
+    def test_a_failed_write_is_still_resolved(self):
+        """One broken row must not block every future save."""
         engine = _engine()
         engine.resolve_heading_id("negligence")
-        rows = engine.take_pending_heading_rows()
 
-        rows[0]["heading_text"] = "mutated"
+        succeeded, failed = engine.flush_heading_inserts(_RecordingPersistence(insert_ok=False))
 
-        assert engine._active_headings[0]["heading_text"] == "negligence"
+        assert (succeeded, failed) == (0, 1)
+        assert engine.has_pending_heading_changes() is False
+
+    def test_no_persistence_is_a_safe_noop(self):
+        engine = _engine()
+        engine.resolve_heading_id("negligence")
+
+        assert engine.flush_heading_inserts(None) == (0, 0)
+        assert engine.has_pending_heading_changes() is True  # still pending

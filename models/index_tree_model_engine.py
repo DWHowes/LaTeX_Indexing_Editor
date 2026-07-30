@@ -2,6 +2,7 @@ import os
 import re
 
 from models import index_tag_grammar as grammar
+from models.pending_changes_journal import DELETE, INSERT, PendingChangesJournal
 
 class IndexTreeModelEngine:
     """
@@ -16,10 +17,11 @@ class IndexTreeModelEngine:
 
         self._active_headings: list = []
         # Heading ids are allocated here, not by SQLite -- see
-        # resolve_heading_id. _pending_heading_ids are those created in
-        # memory whose row has not been written yet.
+        # resolve_heading_id. The journal holds heading rows created or
+        # orphaned since the last save; both are written at save time,
+        # same as references.
         self._next_heading_id: int = 1
-        self._pending_heading_ids: set[int] = set()
+        self._heading_journal = PendingChangesJournal("heading")
         self._active_references: list = []
 
     def discard_staged_entry(self, unique_id_number: int) -> None:
@@ -94,7 +96,7 @@ class IndexTreeModelEngine:
         self._cross_reference_cache.clear()
         self._active_headings.clear()
         self._active_references.clear()
-        self._pending_heading_ids.clear()
+        self._heading_journal.clear()
         self._next_heading_id = 1
 
     def get_main_headings(self) -> list[tuple[str, str]]:
@@ -201,8 +203,8 @@ class IndexTreeModelEngine:
         this brings live insertion onto the same footing rather than
         introducing a new convention.
 
-        Newly created headings are recorded in _pending_heading_ids for
-        the save drain to write.
+        Newly created headings are journalled for the save drain to
+        write; nothing reaches the database here.
         """
         if not heading_text:
             return None
@@ -230,8 +232,20 @@ class IndexTreeModelEngine:
             "name": heading_text,
             "depth": grammar.depth_of(heading_text),
         })
-        self._pending_heading_ids.add(new_id)
+        self._heading_journal.mark_insert(new_id)
         return new_id
+
+    def mark_heading_deleted(self, heading_id: int) -> None:
+        """
+        Records that a heading row should be removed at the next save.
+
+        A heading created and orphaned within the same session cancels out
+        in the journal, exactly as a reference does -- its row was never
+        written, so neither the insert nor the delete should ever reach
+        the database.
+        """
+        if heading_id is not None:
+            self._heading_journal.mark_delete(int(heading_id))
 
     def resolve_heading_path(self, heading_text: str) -> int | None:
         """
@@ -251,14 +265,51 @@ class IndexTreeModelEngine:
 
         return self.resolve_heading_id(heading_text, parent_id)
 
-    def take_pending_heading_rows(self) -> list[dict]:
+    def has_pending_heading_changes(self) -> bool:
+        return bool(self._heading_journal)
+
+    def flush_heading_inserts(self, persistence) -> tuple[int, int]:
+        r"""
+        Writes every heading created in memory since the last save.
+
+        Called BEFORE the reference flush: a reference row carries a
+        heading_id, so the heading it names has to exist first.
         """
-        Returns the heading dicts created in memory since the last call,
-        and forgets them. The caller is responsible for writing them.
+        if persistence is None:
+            return 0, 0
+
+        by_id = {h.get("id"): h for h in self._active_headings}
+        succeeded = failed = 0
+        for heading_id in self._heading_journal.entity_ids(INSERT):
+            row = by_id.get(heading_id)
+            if row is None:
+                # Created and then pruned from _active_headings without the
+                # deletion being marked -- nothing to write.
+                self._heading_journal.resolve([heading_id])
+                continue
+            if persistence.insert_heading_with_id(row):
+                succeeded += 1
+            else:
+                failed += 1
+            self._heading_journal.resolve([heading_id])
+        return succeeded, failed
+
+    def flush_heading_deletes(self, persistence) -> tuple[int, int]:
+        r"""
+        Removes heading rows orphaned since the last save.
+
+        Called AFTER the reference flush, for the mirror of the reason
+        inserts go first: the references pointing at a heading have to be
+        gone before the heading itself is.
         """
-        pending = [
-            dict(h) for h in self._active_headings
-            if h.get("id") in self._pending_heading_ids
-        ]
-        self._pending_heading_ids.clear()
-        return pending
+        if persistence is None:
+            return 0, 0
+
+        succeeded = failed = 0
+        for heading_id in self._heading_journal.entity_ids(DELETE):
+            if persistence.delete_heading_if_orphaned(heading_id):
+                succeeded += 1
+            else:
+                failed += 1
+            self._heading_journal.resolve([heading_id])
+        return succeeded, failed

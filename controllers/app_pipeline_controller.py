@@ -419,33 +419,36 @@ class AppPipelineController(QObject):
 
         self._refresh_undo_actions()
             
+    def _has_pending_db_writes(self) -> bool:
+        """
+        Whether anything is still waiting to be written to the database.
+
+        Covers both journals: references (EntryModifierModel) and headings
+        (IndexTreeModelEngine). A heading change nearly always accompanies
+        a reference change, but not always -- an orphaned heading left by a
+        rename can be the only thing outstanding, and it would otherwise
+        slip past the exit prompt unwritten.
+        """
+        if self.entry_modifier_model and self.entry_modifier_model.has_dirty_records():
+            return True
+        engine = self.idx_ctrl.model_engine if self.idx_ctrl else None
+        return bool(engine and engine.has_pending_heading_changes())
+
     def _resolve_heading_id_for(self, heading_text: str) -> int | None:
         r"""
         Resolves (creating if needed) the heading id for heading_text.
 
         The id is allocated in memory by IndexTreeModelEngine, not by
-        SQLite -- see resolve_heading_id for why. Any row it creates is
-        written straight afterwards, so behaviour is unchanged for now;
-        deferring that write to save time is the next step and only has to
-        change _write_pending_heading_rows.
+        SQLite -- see resolve_heading_id for why -- and the row it creates
+        is journalled, not written. The save drain writes it, ahead of the
+        references that name it.
         """
         engine = self.idx_ctrl.model_engine if self.idx_ctrl else None
         if engine is None:
             persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
             return persistence.resolve_heading_path(heading_text) if persistence else None
 
-        heading_id = engine.resolve_heading_path(heading_text)
-        self._write_pending_heading_rows()
-        return heading_id
-
-    def _write_pending_heading_rows(self) -> None:
-        """Writes any heading rows created in memory but not yet persisted."""
-        engine = self.idx_ctrl.model_engine if self.idx_ctrl else None
-        persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
-        if engine is None or persistence is None:
-            return
-        for heading in engine.take_pending_heading_rows():
-            persistence.insert_heading_with_id(heading)
+        return engine.resolve_heading_path(heading_text)
 
     def _fetch_managed_cross_references(self) -> list:
         r"""
@@ -1158,8 +1161,14 @@ class AppPipelineController(QObject):
         # than execute_project_save_workflow can reach here with a dirty
         # model (project close, shutdown). Leaving the paths pending means a
         # later save still stamps them.
-        has_pending_writes = bool(self.entry_modifier_model.has_dirty_records()) if self.entry_modifier_model else False
-        if has_pending_writes:
+        #
+        # References only, deliberately -- NOT _has_pending_db_writes().
+        # Heading rows carry no file coordinates, so an unwritten heading
+        # change cannot make a checksum wrong. Heading changes are also not
+        # file-scoped, while this path is reached per-file (closing one tab
+        # with Save flushes just that file), so gating on them would mean a
+        # single-tab save could never stamp anything again.
+        if self.entry_modifier_model and self.entry_modifier_model.has_dirty_records():
             return
 
         written = self.doc_io.consume_synced_write_paths()
@@ -1228,7 +1237,7 @@ class AppPipelineController(QObject):
         safe only when there's nothing valuable riding on those stale ids.
         """
         has_unsaved_tex = bool(self.doc_io.check_unsaved_tex_changes()) if self.doc_io else False
-        has_pending_writes = bool(self.entry_modifier_model.has_dirty_records()) if self.entry_modifier_model else False
+        has_pending_writes = self._has_pending_db_writes()
         return not (has_unsaved_tex or has_pending_writes or self._tree_modified)
 
     def _reload_open_tab_if_unmodified(self, absolute_path: str, new_content: str) -> None:
@@ -1745,9 +1754,20 @@ class AppPipelineController(QObject):
         # shifted coordinates were silently lost on the next project load
         # (which reads straight from the DB, not by rescanning .tex files,
         # whenever the DB already has data).
+        # Headings first: a reference row names a heading_id, so the
+        # heading it points at has to exist before it does.
+        persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+        engine = self.idx_ctrl.model_engine if self.idx_ctrl else None
+        heading_inserts = engine.flush_heading_inserts(persistence) if engine else (0, 0)
+
         dirty_success, dirty_failures = (
             self.entry_modifier_model.flush_dirty_to_db() if self.entry_modifier_model else (0, 0)
         )
+
+        # Headings last for deletions, the mirror of the same reason: the
+        # references pointing at a heading must be gone before it is.
+        heading_deletes = engine.flush_heading_deletes(persistence) if engine else (0, 0)
+        dirty_failures += heading_inserts[1] + heading_deletes[1]
         if dirty_failures:
             self.window.status_bar.showMessage(
                 f"Warning: {dirty_failures} index edit(s) failed to save — see session log.", 5000
@@ -1756,7 +1776,7 @@ class AppPipelineController(QObject):
         # The pending-changes journal drain above IS the database write
         # now -- inserts, updates and deletes together. There is no
         # separate staged-entry commit to make.
-        db_success = dirty_success > 0
+        db_success = (dirty_success + heading_inserts[0] + heading_deletes[0]) > 0
         self._confirm_all_pending_insertions()
 
         # DB and disk now agree for everything this app wrote, so record
@@ -1817,7 +1837,7 @@ class AppPipelineController(QObject):
                 self.lc_ctrl.halt_active_search_workers()
             
             has_unsaved_tex = bool(self.doc_io.check_unsaved_tex_changes()) if self.doc_io else False
-            has_pending_writes = bool(self.entry_modifier_model.has_dirty_records()) if self.entry_modifier_model else False
+            has_pending_writes = self._has_pending_db_writes()
 
             if has_unsaved_tex or has_pending_writes or self._tree_modified:
                 box = QMessageBox(self.window)

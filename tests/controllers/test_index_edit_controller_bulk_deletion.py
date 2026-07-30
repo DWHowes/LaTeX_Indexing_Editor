@@ -36,6 +36,11 @@ from views.index_tree_view import IndexTreeView
 class _FakeEngine:
     def __init__(self):
         self._active_headings = []
+        self.deleted_heading_ids = []
+
+    def mark_heading_deleted(self, heading_id):
+        """Heading removal is journalled on the engine now, not written."""
+        self.deleted_heading_ids.append(heading_id)
 
 
 def _parse_entries(tmp_path, tex_content, filename="chapter.tex"):
