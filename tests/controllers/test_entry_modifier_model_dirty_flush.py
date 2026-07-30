@@ -113,6 +113,9 @@ def test_register_new_entry_serializes_list_valued_see_references(fresh_persiste
     model = EntryModifierModel(persistence=fresh_persistence)
 
     model.register_new_entry(_record(uid=1, see=[], seealso=["Other"]))
+    # Insertion is deferred now -- the row appears at save, not on
+    # registration -- but it must still be serialized on the way out.
+    model.flush_dirty_to_db()
 
     row = fresh_persistence.fetch_reference_row(1)
     assert row["see_references"] == []
@@ -124,6 +127,7 @@ def test_register_new_entry_leaves_none_valued_see_references_untouched(fresh_pe
     model = EntryModifierModel(persistence=fresh_persistence)
 
     model.register_new_entry(_record(uid=1, see=None, seealso=None))
+    model.flush_dirty_to_db()
 
     row = fresh_persistence.fetch_reference_row(1)
     assert row["see_references"] is None

@@ -40,7 +40,6 @@ def _clean_pipeline_state(opened_project):
     yield
     pipeline_ctrl._tree_modified = False
     pipeline_ctrl.entry_modifier_model.clear_dirty()
-    pipeline_ctrl.idx_ctrl.model_engine._staged_db_entries.clear()
     for i in range(pipeline_ctrl.window.tabs.count()):
         tab = pipeline_ctrl.window.tabs.widget(i)
         if hasattr(tab, "document"):
@@ -86,13 +85,19 @@ class TestIsSafeToAutoResync:
         pipeline_ctrl.entry_modifier_model.clear_dirty()
         assert pipeline_ctrl._is_safe_to_auto_resync() is True
 
-    def test_staged_unsaved_db_entry_blocks_it(self, opened_project):
+    def test_unwritten_db_change_blocks_it(self, opened_project):
+        """
+        A resync reassigns every unique_id_number from scratch, so it must
+        not run while any index change is still unwritten. The engine used
+        to keep a second staged-entry list for exactly this; the
+        pending-changes journal is now the only record of unwritten work.
+        """
         pipeline_ctrl, _project_dir = opened_project
 
-        pipeline_ctrl.idx_ctrl.model_engine._staged_db_entries.append({"unique_id_number": 999999})
+        pipeline_ctrl.entry_modifier_model.mark_dirty(999999)
         assert pipeline_ctrl._is_safe_to_auto_resync() is False
 
-        pipeline_ctrl.idx_ctrl.model_engine._staged_db_entries.clear()
+        pipeline_ctrl.entry_modifier_model.clear_dirty()
         assert pipeline_ctrl._is_safe_to_auto_resync() is True
 
 

@@ -35,7 +35,6 @@ def _clean_pipeline_state(opened_project):
     yield
     pipeline_ctrl._tree_modified = False
     pipeline_ctrl.entry_modifier_model.clear_dirty()
-    pipeline_ctrl.idx_ctrl.model_engine._staged_db_entries.clear()
     pipeline_ctrl._index_commands.clear()
     pipeline_ctrl._pending_insertions_by_file.clear()
     for i in range(pipeline_ctrl.window.tabs.count()):
@@ -79,6 +78,11 @@ class TestDuplicateStandaloneEntry:
         before = persistence.fetch_index_statistics()["total_references"]
 
         pipeline_ctrl._handle_duplicate_references_request([uid])
+
+        # The row is journalled, not written, until the project is saved.
+        assert persistence.fetch_index_statistics()["total_references"] == before
+
+        pipeline_ctrl.execute_project_save_workflow()
 
         after = persistence.fetch_index_statistics()["total_references"]
         assert after == before + 1

@@ -6,7 +6,7 @@ state to durable storage: modified editor tab buffers to disk
 the DB (entry_modifier_model.flush_dirty_to_db -- the flush that was
 "previously never wired up anywhere" per this method's own docstring,
 i.e. exactly the kind of gap this test harness exists to catch), and any
-staged fresh insertions (idx_ctrl.commit_staged_changes_to_db). Also
+fresh insertions (now drained from the pending-changes journal). Also
 clears _tree_modified and the session backup set on success.
 
 Driven through the real booted app via opened_project, same rationale as
@@ -29,7 +29,6 @@ def _clean_pipeline_state(opened_project):
     yield
     pipeline_ctrl._tree_modified = False
     pipeline_ctrl.entry_modifier_model.clear_dirty()
-    pipeline_ctrl.idx_ctrl.model_engine._staged_db_entries.clear()
     for i in range(pipeline_ctrl.window.tabs.count()):
         tab = pipeline_ctrl.window.tabs.widget(i)
         if hasattr(tab, "document"):

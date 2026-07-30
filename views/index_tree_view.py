@@ -21,8 +21,6 @@ class CaseInsensitiveItem(QStandardItem):
         super().__init__(text)
         self.sort_key = self._compute_clean_sort_key(text)
 
-        self._suppress_transaction_compilation = False
-
     def _compute_clean_sort_key(self, text: str) -> str:
         if not text:
             return ""
@@ -90,15 +88,6 @@ class IndexTreeView(QTreeView):
     def __init__(self, model_engine, parent=None):
         super().__init__(parent)
         self.engine = model_engine  # Injected data model engine layer
-
-        # Gates whether append_entry/_populate_row_metadata stage a new-entry
-        # DB transaction (see append_entry's docstring) -- only ever flipped
-        # True/False for the duration of populate_hierarchy_tree, but must
-        # exist before that first runs: a re-attach via append_entry
-        # (IndexEditController._reconcile_heading_node, reachable from a
-        # table-originated edit) can in principle happen before this view's
-        # first populate_hierarchy_tree call.
-        self._suppress_transaction_compilation = False
 
         # Configure the primary structural data model columns
         self.base_model = QStandardItemModel(self)
@@ -243,32 +232,23 @@ class IndexTreeView(QTreeView):
         rebuilding/clearing the rest of the model. Re-sorts and re-expands
         afterward so the new node is visible in its correct alphabetical slot.
 
-        suppress_transaction: pass True when refs are being RE-attached to
-        a node (e.g. IndexEditController._reconcile_heading_node moving an
-        existing, already-persisted entry to a different heading node
-        after a rename or a discard revert) rather than genuinely inserted
-        for the first time. Without this, _populate_row_metadata's call to
-        engine.compile_transaction_record (gated only on
-        self._suppress_transaction_compilation, which is only ever True
-        during a full populate_hierarchy_tree reload) would stage the
-        already-existing entry into engine._staged_db_entries as if it
-        were a brand-new \\index insertion pending its first DB write --
-        left permanently uncommitted for reconciliations that don't run
-        through the new-entry insertion pipeline, so has_unsaved_changes()
-        (and therefore the exit save-prompt) stayed True forever after,
-        even once every real edit had been either saved or discarded.
+        suppress_transaction is accepted and ignored. It used to gate a
+        second staging list the tree kept for entries pending their first
+        DB write, which had to be suppressed when an already-persisted
+        entry was merely being RE-attached to a different node (after a
+        rename, or a discard revert) or it would sit uncommitted forever
+        and keep the exit save-prompt True. EntryModifierModel's
+        pending-changes journal is now the single record of unwritten
+        work, marked by the insertion itself rather than by the tree
+        drawing a node, so re-attachment has nothing left to suppress.
         """
         if not parts_list:
             return
 
         self.setSortingEnabled(False)
-        previous_suppress = self._suppress_transaction_compilation
-        if suppress_transaction:
-            self._suppress_transaction_compilation = True
         try:
             self._insert_visual_node(self.base_model.invisibleRootItem(), parts_list, refs)
         finally:
-            self._suppress_transaction_compilation = previous_suppress
             self.setSortingEnabled(True)
             self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
             self.expandAll()
@@ -362,7 +342,6 @@ class IndexTreeView(QTreeView):
         Receives backend data payloads and renders tree columns.
         Strict MVC: Renders GUI elements here while delegating string logic to the engine.
         """
-        self._suppress_transaction_compilation = True
         self.base_model.blockSignals(True)
         self.setSortingEnabled(False)
         try:
@@ -418,7 +397,6 @@ class IndexTreeView(QTreeView):
             self.setSortingEnabled(True)
             self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
             self.expandAll()
-            self._suppress_transaction_compilation = False
 
     def _insert_visual_node(self, parent_item, remaining_parts: list, refs: list):
         """
@@ -498,19 +476,6 @@ class IndexTreeView(QTreeView):
                         "absolute_end": r.get("absolute_end"),
                         "macro_command": r.get("macro_command", "index"),
                     })
-
-                    # Track hierarchy keys to build back-end transaction tokens
-                    keys = []
-                    trace = target_branch
-                    while trace and trace != self.base_model.invisibleRootItem():
-                        keys.insert(0, trace.text().lstrip('\x00'))
-                        trace = trace.parent()
-
-                    # Push transaction staging records straight into the model engine layer
-                    if not self._suppress_transaction_compilation:
-                        self.engine.compile_transaction_record(
-                            keys, r, r.get("encap", "standard"), int(stable_id)
-                        )
 
             sibling_ref_item.setData(new_records, role_uid)
             if new_records:

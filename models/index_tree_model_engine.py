@@ -12,27 +12,26 @@ class IndexTreeModelEngine:
     def __init__(self, repository_model):
         self.repo = repository_model  # Database repository layer
 
-        self._staged_db_entries: list = []
         self._cross_reference_cache: dict = {}  
 
         self._active_headings: list = []
+        # Heading ids are allocated here, not by SQLite -- see
+        # resolve_heading_id. _pending_heading_ids are those created in
+        # memory whose row has not been written yet.
+        self._next_heading_id: int = 1
+        self._pending_heading_ids: set[int] = set()
         self._active_references: list = []
-
-    def has_unsaved_changes(self) -> bool:
-        return len(self._staged_db_entries) > 0
 
     def discard_staged_entry(self, unique_id_number: int) -> None:
         """
-        Removes a single not-yet-saved entry from the staged-for-save list.
-        Used when the user discards a tab's unsaved changes: the entry was
-        inserted this session but never reached an explicit Save, so it
-        must stop being counted by has_unsaved_changes() once its DB row
-        and views have been rolled back elsewhere.
+        Retained as a no-op for the discard path.
+
+        There is no longer a separate staged-entry list to remove from:
+        EntryModifierModel's pending-changes journal is the single record
+        of unwritten work, and discarding an entry cancels it there when
+        the record itself is dropped.
         """
-        self._staged_db_entries = [
-            rec for rec in self._staged_db_entries
-            if rec.get("unique_id_number") != unique_id_number
-        ]
+        return
 
     def clear_staged_entries(self) -> None:
         """Delegates to the full transaction reset for consistency."""
@@ -40,22 +39,10 @@ class IndexTreeModelEngine:
 
     def reset_transaction_arrays(self) -> None:
         """
-        Purges all volatile transactional staging arrays from memory.
+        Purges all volatile transactional caches from memory.
         Ensures a completely fresh tracking state for new project loads.
         """
-        self._staged_db_entries.clear()
         self._cross_reference_cache.clear()
-
-    def commit_staged_changes(self) -> bool:
-        if not self._staged_db_entries:
-            return False  # nothing to commit — consistent with controller's "no changes" path
-        if not self.repo:
-            return False  # no repository — genuine failure
-        
-        success = self.repo.save_batch_index_manifest(self._staged_db_entries)
-        if success:
-            self._staged_db_entries.clear()
-        return success
 
     def sanitize_hierarchical_input(self, raw_parts) -> tuple[str, list] | None:
         """Sanitizes incoming arrays into safe tokens and slices."""
@@ -94,17 +81,6 @@ class IndexTreeModelEngine:
 
         return display_text, is_xref
 
-    def compile_transaction_record(self, clean_parts: list, ref_data: dict, encap: str, aid: int):
-        """Compiles uncommitted metadata parameters for database staging."""
-        self._staged_db_entries.append({
-            "unique_id_number": int(aid),
-            "heading_raw_text": grammar.join_levels(clean_parts),
-            "file_path": os.path.normpath(str(ref_data.get("file_path", ""))),
-            "line_number": int(ref_data.get("line_number", 0)),
-            "column_offset": int(ref_data.get("column_offset", 0)),
-            "encap": encap,
-        })
-
     def compile_and_retain_project_paths(self, file_paths: list[str]) -> tuple[list[dict], list[dict]]:
         """Invokes your scraper method, retains results in memory, and returns them."""
         self.reset_transaction_arrays()
@@ -115,10 +91,11 @@ class IndexTreeModelEngine:
     
     def clear_active_manifests(self) -> None:
         """Purges all active workspace structures from cache tracking memory."""
-        self._staged_db_entries.clear()
         self._cross_reference_cache.clear()
         self._active_headings.clear()
         self._active_references.clear()
+        self._pending_heading_ids.clear()
+        self._next_heading_id = 1
 
     def get_main_headings(self) -> list[tuple[str, str]]:
         """
@@ -171,3 +148,117 @@ class IndexTreeModelEngine:
         self.clear_active_manifests()
         self._active_headings = list(headings)
         self._active_references = list(references)
+        self._reseed_heading_ids()
+
+    # ------------------------------------------------------------------
+    # Heading identity
+    # ------------------------------------------------------------------
+
+    def _reseed_heading_ids(self) -> None:
+        """
+        Re-seeds the in-memory heading id counter above every id currently
+        loaded. Called after any full ingest, mirroring what
+        AppPipelineController does with MacroIDGenerator for reference ids.
+        """
+        existing = [
+            int(h.get("id")) for h in self._active_headings
+            if h.get("id") is not None
+        ]
+        self._next_heading_id = (max(existing) + 1) if existing else 1
+
+    @staticmethod
+    def _heading_key(heading_text: str, depth: int) -> tuple[str, int]:
+        """
+        Identity of a heading row. Matches resolve_or_insert_heading's own
+        SELECT, which keys on (heading_text, depth) -- not on text alone,
+        so the two cannot disagree about what counts as the same heading.
+        """
+        return (str(heading_text), int(depth))
+
+    def find_heading_id(self, heading_text: str) -> int | None:
+        """Returns the id of an already-known heading, or None."""
+        depth = grammar.depth_of(heading_text)
+        key = self._heading_key(heading_text, depth)
+        for heading in self._active_headings:
+            if heading.get("id") is None:
+                continue
+            if self._heading_key(
+                heading.get("heading_text") or heading.get("name") or "",
+                heading.get("depth", 0),
+            ) == key:
+                return int(heading["id"])
+        return None
+
+    def resolve_heading_id(self, heading_text: str, parent_id: int | None = None) -> int | None:
+        """
+        Finds or creates the heading for heading_text and returns its id,
+        **without touching the database**.
+
+        Heading ids are allocated here rather than by SQLite's
+        autoincrement so that a heading can be created while its row is
+        still pending a write. ProjectLoadWorker already assigns them this
+        way for a full load (and the bulk insert writes explicit ids), so
+        this brings live insertion onto the same footing rather than
+        introducing a new convention.
+
+        Newly created headings are recorded in _pending_heading_ids for
+        the save drain to write.
+        """
+        if not heading_text:
+            return None
+
+        existing = self.find_heading_id(heading_text)
+        if existing is not None:
+            return existing
+
+        # Defensive rather than trusting the seed: _active_headings can be
+        # populated by paths that never call ingest_pre_parsed_project_dataset
+        # (a directly-built engine, a test fixture), which would leave the
+        # counter at 1 and hand out an id that already belongs to a loaded
+        # heading. Re-deriving the floor at allocation time makes a
+        # collision impossible however the list was filled.
+        highest_loaded = max(
+            (int(h["id"]) for h in self._active_headings if h.get("id") is not None),
+            default=0,
+        )
+        new_id = max(self._next_heading_id, highest_loaded + 1)
+        self._next_heading_id = new_id + 1
+        self._active_headings.append({
+            "id": new_id,
+            "parent_id": parent_id,
+            "heading_text": heading_text,
+            "name": heading_text,
+            "depth": grammar.depth_of(heading_text),
+        })
+        self._pending_heading_ids.add(new_id)
+        return new_id
+
+    def resolve_heading_path(self, heading_text: str) -> int | None:
+        """
+        In-memory counterpart of FileTreePersistence.resolve_heading_path:
+        resolves the heading together with its parent chain and returns its
+        id. Depth and parent text come from index_tag_grammar, so an encap
+        or a braced "!" never inflates the depth.
+        """
+        if not heading_text:
+            return None
+
+        parent_id = None
+        if grammar.depth_of(heading_text) > 0:
+            parent_text = grammar.parent_path(heading_text)
+            if parent_text:
+                parent_id = self.resolve_heading_id(parent_text)
+
+        return self.resolve_heading_id(heading_text, parent_id)
+
+    def take_pending_heading_rows(self) -> list[dict]:
+        """
+        Returns the heading dicts created in memory since the last call,
+        and forgets them. The caller is responsible for writing them.
+        """
+        pending = [
+            dict(h) for h in self._active_headings
+            if h.get("id") in self._pending_heading_ids
+        ]
+        self._pending_heading_ids.clear()
+        return pending

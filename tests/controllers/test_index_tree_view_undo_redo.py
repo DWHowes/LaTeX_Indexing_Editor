@@ -3,8 +3,8 @@ IndexTreeView.append_entry/remove_last_entry/reinsert_entry -- the tree's
 own undo/redo mechanics for a fresh live insertion
 (AppPipelineController._handle_index_undo/_handle_index_redo), plus
 append_entry's new-entry DB-transaction staging
-(IndexTreeModelEngine.compile_transaction_record, gated by
-suppress_transaction). Only ever exercised previously with
+(the engine's old staged-entry list, gated by suppress_transaction --
+both since removed). Only ever exercised previously with
 suppress_transaction=True (re-attaching an already-persisted entry after
 a rename, see test_index_edit_controller_table_edit.py) -- the
 suppress_transaction=False staging path used by a genuine fresh
@@ -92,28 +92,30 @@ class TestAppendEntry:
 
         assert _top_level_tokens(tree) == ["Apple", "Mango", "Zebra"]
 
-    def test_suppress_transaction_true_does_not_stage_a_db_transaction(self, qtbot):
+    def test_appending_does_not_stage_any_db_work_of_its_own(self, qtbot):
+        """
+        The tree used to keep its own staged-entry list, appended to
+        whenever it drew a node for a genuinely new insertion -- which is
+        why append_entry needed a suppress_transaction flag to tell a
+        fresh insert apart from re-attaching an already-persisted entry.
+
+        Drawing a node is no longer how a database write gets recorded.
+        EntryModifierModel's pending-changes journal is marked by the
+        insertion itself, so the tree has nothing to stage and the flag is
+        accepted but inert. This pins that: appending must not reach into
+        the engine for persistence at all, either way the flag is set.
+        """
         tree = _tree(qtbot)
 
-        tree.append_entry(["Main"], [{"unique_id_number": 1, "file_path": "a.tex", "line_number": 1}],
-                           suppress_transaction=True)
+        for suppress in (True, False):
+            tree.append_entry(
+                ["Main"],
+                [{"unique_id_number": 1, "file_path": "a.tex", "line_number": 3, "column_offset": 5}],
+                suppress_transaction=suppress,
+            )
 
-        assert tree.engine._staged_db_entries == []
-
-    def test_suppress_transaction_false_stages_a_db_transaction(self, qtbot):
-        """The real fresh-insertion path -- suppress_transaction=True is only ever used for re-attachment."""
-        tree = _tree(qtbot)
-
-        tree.append_entry(
-            ["Main"],
-            [{"unique_id_number": 1, "file_path": "a.tex", "line_number": 3, "column_offset": 5}],
-            suppress_transaction=False,
-        )
-
-        assert len(tree.engine._staged_db_entries) == 1
-        staged = tree.engine._staged_db_entries[0]
-        assert staged["unique_id_number"] == 1
-        assert staged["heading_raw_text"] == "Main"
+        assert not hasattr(tree.engine, "_staged_db_entries")
+        assert _top_level_tokens(tree) == ["Main"]
 
 
 class TestRemoveLastEntry:

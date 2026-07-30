@@ -3,6 +3,7 @@ import os
 from PySide6.QtCore import QObject, Signal
 
 from models import index_tag_grammar as grammar
+from models.pending_changes_journal import DELETE, INSERT, UPDATE, PendingChangesJournal
 
 class EntryModifierModel(QObject):
     """
@@ -18,7 +19,24 @@ class EntryModifierModel(QObject):
         self._staging_model = staging_model  # IndexEditStagingModel ref — shared with IndexEditController
         self._records: dict[int, dict] = {}  # In-memory cache keyed by unique_id_number
         self._display_ids: set[int] = set()
-        self._dirty_ids: set[int] = set()
+
+        # What still needs writing to project_references at save time.
+        # Entity-keyed rather than a plain dirty set, so that insert and
+        # delete can join update here as the remaining immediate writes
+        # are deferred -- see models/pending_changes_journal.py.
+        self._journal = PendingChangesJournal("reference")
+        # file_path of entries deleted since the last save, kept only
+        # so the per-file flush scoping can still place them.
+        self._pending_delete_meta: dict[int, dict] = {}
+
+    @property
+    def _dirty_ids(self) -> set[int]:
+        """
+        Read-only view of the journal, kept because callers and tests
+        check membership. Mutate through mark_dirty/clear_dirty, never
+        through this.
+        """
+        return set(self._journal.entity_ids())
 
     def get_heading_text(self, entry_id: int) -> str:
         record = self._records.get(entry_id)
@@ -92,41 +110,30 @@ class EntryModifierModel(QObject):
 
     def register_new_entry(self, entry_dict: dict) -> None:
         """
-        Adds a single new entry to the in-memory cache and persists it.
-        Called after the .tex file has already been written.
-        entry_dict is expected to arrive fully populated including uid and heading_id.
+        Adds a single new entry to the in-memory cache and marks its row
+        for creation at the next save. Called after the .tex file has
+        already been written; entry_dict arrives fully populated including
+        uid and heading_id.
+
+        The row used to be inserted here and then. Deferring it is what
+        removes the need for the insertion-rollback bookkeeping that grew
+        up around it: an entry created and discarded before any save now
+        cancels out in the journal instead of having to be deleted back
+        out of the database.
 
         Also seeds the staging model's baseline for this entry, so its
         first edit doesn't hit stage_edit's auto-register/warning path.
         """
         unique_id = entry_dict["unique_id_number"]
         self._records[unique_id] = entry_dict
+        self._pending_delete_meta.pop(unique_id, None)
 
         if self._staging_model is not None:
             self._staging_model.register_original(
                 unique_id, entry_dict.get("heading_raw_text", "")
             )
 
-        if self._persistence is not None:
-            # Same list-vs-JSON-string gotcha as flush_dirty_to_db above:
-            # insert_reference does not JSON-encode see_references/
-            # seealso_references either, and a duplicated entry (see
-            # AppPipelineController._build_duplicate_entry_dict) copies
-            # these fields straight from an already-loaded record, where
-            # they're real Python lists (LatexIndexParser always returns a
-            # list, never None, even for a plain \index{...} entry with no
-            # cross-references).
-            write_dict = dict(entry_dict)
-            for key in ("see_references", "seealso_references"):
-                if isinstance(write_dict.get(key), list):
-                    write_dict[key] = json.dumps(write_dict[key])
-
-            success = self._persistence.insert_reference(write_dict)
-            if not success:
-                print(f"[MODEL WARNING] insert_reference failed for ID {unique_id}")
-        else:
-            print(f"[MODEL STUB] No persistence layer — skipping insert for ID {unique_id}")
-
+        self._journal.mark_insert(unique_id)
         self.entry_modifier_updated.emit(unique_id, True)
 
     # ------------------------------------------------------------------
@@ -237,15 +244,15 @@ class EntryModifierModel(QObject):
         both for the directly edited entry and for all shifted entries
         returned by shift_coordinates_after.
         """
-        self._dirty_ids.add(entry_id)
+        self._journal.mark_update(entry_id)
 
     def clear_dirty(self) -> None:
-        """Clears the dirty set after a successful flush."""
-        self._dirty_ids.clear()
+        """Clears the journal after a successful flush."""
+        self._journal.clear()
 
     def has_dirty_records(self) -> bool:
         """Returns True if any records are pending a DB flush."""
-        return bool(self._dirty_ids)
+        return bool(self._journal)
 
     def flush_dirty_to_db(self, file_path: str | None = None) -> tuple[int, int]:
         """
@@ -268,77 +275,124 @@ class EntryModifierModel(QObject):
         success, so a broken record doesn't block future saves; ids
         outside file_path's scope are left untouched for a later flush.
         """
-        if not self._dirty_ids:
+        if not self._journal:
             return 0, 0
 
         if self._persistence is None:
             print("[MODEL STUB] No persistence layer — skipping flush")
-            return 0, len(self._dirty_ids)
+            return 0, len(self._journal)
 
         norm_target = os.path.normpath(file_path) if file_path else None
 
-        target_ids = [
-            entry_id for entry_id in self._dirty_ids
-            if norm_target is None
-            or os.path.normpath((self._records.get(entry_id) or {}).get("file_path", "")) == norm_target
+        targets = [
+            (entry_id, op) for entry_id, op in self._journal.items()
+            if norm_target is None or self._pending_file_path(entry_id) == norm_target
         ]
+
+        # Inserts before updates before deletes: a row has to exist before
+        # anything updates it, and removing it last keeps the drain valid
+        # if it is interrupted partway.
+        _ORDER = {INSERT: 0, UPDATE: 1, DELETE: 2}
+        targets.sort(key=lambda pair: _ORDER.get(pair[1], 1))
 
         success_count = 0
         failure_count = 0
+        resolved: list[int] = []
 
-        for entry_id in target_ids:
-            record = self._records.get(entry_id)
-            if record is None:
-                print(f"[MODEL WARNING] flush_dirty_to_db: ID {entry_id} not in cache — skipping")
-                failure_count += 1
-                continue
+        for entry_id, op in targets:
+            if op == DELETE:
+                ok = self._write_delete(entry_id)
+            elif op == INSERT:
+                ok = self._write_insert(entry_id)
+            else:
+                ok = self._write_update(entry_id)
 
-            # In-memory records carry see_references/seealso_references as
-            # real Python lists (set that way at parse time by
-            # LatexIndexParser._build_see_reference_payload, or by a prior
-            # DB read that already deserialized them) -- but
-            # update_reference_field does NOT JSON-encode on write (see its
-            # own docstring/tests), it expects a pre-serialized string.
-            # Passing the raw list through fails the sqlite bind and was
-            # silently swallowed as a flush failure, defeating this
-            # method's whole purpose of persisting renames to the DB.
-            write_record = dict(record)
-            for key in ("see_references", "seealso_references"):
-                if isinstance(write_record.get(key), list):
-                    write_record[key] = json.dumps(write_record[key])
-
-            ok = self._persistence.update_reference_field(entry_id, write_record)
             if ok:
                 success_count += 1
-                # Keeps the shared project_headings row's own text in sync
-                # with whatever this now-durably-saved reference's heading
-                # path actually is -- see FileTreePersistence.
-                # update_heading_text's docstring for why this can't be
-                # skipped: a tree rename only ever updated each
-                # reference's own heading_raw_text, never this row, so
-                # without this a reopened project would rebuild its tree
-                # from the pre-rename name.
-                self._persistence.update_heading_text(
-                    record.get("heading_id"), record.get("heading_raw_text", "")
-                )
             else:
-                print(f"[MODEL WARNING] flush_dirty_to_db: DB write failed for ID {entry_id}")
                 failure_count += 1
+            # Resolved either way, so one broken record can't block every
+            # future save -- the pre-existing behaviour for updates.
+            resolved.append(entry_id)
 
-        self._dirty_ids.difference_update(target_ids)
+        self._journal.resolve(resolved)
+        for entry_id in resolved:
+            self._pending_delete_meta.pop(entry_id, None)
 
         print(
-            f"[MODEL] Flushed dirty records"
+            f"[MODEL] Flushed pending changes"
             f"{'' if norm_target is None else f' for {os.path.basename(norm_target)}'}: "
             f"{success_count} succeeded, {failure_count} failed"
         )
         return success_count, failure_count
 
+    # -- per-operation writers -------------------------------------------
+
+    def _pending_file_path(self, entry_id: int) -> str:
+        """
+        The file a pending change belongs to. Reads the live record where
+        there is one, and falls back to the metadata captured at deletion
+        time -- a pending delete has no record left to ask.
+        """
+        record = self._records.get(entry_id)
+        if record is not None:
+            return os.path.normpath(record.get("file_path", "") or "")
+        meta = self._pending_delete_meta.get(entry_id) or {}
+        return os.path.normpath(meta.get("file_path", "") or "")
+
+    @staticmethod
+    def _serialized(record: dict) -> dict:
+        """
+        In-memory records carry see_references/seealso_references as real
+        Python lists (set that way at parse time by LatexIndexParser
+        ._build_see_reference_payload, or by a prior DB read that already
+        deserialized them) -- but neither update_reference_field nor
+        insert_reference JSON-encodes on write, they expect a
+        pre-serialized string. Passing the raw list through fails the
+        sqlite bind and used to be silently swallowed as a flush failure.
+        """
+        write_record = dict(record)
+        for key in ("see_references", "seealso_references"):
+            if isinstance(write_record.get(key), list):
+                write_record[key] = json.dumps(write_record[key])
+        return write_record
+
+    def _write_insert(self, entry_id: int) -> bool:
+        record = self._records.get(entry_id)
+        if record is None:
+            print(f"[MODEL WARNING] flush: insert for ID {entry_id} has no cached record")
+            return False
+        return bool(self._persistence.insert_reference(self._serialized(record)))
+
+    def _write_update(self, entry_id: int) -> bool:
+        record = self._records.get(entry_id)
+        if record is None:
+            print(f"[MODEL WARNING] flush: update for ID {entry_id} has no cached record")
+            return False
+
+        if not self._persistence.update_reference_field(entry_id, self._serialized(record)):
+            print(f"[MODEL WARNING] flush: DB write failed for ID {entry_id}")
+            return False
+
+        # Keeps the shared project_headings row's own text in sync with
+        # whatever this now-durably-saved reference's heading path actually
+        # is -- see FileTreePersistence.update_heading_text's docstring for
+        # why this can't be skipped: a tree rename only ever updated each
+        # reference's own heading_raw_text, never this row, so without it a
+        # reopened project would rebuild its tree from the pre-rename name.
+        self._persistence.update_heading_text(
+            record.get("heading_id"), record.get("heading_raw_text", "")
+        )
+        return True
+
+    def _write_delete(self, entry_id: int) -> bool:
+        return bool(self._persistence.delete_reference(entry_id))
+
     def get_dirty_ids_for_file(self, file_path: str) -> list[int]:
         """Returns dirty entry_ids whose cached record belongs to file_path (normalized)."""
         norm_target = os.path.normpath(file_path) if file_path else ""
         return [
-            entry_id for entry_id in self._dirty_ids
+            entry_id for entry_id in self._journal.entity_ids()
             if os.path.normpath((self._records.get(entry_id) or {}).get("file_path", "")) == norm_target
         ]
 
@@ -346,7 +400,7 @@ class EntryModifierModel(QObject):
         """Returns the (normalized) set of file paths with at least one dirty record."""
         return {
             os.path.normpath((self._records.get(entry_id) or {}).get("file_path", ""))
-            for entry_id in self._dirty_ids
+            for entry_id in self._journal.entity_ids()
             if (self._records.get(entry_id) or {}).get("file_path")
         }
 
@@ -368,7 +422,7 @@ class EntryModifierModel(QObject):
         display), or None if there's no persistence layer or no matching
         row (e.g. the entry was deleted through some other path).
         """
-        self._dirty_ids.discard(entry_id)
+        self._journal.resolve([entry_id])
 
         if self._persistence is None:
             return None
@@ -447,18 +501,24 @@ class EntryModifierModel(QObject):
         this is called (see IndexEditController.handle_entry_deletion), so
         there's no reason to defer the corresponding DB row's removal.
         """
-        self._records.pop(entry_id, None)
+        record = self._records.pop(entry_id, None)
         self._display_ids.discard(entry_id)
-        self._dirty_ids.discard(entry_id)
 
-        if self._persistence is not None:
-            success = self._persistence.delete_reference(entry_id)
-            if not success:
-                print(f"[MODEL WARNING] delete_reference failed for ID {entry_id}")
-        else:
-            print(f"[MODEL STUB] No persistence layer — skipping delete for ID {entry_id}")
+        # The record is gone from the cache, so the drain can no longer ask
+        # it which file it belonged to. Keep just enough to answer that,
+        # for the per-file flush scoping.
+        if record is not None:
+            self._pending_delete_meta[entry_id] = {"file_path": record.get("file_path", "")}
 
-        self.entry_modifier_updated.emit(entry_id, True)    
+        # mark_delete rather than deleting now. If this row was itself
+        # created since the last save the journal cancels the pair outright
+        # -- it never existed in the database, so neither an insert nor a
+        # delete should ever be written for it.
+        self._journal.mark_delete(entry_id)
+        if not self._journal.has(entry_id):
+            self._pending_delete_meta.pop(entry_id, None)
+
+        self.entry_modifier_updated.emit(entry_id, True)
 
     def relink_range_partner(self, entry_id: int, new_partner_id: int | None) -> None:
         """
@@ -468,11 +528,11 @@ class EntryModifierModel(QObject):
         (the interior opener/closer being deleted) is replaced by the
         surviving entry at the other end of the newly merged range.
 
-        Persisted immediately (like delete_record's delete_reference
-        call), not deferred via mark_dirty/flush_dirty_to_db: this isn't a
-        staged user edit awaiting Save, it's a correction that must stay
-        consistent with the .tex deletions the caller performs in the same
-        operation.
+        Journalled rather than written immediately, like every other index
+        edit. It stays consistent with the .tex deletions the caller makes
+        in the same operation because those are journalled too -- the whole
+        correction now lands together at save, instead of this half being
+        written ahead of the rest.
         """
         record = self._records.get(entry_id)
         if record is None:
@@ -480,15 +540,7 @@ class EntryModifierModel(QObject):
             return
 
         record["range_partner_id"] = new_partner_id
-
-        if self._persistence is not None:
-            success = self._persistence.update_reference_field(
-                entry_id, {"range_partner_id": new_partner_id}
-            )
-            if not success:
-                print(f"[MODEL WARNING] relink_range_partner: DB write failed for ID {entry_id}")
-        else:
-            print(f"[MODEL STUB] No persistence layer — skipping relink for ID {entry_id}")
+        self._journal.mark_update(entry_id)
 
     def delete_heading_if_orphaned(self, heading_id: int) -> None:
         """

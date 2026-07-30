@@ -40,7 +40,6 @@ def _clean_pipeline_state(opened_project):
     yield
     pipeline_ctrl._tree_modified = False
     pipeline_ctrl.entry_modifier_model.clear_dirty()
-    pipeline_ctrl.idx_ctrl.model_engine._staged_db_entries.clear()
     pipeline_ctrl.doc_io.clear_write_tracking()
     for i in range(pipeline_ctrl.window.tabs.count()):
         tab = pipeline_ctrl.window.tabs.widget(i)

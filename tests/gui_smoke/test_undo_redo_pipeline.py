@@ -34,7 +34,6 @@ def _clean_pipeline_state(opened_project):
     yield
     pipeline_ctrl._tree_modified = False
     pipeline_ctrl.entry_modifier_model.clear_dirty()
-    pipeline_ctrl.idx_ctrl.model_engine._staged_db_entries.clear()
     pipeline_ctrl._index_commands.clear()
     pipeline_ctrl._pending_insertions_by_file.clear()
     for i in range(pipeline_ctrl.window.tabs.count()):
@@ -87,6 +86,19 @@ def _db_row_exists(pipeline_ctrl, entry_id: int) -> bool:
     return row is not None
 
 
+def _saved_row_exists(pipeline_ctrl, entry_id: int) -> bool:
+    """
+    Whether a save would leave this entry in the database.
+
+    Index writes are journalled and drained at save time, so asserting on
+    the raw table straight after an operation says nothing useful. Saving
+    first is what makes the question meaningful -- and it exercises the
+    drain, which is the part that could actually be wrong.
+    """
+    pipeline_ctrl.execute_project_save_workflow()
+    return _db_row_exists(pipeline_ctrl, entry_id)
+
+
 def _undo(pipeline_ctrl, tab, qtbot):
     qtbot.keyClick(tab, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
 
@@ -124,12 +136,11 @@ class TestUndoingAnInsertion:
 
         _insert(pipeline_ctrl, "BrandNew")
         entry_id = _find_uid(pipeline_ctrl, "BrandNew")
-        assert _db_row_exists(pipeline_ctrl, entry_id) is True
 
         _undo(pipeline_ctrl, tab, qtbot)
 
-        assert _db_row_exists(pipeline_ctrl, entry_id) is False
         assert entry_id not in _records(pipeline_ctrl)
+        assert _saved_row_exists(pipeline_ctrl, entry_id) is False
 
 
 # ---------------------------------------------------------------------------
@@ -203,11 +214,14 @@ class TestUndoTargetsTheLastOperation:
         # The deletion is fully reversed: text, cache and DB row together.
         assert r"\index{Introduction}" in tab.toPlainText()
         assert victim_id in _records(pipeline_ctrl)
-        assert _db_row_exists(pipeline_ctrl, victim_id) is True
 
-        # ...and the unrelated insertion is untouched in all three places.
+        # ...and the unrelated insertion is untouched.
         assert r"\index{BrandNew}" in tab.toPlainText()
         assert inserted_id in _records(pipeline_ctrl)
+
+        # Both survive the save that actually writes them.
+        pipeline_ctrl.execute_project_save_workflow()
+        assert _db_row_exists(pipeline_ctrl, victim_id) is True
         assert _db_row_exists(pipeline_ctrl, inserted_id) is True
 
     def test_a_second_undo_then_reverses_the_insertion(self, opened_project, qtbot):
@@ -312,8 +326,8 @@ class TestRedo:
 
         _redo(pipeline_ctrl, tab, qtbot)
 
-        assert _db_row_exists(pipeline_ctrl, entry_id) is True
         assert entry_id in _records(pipeline_ctrl)
+        assert _saved_row_exists(pipeline_ctrl, entry_id) is True
 
     def test_undoing_a_deletion_and_redoing_it_removes_it_again(self, opened_project, qtbot):
         pipeline_ctrl, project_dir = opened_project
@@ -328,7 +342,7 @@ class TestRedo:
         _redo(pipeline_ctrl, tab, qtbot)
 
         assert r"\index{Introduction}" not in tab.toPlainText()
-        assert _db_row_exists(pipeline_ctrl, entry_id) is False
+        assert _saved_row_exists(pipeline_ctrl, entry_id) is False
 
     def test_a_new_action_discards_the_redo_branch(self, opened_project, qtbot):
         pipeline_ctrl, project_dir = opened_project

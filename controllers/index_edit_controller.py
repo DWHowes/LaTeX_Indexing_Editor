@@ -1137,26 +1137,25 @@ class IndexEditController(QObject):
         if not heading_text:
             return snapshot.heading_id
 
-        heading_id = None
-        persistence = getattr(self._entry_model, "_persistence", None)
-        if persistence is not None:
-            heading_id = persistence.resolve_heading_path(heading_text)
-        if heading_id is None:
-            heading_id = snapshot.heading_id
-
         engine = getattr(self._tree, "engine", None)
-        if engine is not None and heading_id is not None:
-            known = {h.get("id") for h in engine._active_headings}
-            if heading_id not in known:
-                engine._active_headings.append({
-                    "id": heading_id,
-                    "parent_id": None,
-                    "heading_text": heading_text,
-                    "name": heading_text,
-                    "depth": grammar.depth_of(heading_text),
-                })
+        persistence = getattr(self._entry_model, "_persistence", None)
 
-        return heading_id
+        if engine is None:
+            return (
+                persistence.resolve_heading_path(heading_text)
+                if persistence is not None else snapshot.heading_id
+            )
+
+        # The engine allocates the id and records the heading in
+        # _active_headings in one step, so the two can no longer disagree
+        # about whether a heading exists -- this used to resolve the row in
+        # the DB and then patch _active_headings separately.
+        heading_id = engine.resolve_heading_path(heading_text)
+        if persistence is not None:
+            for pending in engine.take_pending_heading_rows():
+                persistence.insert_heading_with_id(pending)
+
+        return heading_id if heading_id is not None else snapshot.heading_id
 
     def _apply_heading_change(self, change) -> None:
         """
@@ -1361,23 +1360,15 @@ class IndexEditController(QObject):
 
     def _create_heading_in_engine(self, engine, heading_text: str) -> int:
         """
-        Creates a new heading dict in _active_headings and returns its
-        assigned id.  IDs are positional so we use max+1.
+        Creates a heading in _active_headings and returns its id.
+
+        This used to allocate its own id as max(existing) + 1, making it a
+        third independent assigner alongside ProjectLoadWorker's counter
+        and SQLite's autoincrement. It now defers to the engine, which is
+        the single allocator -- so an id handed out here can no longer
+        collide with one handed out for a live insertion between saves.
         """
-        existing_ids = [
-            h.get("id", 0) for h in engine._active_headings if h.get("id") is not None
-        ]
-        new_id = (max(existing_ids) + 1) if existing_ids else 1
-        parts = grammar.split_levels_clean(heading_text)
-        new_heading = {
-            "id": new_id,
-            "parent_id": None,
-            "heading_text": heading_text,
-            "name": heading_text,
-            "depth": len(parts) - 1,
-        }
-        engine._active_headings.append(new_heading)
-        return new_id
+        return engine.resolve_heading_id(heading_text)
 
     def _remove_orphaned_heading(
         self, engine, heading_id: int, heading_text: str

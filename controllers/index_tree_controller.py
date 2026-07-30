@@ -13,11 +13,7 @@ class IndexTreeController(QObject):
         super().__init__(parent)
         self.model_engine = data_model_engine  # This is your IndexTreeModelEngine instance
 
-    def has_unsaved_changes(self) -> bool:
-        return self.model_engine.has_unsaved_changes()
 
-    def commit_staged_changes_to_db(self) -> bool:
-        return self.model_engine.commit_staged_changes()
 
     def discard_staged_entry(self, unique_id_number: int) -> None:
         """Forgets a single not-yet-saved entry — see IndexTreeModelEngine.discard_staged_entry."""

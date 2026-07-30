@@ -40,7 +40,8 @@ def _fresh_engine():
     sanitize_hierarchical_input/evaluate_node_type parsing helpers. A
     None repository_model is safe here: append_entry is always called
     with suppress_transaction=True from this call site, so the one method
-    that would need a real repo (compile_transaction_record) never runs.
+    that would have needed a real repo never runs (the tree no longer
+    stages DB work of its own at all -- see PendingChangesJournal).
     """
     return IndexTreeModelEngine(repository_model=None)
 

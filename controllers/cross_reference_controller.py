@@ -130,6 +130,36 @@ class CrossReferenceController(QObject):
     #: available.
     MIGRATION_DECLINED_KEY = "legacy_xref_migration_declined"
 
+    def _live_legacy_candidates(self) -> list:
+        """
+        Legacy cross-reference rows that still actually exist.
+
+        The DB query alone is no longer sufficient: reference deletions are
+        deferred to save time, so a row migrated earlier in this session is
+        still present in project_references and would be offered for
+        migration all over again -- including by the prompt on project
+        open.
+
+        Liveness is taken from the entry model's cache rather than the
+        database, because that is what the deletion actually updated. An
+        id no longer in _records has been deleted, whether or not the row
+        has been written away yet.
+        """
+        if self._persistence is None:
+            return []
+
+        candidates = self._persistence.fetch_legacy_cross_reference_candidates()
+
+        entry_model = getattr(self._index_edit_ctrl, "_entry_model", None)
+        if entry_model is None:
+            return candidates
+
+        live_ids = entry_model._records
+        return [
+            row for row in candidates
+            if row.get("unique_id_number") in live_ids
+        ]
+
     def offer_migration_if_needed(self) -> bool:
         """
         Called once a project has finished loading. Offers to migrate any
@@ -150,7 +180,7 @@ class CrossReferenceController(QObject):
         if str(self._persistence.get_metadata_value(self.MIGRATION_DECLINED_KEY) or "") == "1":
             return False
 
-        candidates = self._persistence.fetch_legacy_cross_reference_candidates()
+        candidates = self._live_legacy_candidates()
         if not candidates:
             return False
 
@@ -197,7 +227,7 @@ class CrossReferenceController(QObject):
         self.migration_dialog.activateWindow()
 
     def _refresh_migration_dialog_contents(self) -> None:
-        candidates = self._persistence.fetch_legacy_cross_reference_candidates() if self._persistence else []
+        candidates = self._live_legacy_candidates()
         rows = []
         for candidate in candidates:
             parsed = parse_encap_xref(candidate.get("encap", ""))

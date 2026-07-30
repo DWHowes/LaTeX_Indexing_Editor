@@ -7,7 +7,7 @@ project save. This full chain had never been driven by a single test
 before: earlier coverage stopped at the .tex macro text
 (test_latex_index_controller_insert.py) or started from an
 already-loaded record (test_project_save_workflow.py, which only ever
-staged a synthetic placeholder into _staged_db_entries, never a real
+staged a synthetic placeholder into the engine's old staged list, never a real
 insertion).
 
 Driving this for real surfaced and fixed a genuine, previously-unknown
@@ -34,7 +34,6 @@ def _clean_pipeline_state(opened_project):
     yield
     pipeline_ctrl._tree_modified = False
     pipeline_ctrl.entry_modifier_model.clear_dirty()
-    pipeline_ctrl.idx_ctrl.model_engine._staged_db_entries.clear()
     pipeline_ctrl._index_commands.clear()
     pipeline_ctrl._pending_insertions_by_file.clear()
     for i in range(pipeline_ctrl.window.tabs.count()):
@@ -131,11 +130,15 @@ class TestCoordinateShiftOnLiveInsertion:
 
 
 class TestFreshInsertionDatabasePersistence:
-    def test_a_new_entry_is_committed_to_the_database_immediately(self, opened_project):
+    def test_a_new_entry_is_not_written_until_the_project_is_saved(self, opened_project):
         """
-        register_new_entry -> insert_reference commits synchronously, well
-        before any explicit Save -- matches _handle_manual_index_insertion's
-        own documented "immediately commit a DB row" contract.
+        Insertion used to commit its row synchronously. It is now recorded
+        in the pending-changes journal and written at save, which is what
+        lets a discarded insertion cancel out instead of having to be
+        deleted back out of the database.
+
+        The .tex macro is still written immediately, so a crash before
+        saving loses nothing that a resync cannot rebuild.
         """
         pipeline_ctrl, project_dir = opened_project
         intro_path = project_dir / "01.Intro" / "intro.tex"
@@ -145,8 +148,12 @@ class TestFreshInsertionDatabasePersistence:
         _open_tab_at_start(pipeline_ctrl, intro_path)
         _insert(pipeline_ctrl, "BrandNew")
 
-        after = persistence.fetch_index_statistics()["total_references"]
-        assert after == before + 1
+        assert persistence.fetch_index_statistics()["total_references"] == before
+        assert _find_uid(pipeline_ctrl, "BrandNew")            # but it is live in memory
+
+        pipeline_ctrl.execute_project_save_workflow()
+
+        assert persistence.fetch_index_statistics()["total_references"] == before + 1
 
     def test_the_new_entry_still_exists_after_an_explicit_save(self, opened_project):
         pipeline_ctrl, project_dir = opened_project
@@ -164,12 +171,12 @@ class TestFreshInsertionDatabasePersistence:
     def test_a_fresh_insertion_marks_the_project_as_having_unsaved_tree_changes(self, opened_project):
         pipeline_ctrl, project_dir = opened_project
         intro_path = project_dir / "01.Intro" / "intro.tex"
-        assert pipeline_ctrl.idx_ctrl.has_unsaved_changes() is False
+        assert pipeline_ctrl.entry_modifier_model.has_dirty_records() is False
 
         _open_tab_at_start(pipeline_ctrl, intro_path)
         _insert(pipeline_ctrl, "BrandNew")
 
-        assert pipeline_ctrl.idx_ctrl.has_unsaved_changes() is True
+        assert pipeline_ctrl.entry_modifier_model.has_dirty_records() is True
 
     def test_saving_clears_the_unsaved_tree_changes_flag(self, opened_project):
         pipeline_ctrl, project_dir = opened_project
@@ -177,11 +184,11 @@ class TestFreshInsertionDatabasePersistence:
 
         _open_tab_at_start(pipeline_ctrl, intro_path)
         _insert(pipeline_ctrl, "BrandNew")
-        assert pipeline_ctrl.idx_ctrl.has_unsaved_changes() is True
+        assert pipeline_ctrl.entry_modifier_model.has_dirty_records() is True
 
         pipeline_ctrl.execute_project_save_workflow()
 
-        assert pipeline_ctrl.idx_ctrl.has_unsaved_changes() is False
+        assert pipeline_ctrl.entry_modifier_model.has_dirty_records() is False
 
 
 class TestDiscardingAFreshInsertion:
@@ -193,7 +200,10 @@ class TestDiscardingAFreshInsertion:
         _open_tab_at_start(pipeline_ctrl, intro_path)
         _insert(pipeline_ctrl, "BrandNew")
         new_uid = _find_uid(pipeline_ctrl, "BrandNew")
-        assert persistence.fetch_reference_row(new_uid) is not None
+        # Never reached the database in the first place: the insert is
+        # pending, so discarding it cancels the pair outright rather than
+        # having to delete a committed row back out.
+        assert persistence.fetch_reference_row(new_uid) is None
 
         norm_path = str(intro_path)
         import os
@@ -201,3 +211,7 @@ class TestDiscardingAFreshInsertion:
 
         assert persistence.fetch_reference_row(new_uid) is None
         assert new_uid not in pipeline_ctrl.entry_modifier_ctrl.model._records
+
+        # ...and a later save must not resurrect it.
+        pipeline_ctrl.execute_project_save_workflow()
+        assert persistence.fetch_reference_row(new_uid) is None

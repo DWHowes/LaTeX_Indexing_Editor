@@ -1324,6 +1324,41 @@ class FileTreePersistence:
             print(f"[DB ERROR] insert_reference failed for ID {entry_dict.get('unique_id_number')}: {e}")
             return False
 
+    def insert_heading_with_id(self, heading: dict) -> bool:
+        """
+        Writes a heading row using the id it already carries, rather than
+        letting SQLite assign one.
+
+        Heading ids are allocated in memory (IndexTreeModelEngine
+        .resolve_heading_id) so a heading can exist before its row does.
+        The bulk project write has always inserted explicit ids this way;
+        this is the single-row equivalent for live insertion.
+
+        INSERT OR IGNORE so re-writing an already-written heading is a
+        no-op rather than a primary-key error -- the save drain may see
+        the same pending heading twice if a save is interrupted.
+        """
+        if not self.db_path or heading.get("id") is None:
+            return False
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO project_headings "
+                    "(id, parent_id, heading_text, name, depth) VALUES (?, ?, ?, ?, ?);",
+                    (
+                        int(heading["id"]),
+                        heading.get("parent_id"),
+                        str(heading.get("heading_text", "")),
+                        str(heading.get("name", heading.get("heading_text", ""))),
+                        int(heading.get("depth", 0)),
+                    ),
+                )
+                conn.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"[DB ERROR] insert_heading_with_id failed for id={heading.get('id')}: {e}")
+            return False
+
     def resolve_heading_path(self, heading_text: str) -> int | None:
         """
         Resolves (creating if needed) the heading row for heading_text
@@ -1369,9 +1404,15 @@ class FileTreePersistence:
 
     def save_batch_index_manifest(self, entries: list[dict]) -> bool:
         """
-        Persists a batch of staged reference edits to project_references.
+        Persists a batch of reference edits to project_references.
         Each entry must contain 'unique_id_number' plus one or more mutable fields.
         Delegates to update_reference_field per entry; returns True if all succeed.
+
+        Currently called only by its own tests: its previous caller was the
+        tree engine's staged-entry list, which the pending-changes journal
+        replaced. Kept rather than deleted because the journal drain is due
+        to become a single transaction, and a batch writer is exactly what
+        that needs -- delete it if that lands some other way.
         """
         if not entries:
             return False

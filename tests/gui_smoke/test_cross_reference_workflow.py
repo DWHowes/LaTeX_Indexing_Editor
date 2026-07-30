@@ -140,8 +140,12 @@ def test_migrating_a_legacy_cross_reference_does_not_make_it_vanish(opened_proje
     pipeline_ctrl.cross_reference_ctrl.run_migration_scan()
     pipeline_ctrl.cross_reference_ctrl._on_migration_approved([enriched])
 
-    # It moved tables...
-    assert persistence.fetch_legacy_cross_reference_candidates() == []
+    # It moved tables. Asserted through the controller's own live view
+    # rather than the raw query: reference deletions are journalled until
+    # save, so the migrated row is still physically present in
+    # project_references at this point -- what matters is that nothing
+    # offers it for migration again.
+    assert pipeline_ctrl.cross_reference_ctrl._live_legacy_candidates() == []
     assert any(
         row["target_heading"] == spec.target
         for row in persistence.fetch_project_cross_references()
