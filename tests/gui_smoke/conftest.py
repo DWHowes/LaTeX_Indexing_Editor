@@ -4,7 +4,7 @@ through an actual project open (background QThread and all), so this one
 open-a-project sequence is common setup every file in this layer needs.
 """
 import pytest
-from PySide6.QtWidgets import QFileDialog, QInputDialog
+from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
 
 
 def _open_project(qtbot, monkeypatch, pipeline_ctrl, project_dir: str, project_name: str = "SmokeTest"):
@@ -14,9 +14,23 @@ def _open_project(qtbot, monkeypatch, pipeline_ctrl, project_dir: str, project_n
     show -- unautomatable headlessly. Everything past that point (the real
     background SafeProjectLoadThread, the real regex parse) is the real
     code path.
+
+    QMessageBox.question is suppressed for the duration of the open too.
+    Finishing a load can raise two real modals -- the external-drift
+    prompt, and the offer to migrate cross-references written inline in
+    the source (the sample project has one, in 10.Chapter10/chapter10.tex)
+    -- and a real modal blocks the whole run forever headlessly rather
+    than failing. "No" is returned so neither is accepted: a test that
+    wants either prompt drives it directly afterwards with its own
+    monkeypatch, which is how test_file_sync_checksums_on_save.py asserts
+    on the drift prompt.
     """
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: project_dir))
     monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: (project_name, True)))
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.No),
+    )
 
     pipeline_ctrl.select_project_folder_workflow()
 

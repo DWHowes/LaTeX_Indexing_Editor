@@ -42,6 +42,25 @@ class _FakeIndexEditController(QObject):
         return self.should_succeed
 
 
+def _set_up_base_document(fresh_persistence, tmp_path, name="main.tex") -> str:
+    r"""
+    Gives the project a real base document with a \begin{document} anchor,
+    and records it as root_tex_file.
+
+    Migration refuses to run without both -- it removes each pointer from
+    the source and re-homes it in cross_refs.tex, which only reaches the
+    compiled index through an \input line that has to go somewhere. See
+    CrossReferenceController._ensure_cross_refs_file_is_linked.
+    """
+    base = tmp_path / name
+    base.write_text(
+        "\\documentclass{book}\n\\begin{document}\nBody text.\n\\end{document}\n",
+        encoding="utf-8",
+    )
+    fresh_persistence.set_metadata_value("root_tex_file", str(base))
+    return str(base)
+
+
 def _controller(fresh_persistence, tmp_path, qtbot, window=None):
     view = CrossReferenceList()
     qtbot.addWidget(view)
@@ -140,6 +159,7 @@ class TestAddEditRemove:
 class TestMigrationFlow:
     def test_migrates_a_legacy_candidate_and_regenerates_file(self, fresh_persistence, tmp_path, qtbot):
         controller, view, index_edit_ctrl = _controller(fresh_persistence, tmp_path, qtbot)
+        _set_up_base_document(fresh_persistence, tmp_path)
         controller.set_active_project(fresh_persistence, str(tmp_path))
         controller.run_migration_scan()  # lazily constructs migration_dialog, as the real menu action does first
 
@@ -159,8 +179,30 @@ class TestMigrationFlow:
         content = (tmp_path / "cross_refs.tex").read_text(encoding="utf-8")
         assert r"\index{Gadgets|see{Widgets}}" in content
 
+    def test_migration_links_the_cross_refs_file_into_the_base_document(
+        self, fresh_persistence, tmp_path, qtbot
+    ):
+        r"""
+        Migration deletes each pointer from the source; cross_refs.tex only
+        reaches the compiled index through \input. Before this was bundled
+        in, a user could migrate every cross-reference and -- never having
+        run Tools -> Insert Cross-References File... -- end up with a
+        document that compiles perfectly and silently omits all of them.
+        """
+        controller, _view, _idx = _controller(fresh_persistence, tmp_path, qtbot)
+        base_path = _set_up_base_document(fresh_persistence, tmp_path)
+        controller.set_active_project(fresh_persistence, str(tmp_path))
+        controller.run_migration_scan()
+
+        controller._on_migration_approved(
+            [{"unique_id_number": 1, "heading_raw_text": "Gadgets", "xref_type": "see", "target": "Widgets"}]
+        )
+
+        assert r"\input{cross_refs.tex}" in open(base_path, encoding="utf-8").read()
+
     def test_failed_deletion_is_not_migrated(self, fresh_persistence, tmp_path, qtbot):
         controller, view, index_edit_ctrl = _controller(fresh_persistence, tmp_path, qtbot)
+        _set_up_base_document(fresh_persistence, tmp_path)
         controller.set_active_project(fresh_persistence, str(tmp_path))
         controller.run_migration_scan()
         index_edit_ctrl.should_succeed = False
@@ -168,6 +210,157 @@ class TestMigrationFlow:
         candidate = {"unique_id_number": 1, "heading_raw_text": "Gadgets", "xref_type": "see", "target": "Widgets"}
         controller._on_migration_approved([candidate])
 
+        assert fresh_persistence.fetch_project_cross_references() == []
+
+
+class TestMigrationOfferOnProjectOpen:
+    """
+    The offer AppPipelineController makes once a project has finished
+    loading. QMessageBox.question is a real modal and is monkeypatched
+    throughout -- see the "Monkeypatch modal dialogs" gotcha in
+    tests/README.md.
+    """
+
+    @staticmethod
+    def _answer(monkeypatch, button):
+        from PySide6.QtWidgets import QMessageBox
+
+        asked = []
+
+        def _fake(*args, **kwargs):
+            asked.append(args)
+            return button
+
+        monkeypatch.setattr(QMessageBox, "question", _fake)
+        return asked
+
+    @staticmethod
+    def _add_legacy_xref(fresh_persistence, tmp_path):
+        """A project_references row whose encap is a see/seealso pointer."""
+        fresh_persistence.insert_reference({
+            "unique_id_number": 1,
+            "heading_raw_text": "Gadgets",
+            "file_path": str(tmp_path / "ch.tex"),
+            "line_number": 1,
+            "column_offset": 1,
+            "absolute_position": 0,
+            "absolute_end": 25,
+            "encap": "see{Widgets}",
+            "uid": "u1",
+            "see_references": None,
+            "seealso_references": None,
+            "has_references": 0,
+            "heading_id": None,
+            "range_partner_id": None,
+            "is_range_closer": 0,
+            "macro_command": "index",
+        })
+
+    def test_no_offer_when_there_are_no_legacy_xrefs(self, fresh_persistence, tmp_path, qtbot, monkeypatch):
+        asked = self._answer(monkeypatch, None)
+        controller, _view, _idx = _controller(fresh_persistence, tmp_path, qtbot)
+        controller.set_active_project(fresh_persistence, str(tmp_path))
+
+        assert controller.offer_migration_if_needed() is False
+        assert asked == []
+
+    def test_offers_and_opens_the_dialog_on_yes(self, fresh_persistence, tmp_path, qtbot, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+
+        asked = self._answer(monkeypatch, QMessageBox.StandardButton.Yes)
+        controller, _view, _idx = _controller(fresh_persistence, tmp_path, qtbot)
+        self._add_legacy_xref(fresh_persistence, tmp_path)
+        controller.set_active_project(fresh_persistence, str(tmp_path))
+
+        assert controller.offer_migration_if_needed() is True
+        assert len(asked) == 1
+        assert controller.migration_dialog is not None
+
+    def test_declining_records_the_choice_and_does_not_migrate(
+        self, fresh_persistence, tmp_path, qtbot, monkeypatch
+    ):
+        from PySide6.QtWidgets import QMessageBox
+
+        self._answer(monkeypatch, QMessageBox.StandardButton.No)
+        controller, _view, index_edit_ctrl = _controller(fresh_persistence, tmp_path, qtbot)
+        self._add_legacy_xref(fresh_persistence, tmp_path)
+        controller.set_active_project(fresh_persistence, str(tmp_path))
+
+        assert controller.offer_migration_if_needed() is False
+        assert index_edit_ctrl.deleted_ids == []
+        assert fresh_persistence.get_metadata_value(controller.MIGRATION_DECLINED_KEY) == "1"
+
+    def test_a_declined_project_is_never_asked_again(self, fresh_persistence, tmp_path, qtbot, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+
+        self._answer(monkeypatch, QMessageBox.StandardButton.No)
+        controller, _view, _idx = _controller(fresh_persistence, tmp_path, qtbot)
+        self._add_legacy_xref(fresh_persistence, tmp_path)
+        controller.set_active_project(fresh_persistence, str(tmp_path))
+        controller.offer_migration_if_needed()
+
+        asked_again = self._answer(monkeypatch, QMessageBox.StandardButton.Yes)
+
+        assert controller.offer_migration_if_needed() is False
+        assert asked_again == [], "the decline must persist across opens"
+
+    def test_no_offer_without_a_project_bound(self, fresh_persistence, tmp_path, qtbot, monkeypatch):
+        asked = self._answer(monkeypatch, None)
+        controller, _view, _idx = _controller(fresh_persistence, tmp_path, qtbot)
+        # set_active_project deliberately never called.
+
+        assert controller.offer_migration_if_needed() is False
+        assert asked == []
+
+
+class TestMigrationRefusals:
+    """
+    Both refusals abort BEFORE any macro is deleted, so a project that
+    can't be linked is left exactly as it was rather than half-migrated.
+
+    QMessageBox.warning is monkeypatched in each: it is a real modal, and
+    driving this path without suppressing it blocks the run forever
+    headlessly.
+    """
+
+    def test_refuses_when_no_base_document_is_set(self, fresh_persistence, tmp_path, qtbot, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+
+        warnings = []
+        monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warnings.append(a))
+
+        controller, _view, index_edit_ctrl = _controller(fresh_persistence, tmp_path, qtbot)
+        controller.set_active_project(fresh_persistence, str(tmp_path))
+        controller.run_migration_scan()
+
+        controller._on_migration_approved(
+            [{"unique_id_number": 1, "heading_raw_text": "Gadgets", "xref_type": "see", "target": "Widgets"}]
+        )
+
+        assert warnings, "the user must be told why nothing happened"
+        assert index_edit_ctrl.deleted_ids == []          # nothing deleted from source
+        assert fresh_persistence.fetch_project_cross_references() == []
+
+    def test_refuses_when_the_base_document_has_no_anchor(self, fresh_persistence, tmp_path, qtbot, monkeypatch):
+        r"""The injector needs \begin{document} to splice after."""
+        from PySide6.QtWidgets import QMessageBox
+
+        warnings = []
+        monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warnings.append(a))
+
+        controller, _view, index_edit_ctrl = _controller(fresh_persistence, tmp_path, qtbot)
+        base = tmp_path / "main.tex"
+        base.write_text("no anchor here at all\n", encoding="utf-8")
+        fresh_persistence.set_metadata_value("root_tex_file", str(base))
+        controller.set_active_project(fresh_persistence, str(tmp_path))
+        controller.run_migration_scan()
+
+        controller._on_migration_approved(
+            [{"unique_id_number": 1, "heading_raw_text": "Gadgets", "xref_type": "see", "target": "Widgets"}]
+        )
+
+        assert warnings
+        assert index_edit_ctrl.deleted_ids == []
         assert fresh_persistence.fetch_project_cross_references() == []
 
     def test_refresh_migration_dialog_contents_parses_legacy_candidates(self, fresh_persistence, tmp_path, qtbot):

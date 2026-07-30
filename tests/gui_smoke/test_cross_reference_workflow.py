@@ -65,3 +65,88 @@ def test_insert_cross_references_with_no_xrefs_shows_a_status_message_and_does_n
 
     assert main_tex.read_text(encoding="utf-8") == before
     assert "no cross-references" in pipeline_ctrl.window.status_bar.currentMessage().lower()
+
+
+# ---------------------------------------------------------------------------
+# Cross-references in the index tree
+# ---------------------------------------------------------------------------
+
+def _tree_tokens(tree) -> list[str]:
+    """Every node's ToolTipRole token, depth-first."""
+    from PySide6.QtCore import Qt
+
+    found = []
+
+    def _walk(item):
+        for row in range(item.rowCount()):
+            child = item.child(row, 0)
+            if child is None:
+                continue
+            found.append(str(child.data(Qt.ItemDataRole.ToolTipRole) or ""))
+            _walk(child)
+
+    _walk(tree.base_model.invisibleRootItem())
+    return found
+
+
+def test_adding_a_cross_reference_shows_it_in_the_index_tree(opened_project):
+    """
+    Entries created in the Cross-References tab live only in
+    project_cross_references and are rendered into cross_refs.tex, which
+    is excluded from every scan -- so nothing ever put them in the tree.
+    """
+    pipeline_ctrl, _project_dir = opened_project
+
+    pipeline_ctrl.cross_reference_ctrl._on_add_requested("Widgets", "see", "Gadgets")
+
+    assert "see{Gadgets}" in _tree_tokens(pipeline_ctrl.index_tree_widget)
+
+
+def test_removing_a_cross_reference_takes_it_back_out_of_the_tree(opened_project):
+    pipeline_ctrl, _project_dir = opened_project
+    pipeline_ctrl.cross_reference_ctrl._on_add_requested("Widgets", "see", "Gadgets")
+    rows = pipeline_ctrl.scope_ctrl.get_persistence_model().fetch_project_cross_references()
+
+    pipeline_ctrl.cross_reference_ctrl._on_remove_requested([rows[0]["id"]])
+
+    assert "see{Gadgets}" not in _tree_tokens(pipeline_ctrl.index_tree_widget)
+
+
+def test_migrating_a_legacy_cross_reference_does_not_make_it_vanish(opened_project, monkeypatch):
+    r"""
+    The reported symptom that started this work. Migration deletes the
+    inline \index{X|see{Y}} from the source -- removing the reference row
+    the tree was drawing -- and re-homes it in project_cross_references,
+    which the tree did not read. The entry disappeared from the index
+    tree entirely, so the migration tool looked like it destroyed data.
+
+    The sample project's chapter10.tex carries a real legacy see{} for
+    exactly this case.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+
+    pipeline_ctrl, _project_dir = opened_project
+    persistence = pipeline_ctrl.scope_ctrl.get_persistence_model()
+    candidates = persistence.fetch_legacy_cross_reference_candidates()
+    assert candidates, "sample project is expected to have a legacy cross-reference"
+
+    from models import index_tag_grammar as grammar
+
+    spec = grammar.parse_encap_xref(candidates[0]["encap"])
+    enriched = dict(candidates[0], xref_type=spec.kind, target=spec.target)
+
+    pipeline_ctrl.cross_reference_ctrl.run_migration_scan()
+    pipeline_ctrl.cross_reference_ctrl._on_migration_approved([enriched])
+
+    # It moved tables...
+    assert persistence.fetch_legacy_cross_reference_candidates() == []
+    assert any(
+        row["target_heading"] == spec.target
+        for row in persistence.fetch_project_cross_references()
+    )
+    # ...and it is still visible in the tree.
+    assert grammar.build_encap_xref(spec.kind, spec.target) in _tree_tokens(
+        pipeline_ctrl.index_tree_widget
+    )

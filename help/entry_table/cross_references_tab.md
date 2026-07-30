@@ -31,11 +31,17 @@ Adding cross-references here updates `cross_refs.tex` (in the project root) auto
 
 You only need to run this once per base document. After that, `cross_refs.tex` keeps itself up to date as you add, edit, or remove cross-references — there's no need to re-run the Tools menu action. It's only enabled once a project is open and a base file has been chosen.
 
+Migrating legacy cross-references (below) inserts this line for you, so if you migrate you don't need to run the Tools action separately.
+
 ## Migrating legacy cross-references
 
-Before this tab existed, cross-references were created inline — a "see"/"see also" pointer written directly into an ordinary `\index` macro in whichever chapter file happened to contain it, indistinguishable from the entry's real occurrences. Cross-references created that way don't automatically appear in the Xref Table.
+Before this tab existed, cross-references were created inline — a "see"/"see also" pointer written directly into an ordinary `\index` macro in whichever chapter file happened to contain it, indistinguishable from the entry's real occurrences. This is the usual state of a set of `.tex` files that were indexed before being brought into a project here. Cross-references written that way don't automatically appear in the Xref Table.
 
-**Tools → Migrate Legacy Cross-References...** scans the project for them and shows a checklist — heading, file and line, and the see/see also target for each. Every item starts checked. Uncheck anything you don't want moved, then click **Migrate Selected**: each one is removed from its original `.tex` file and added to the Xref Table (and so to `cross_refs.tex`) instead. This is only meaningful with a project open — it doesn't require a base file to be chosen first.
+**If a project contains any, you'll be asked about them when it opens** — a prompt offers to review them, and choosing **Yes** opens the same checklist described below. Choosing **No** won't ask again for that project; the Tools action stays available whenever you want it.
+
+**Tools → Migrate Legacy Cross-References...** scans the project and shows a checklist — heading, file and line, and the see/see also target for each. Every item starts checked. Uncheck anything you don't want moved, then click **Migrate Selected**: each one is removed from its original `.tex` file and added to the Xref Table (and so to `cross_refs.tex`) instead.
+
+**A base document has to be chosen first.** Migrating removes each pointer from your source files, and `cross_refs.tex` only reaches the compiled index through the `\input` line that goes into the base document — so migration adds that line as part of the same step, and refuses to run at all if there's nowhere to put it. Nothing is removed from your files unless the link can be made. If you see a message about no base document, set one (right-click a file in Workspace Files → **Set as root file**) and try again.
 
 ## See also
 

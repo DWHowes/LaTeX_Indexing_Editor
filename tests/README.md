@@ -786,6 +786,15 @@ click that can never come headlessly. See
 `test_shows_warning_dialog_on_failure` for the pattern:
 `monkeypatch.setattr(QMessageBox, "warning", ...)`.
 
+**Adding a modal to an existing code path is the same hazard in reverse.**
+Tests that already drive that path don't start failing — they start *hanging*,
+which reads like a slow suite or a deadlock rather than a broken test. Before
+introducing a `QMessageBox` into existing code, grep the suite for callers of
+the method you're adding it to and monkeypatch them in the same commit.
+`CrossReferenceController._ensure_cross_refs_file_is_linked` is the worked
+example: `test_cross_reference_controller.py` was already calling
+`_on_migration_approved` directly, so the new guard's warning wedged the run.
+
 ### Stale lambdas outliving the object they close over
 
 Found while writing `test_live_insertion_persistence.py`, and a real app bug,

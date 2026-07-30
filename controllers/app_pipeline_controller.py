@@ -312,6 +312,9 @@ class AppPipelineController(QObject):
         self.index_edit_ctrl.heading_rename_conflict.connect(self._handle_heading_rename_conflict)
         self.index_edit_ctrl.heading_renamed.connect(self._handle_heading_renamed)
         self.index_edit_ctrl.command_recorded.connect(self._record_index_command)
+        self.cross_reference_ctrl.cross_references_changed.connect(
+            self._refresh_cross_reference_tree_nodes
+        )
 
         if self.idx_ctrl:
             self._index_context_manager.delete_tree_term_triggered.connect(self._handle_index_deletion_request)
@@ -416,6 +419,29 @@ class AppPipelineController(QObject):
 
         self._refresh_undo_actions()
             
+    def _fetch_managed_cross_references(self) -> list:
+        r"""
+        The project_cross_references rows, for the index tree.
+
+        These never arrive through the reference payload: they have no
+        \index macro in any scanned file (they live in cross_refs.tex,
+        which is excluded from every scan), so without this the tree
+        simply never sees them.
+        """
+        persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+        return persistence.fetch_project_cross_references() if persistence else []
+
+    @Slot()
+    def _refresh_cross_reference_tree_nodes(self) -> None:
+        """
+        Re-renders the tree's managed cross-reference nodes after the
+        Cross-References tab adds, edits, removes or migrates one.
+        """
+        if self.index_tree_widget is not None:
+            self.index_tree_widget.refresh_cross_reference_nodes(
+                self._fetch_managed_cross_references()
+            )
+
     def _record_insertion_command(self, entry_dict: dict, parts_list: list, label: str) -> None:
         r"""
         Records a newly inserted \index macro so Ctrl+Z can remove it --
@@ -885,7 +911,8 @@ class AppPipelineController(QObject):
             self.idx_ctrl.sync_loaded_project_data(
                 files=file_tree_payload,
                 categories=headings,
-                indices=references
+                indices=references,
+                cross_references=self._fetch_managed_cross_references(),
             )
             self.idx_ctrl.clear_staged_entries()
 
@@ -969,6 +996,13 @@ class AppPipelineController(QObject):
         # and would otherwise just get overwritten by the rest of this method.
         if not needs_db_write:
             self._check_for_external_drift_and_prompt(file_tree_payload)
+
+        # Offered after the drift check, for the same reason that one runs
+        # last: a "yes" there re-populates everything via
+        # _resync_index_data_from_disk, which would leave this offer
+        # describing candidate ids that no longer exist.
+        if self.cross_reference_ctrl is not None:
+            self.cross_reference_ctrl.offer_migration_if_needed()
 
         if self._load_thread and self._load_thread.isRunning():
             self._load_thread.quit()
@@ -1334,7 +1368,10 @@ class AppPipelineController(QObject):
         self.index_tree_widget.reset_tree_model()
 
         if self.idx_ctrl:
-            self.idx_ctrl.sync_loaded_project_data(files=[], categories=headings, indices=references)
+            self.idx_ctrl.sync_loaded_project_data(
+                files=[], categories=headings, indices=references,
+                cross_references=self._fetch_managed_cross_references(),
+            )
             self.idx_ctrl.clear_staged_entries()
 
         self.entry_modifier_model.load_records(references)

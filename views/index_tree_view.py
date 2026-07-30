@@ -82,6 +82,11 @@ class IndexTreeView(QTreeView):
     # path, line, col, fallback_label, absolute_position, absolute_end, macro_command, unique_id_number
     coordinate_navigation_requested = Signal(str, int, int, str, object, object, str, object)
 
+    #: Marks a node this view rendered from project_cross_references, so
+    #: refresh_cross_reference_nodes can replace exactly those and leave
+    #: inline see/seealso tokens (which belong to real headings) alone.
+    MANAGED_XREF_ROLE = Qt.ItemDataRole.UserRole + 30
+
     def __init__(self, model_engine, parent=None):
         super().__init__(parent)
         self.engine = model_engine  # Injected data model engine layer
@@ -351,8 +356,8 @@ class IndexTreeView(QTreeView):
         self.base_model.setHorizontalHeaderLabels(["Index Terms", "References"])
         self.formatting_delegate.clear_cache()
 
-    @Slot(list, list)
-    def populate_hierarchy_tree(self, headings: list, references: list):
+    @Slot(list, list, list)
+    def populate_hierarchy_tree(self, headings: list, references: list, cross_references: list = None):
         """
         Receives backend data payloads and renders tree columns.
         Strict MVC: Renders GUI elements here while delegating string logic to the engine.
@@ -362,8 +367,11 @@ class IndexTreeView(QTreeView):
         self.setSortingEnabled(False)
         try:
             self.reset_tree_model()
-            if not headings: return
-
+            # Deliberately no early return on empty headings: a project can
+            # legitimately have cross-references and no headings at all. A
+            # "see" source very often exists ONLY as the pointer -- it has
+            # no page references anywhere -- so bailing here would drop
+            # exactly the entries that have nothing else to draw them.
             id_to_refs = {}
             for ref in (references or []):
                 if not ref: continue
@@ -377,7 +385,7 @@ class IndexTreeView(QTreeView):
                 if h_id is not None:
                     id_to_refs.setdefault(int(h_id), []).append(ref)
 
-            for head in headings:
+            for head in (headings or []):
                 if not head: continue
                 heading_raw = head.get("heading_text") or head.get("name") or ""
                 if not heading_raw: continue
@@ -401,6 +409,10 @@ class IndexTreeView(QTreeView):
                         r_dict["entry_path_latex_format"] = grammar.join_levels(parts)
 
                 self._insert_visual_node(self.base_model.invisibleRootItem(), parts, associated_refs)
+
+            # Managed cross-references go in last, so their source
+            # headings already exist as nodes to attach under.
+            self._insert_cross_reference_nodes(cross_references)
         finally:
             self.base_model.blockSignals(False)
             self.setSortingEnabled(True)
@@ -409,10 +421,15 @@ class IndexTreeView(QTreeView):
             self._suppress_transaction_compilation = False
 
     def _insert_visual_node(self, parent_item, remaining_parts: list, refs: list):
-        """Appends nodes recursively, pulling string parsing rules from the engine model."""
+        """
+        Appends nodes recursively, pulling string parsing rules from the
+        engine model. Returns the deepest node created or found, so a
+        caller that needs to tag the leaf (see
+        _insert_cross_reference_nodes) can do so without re-walking.
+        """
         # Delegate input parsing back down to the Model Layer
         sanitize_result = self.engine.sanitize_hierarchical_input(remaining_parts)
-        if not sanitize_result: return
+        if not sanitize_result: return None
         current_token, path_tail = sanitize_result
 
         # Delegate keyword evaluation rules back down to the Model Layer
@@ -420,7 +437,7 @@ class IndexTreeView(QTreeView):
 
         # Look up existing matching tokens and register structural branches
         target_branch = self._find_or_create_row(parent_item, current_token, display_text, is_xref)
-        self._populate_row_metadata(target_branch, path_tail, refs, is_xref)
+        return self._populate_row_metadata(target_branch, path_tail, refs, is_xref)
 
     def _find_or_create_row(self, parent_item, current_token: str, display_text: str, is_xref: bool):
         """Finds an existing node or appends a new row item with proper visual styling."""
@@ -455,8 +472,7 @@ class IndexTreeView(QTreeView):
         sibling_ref_item = actual_parent.child(row_idx, 1)
 
         if len(path_tail) != 0:
-            self._insert_visual_node(target_branch, path_tail, refs)
-            return
+            return self._insert_visual_node(target_branch, path_tail, refs)
 
         if sibling_ref_item and not is_xref:
             role_uid = Qt.ItemDataRole.UserRole + 1
@@ -502,6 +518,79 @@ class IndexTreeView(QTreeView):
                 sibling_ref_item.setText(" ".join([f"[{rc['unique_id_number']}]" for rc in new_records]))
                 if self.style():
                     sibling_ref_item.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
+
+        return target_branch
+
+    # ------------------------------------------------------------------
+    # Managed cross-references
+    # ------------------------------------------------------------------
+
+    def _insert_cross_reference_nodes(self, cross_references: list) -> None:
+        r"""
+        Renders the project's managed cross-references (the
+        project_cross_references rows behind cross_refs.tex) as leaf nodes
+        under their source heading.
+
+        These are display-only by construction rather than by a special
+        case: each is inserted as a "see{Target}" token, which
+        IndexTreeModelEngine.evaluate_node_type already recognizes -- it
+        renders as an italic "See Target" and _populate_row_metadata
+        deliberately attaches no reference records to it. With no records
+        there is no "[12]" bracket text for IndexLinkDelegate to paint and
+        therefore nothing to click, which is exactly right: a managed
+        cross-reference has no \index macro anywhere in the source and so
+        no location to navigate to.
+
+        Cross-references written inline in the source are NOT handled here
+        -- they are ordinary reference rows with real coordinates, and
+        they keep appearing as ordinary entries, clickable like any other.
+        The visual difference between the two reflects a real one.
+        """
+        root = self.base_model.invisibleRootItem()
+        for row in (cross_references or []):
+            source = str(row.get("source_heading") or "")
+            target = str(row.get("target_heading") or "")
+            xref_type = str(row.get("xref_type") or "see")
+            if not source or not target:
+                continue
+
+            parts = grammar.level_path(source)
+            if not parts:
+                continue
+            parts.append(grammar.build_encap_xref(xref_type, target))
+
+            node = self._insert_visual_node(root, parts, [])
+            if node is not None:
+                node.setData(True, self.MANAGED_XREF_ROLE)
+
+    def refresh_cross_reference_nodes(self, cross_references: list) -> None:
+        """
+        Replaces every managed cross-reference node with a freshly
+        rendered set. Called whenever the Cross-References tab changes the
+        table, so the tree keeps up without a full project reload.
+        """
+        self.setSortingEnabled(False)
+        try:
+            self._remove_managed_xref_nodes(self.base_model.invisibleRootItem())
+            self._insert_cross_reference_nodes(cross_references)
+        finally:
+            self.setSortingEnabled(True)
+            self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+            self.expandAll()
+
+    def _remove_managed_xref_nodes(self, parent_item) -> None:
+        """
+        Depth-first sweep removing only nodes this view tagged as managed
+        cross-references. Inline see/seealso tokens that happen to render
+        the same way are left alone -- they belong to real headings.
+        """
+        for row in range(parent_item.rowCount() - 1, -1, -1):
+            child = parent_item.child(row, 0)
+            if child is None:
+                continue
+            self._remove_managed_xref_nodes(child)
+            if child.data(self.MANAGED_XREF_ROLE):
+                parent_item.removeRow(row)
 
     def focusInEvent(self, event):
         """Intercepts focus restoration to update the reselection layout cache immediately."""

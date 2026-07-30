@@ -1,6 +1,7 @@
 import os
 
-from PySide6.QtCore import QObject, Slot
+from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtWidgets import QMessageBox
 
 from models.cross_reference_model import parse_encap_xref, render_cross_refs_file
 from views.legacy_xref_migration_dialog import LegacyXrefMigrationDialog
@@ -21,6 +22,12 @@ class CrossReferenceController(QObject):
     staging/dirty-tracking here: every committed table edit writes straight
     through.
     """
+
+    #: Emitted whenever project_cross_references changes, so the index
+    #: tree can re-render its managed cross-reference nodes. Fired from
+    #: _regenerate_cross_refs_file, which every mutating path already
+    #: calls -- one hook rather than four.
+    cross_references_changed = Signal()
 
     def __init__(self, window, view, index_model_engine, index_edit_ctrl, doc_io, file_watcher=None, parent=None):
         super().__init__(parent or window)
@@ -81,6 +88,7 @@ class CrossReferenceController(QObject):
         content = render_cross_refs_file(rows)
         path = os.path.join(self._project_root, "cross_refs.tex")
         self._doc_io.write_generated_file(path, content)
+        self.cross_references_changed.emit()
 
     @Slot(str, str, str)
     def _on_add_requested(self, source_raw: str, xref_type: str, target: str) -> None:
@@ -115,6 +123,60 @@ class CrossReferenceController(QObject):
     # Legacy migration -- wired to the "Migrate Legacy Cross-References..."
     # Tools menu action
     # ------------------------------------------------------------------
+
+    #: Set once the user declines the automatic offer, so a project they
+    #: have deliberately left alone stops asking on every open. Tools ->
+    #: Migrate Legacy Cross-References... is unaffected and always
+    #: available.
+    MIGRATION_DECLINED_KEY = "legacy_xref_migration_declined"
+
+    def offer_migration_if_needed(self) -> bool:
+        """
+        Called once a project has finished loading. Offers to migrate any
+        cross-references written directly into the source files.
+
+        Returns True if the migration dialog was opened.
+
+        The offer exists because the two kinds are stored differently and
+        only one of them is visible in the index tree: a pointer written
+        inline as \\index{X|see{Y}} is an ordinary reference row, while
+        one created in the Cross-References tab lives in
+        project_cross_references and is rendered into cross_refs.tex.
+        Migrating unifies them. Nothing is migrated without the user
+        approving the specific entries in the dialog -- this only asks.
+        """
+        if self._persistence is None:
+            return False
+        if str(self._persistence.get_metadata_value(self.MIGRATION_DECLINED_KEY) or "") == "1":
+            return False
+
+        candidates = self._persistence.fetch_legacy_cross_reference_candidates()
+        if not candidates:
+            return False
+
+        count = len(candidates)
+        plural = "s" if count != 1 else ""
+        answer = QMessageBox.question(
+            self._window,
+            "Cross-references found in your source files",
+            f"This project has {count} cross-reference{plural} written directly "
+            f"into the .tex source.\n\n"
+            "Those are only visible as ordinary index entries. Moving them into "
+            "the managed cross-references file lists them in the Cross-References "
+            "tab and keeps them all in one place.\n\n"
+            "Review them now?\n\n"
+            "(Choosing No won't ask again for this project — Tools → Migrate "
+            "Legacy Cross-References... is always available.)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+
+        if answer != QMessageBox.StandardButton.Yes:
+            self._persistence.set_metadata_value(self.MIGRATION_DECLINED_KEY, "1")
+            return False
+
+        self.run_migration_scan()
+        return True
 
     @Slot()
     def run_migration_scan(self) -> None:
@@ -155,8 +217,62 @@ class CrossReferenceController(QObject):
 
         self.migration_dialog.populate_candidates(rows)
 
+    def _ensure_cross_refs_file_is_linked(self) -> str | None:
+        r"""
+        Guarantees \input{cross_refs.tex} is present in the base document,
+        and reports the base document's path.
+
+        Returns None -- meaning "do not migrate" -- if there is no base
+        document set, or if the splice could not be made (the injector
+        needs a \begin{document} anchor and fails without one).
+
+        This runs BEFORE any macro is deleted, deliberately. Migration
+        removes a \index{X|see{Y}} from the source and re-homes it in
+        cross_refs.tex, which only reaches the compiled index through
+        that \input line. Doing it the other way round -- migrate, then
+        try to link -- means a failed splice leaves the project with its
+        cross-references deleted from the source and nothing pulling
+        their replacement in: the document still compiles, and the index
+        silently comes out missing every see-reference. The injector is
+        idempotent (it strips and re-inserts its own marker block), so
+        running it first costs nothing when it is already there.
+        """
+        if self._persistence is None or self._doc_io is None:
+            return None
+
+        root_tex_file = self._persistence.get_metadata_value("root_tex_file")
+        if not root_tex_file:
+            QMessageBox.warning(
+                self._window,
+                "No base document",
+                "Cross-references can't be migrated yet because this project has "
+                "no base document set.\n\n"
+                "Migrating moves each pointer out of your source files and into "
+                "cross_refs.tex, which only takes effect once it is linked into "
+                "the base document — so there is nowhere to link it yet.\n\n"
+                "Set a base document (right-click a file in Workspace Files → "
+                "\"Set as root file\") and try again.",
+            )
+            return None
+
+        if not self._doc_io.inject_cross_references(root_tex_file):
+            QMessageBox.warning(
+                self._window,
+                "Could not link cross-references file",
+                f"\\input{{cross_refs.tex}} could not be added to "
+                f"{os.path.basename(root_tex_file)}, so nothing has been migrated.\n\n"
+                "The base document needs a \\begin{document} line for the link to "
+                "be placed after it.",
+            )
+            return None
+
+        return root_tex_file
+
     @Slot(list)
     def _on_migration_approved(self, candidates: list) -> None:
+        if self._ensure_cross_refs_file_is_linked() is None:
+            return
+
         migrated = 0
         failed = 0
 

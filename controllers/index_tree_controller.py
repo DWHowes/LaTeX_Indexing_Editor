@@ -6,7 +6,8 @@ class IndexTreeController(QObject):
     Strict MVC: Contains zero data regex parsing, zero layout coloring,
     and zero explicit font modifications.
     """
-    tree_population_requested = Signal(list, list) # Instructs view to repaint
+    # headings, references, managed cross-references
+    tree_population_requested = Signal(list, list, list) # Instructs view to repaint
 
     def __init__(self, data_model_engine, parent=None):
         super().__init__(parent)
@@ -41,26 +42,35 @@ class IndexTreeController(QObject):
     @Slot(list, list)
     def populate_from_worker_payloads(self, headings: list, references: list):
         """Passes raw background payloads straight to the presentation view."""
-        self.tree_population_requested.emit(headings, references)
+        self.tree_population_requested.emit(headings, references, [])
 
-    @Slot(list, list, list)
-    def sync_loaded_project_data(self, files: list, categories: list, indices: list) -> None:
+    @Slot(list, list, list, list)
+    def sync_loaded_project_data(
+        self, files: list, categories: list, indices: list, cross_references: list = None
+    ) -> None:
         """
         Traffic Routing Gateway Contract.
         Accepts pre-compiled data frames directly from the background loaders.
+
+        cross_references carries the project_cross_references rows, which
+        have no \\index macro in any scanned file and so never arrive via
+        the reference payload -- they have to be passed in separately for
+        the tree to show them at all.
         """
         # If we have pre-compiled categories/indices, use them directly
         if categories:
             self.model_engine.ingest_pre_parsed_project_dataset(
-                headings=categories, 
+                headings=categories,
                 references=indices if indices else []
             )
-            self.tree_population_requested.emit(categories, indices if indices else [])
+            self.tree_population_requested.emit(
+                categories, indices if indices else [], cross_references or []
+            )
             return
 
         # Fallback: If no pre-compiled data is passed, let the application know it's empty
         self.model_engine.clear_active_manifests()
-        self.tree_population_requested.emit([], [])
+        self.tree_population_requested.emit([], [], [])
 
     @Slot(list)
     def process_and_populate_raw_project_paths(self, absolute_paths: list[str]) -> None:
@@ -75,4 +85,4 @@ class IndexTreeController(QObject):
         headings, references = self.model_engine.scrape_and_compile_paths(absolute_paths)
         
         # Stream data payloads cleanly across decoupled lines to the view layer
-        self.tree_population_requested.emit(headings, references)
+        self.tree_population_requested.emit(headings, references, [])
