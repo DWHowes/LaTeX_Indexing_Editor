@@ -5,6 +5,7 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem, QCursor, QFontMetri
 from PySide6.QtCore import Qt, Signal, Slot, QModelIndex, QSortFilterProxyModel, QItemSelectionModel, QElapsedTimer
 
 from controllers.app_style_configuration import AppStyleConfiguration
+from models import index_tag_grammar as grammar
 from views.index_text_formatter_delegate import IndexTextFormatterDelegate
 from views.index_link_delegate import IndexLinkDelegate
 
@@ -381,9 +382,15 @@ class IndexTreeView(QTreeView):
                 heading_raw = head.get("heading_text") or head.get("name") or ""
                 if not heading_raw: continue
 
-                # Clean structural formatting primitives
-                clean = heading_raw.replace(r'\string', '').strip().replace("/", "!")
-                parts = [p.strip() for p in clean.split("!") if p.strip()]
+                # Clean structural formatting primitives. The "/" -> "!"
+                # substitution is display-side leniency for legacy
+                # slash-separated headings -- nothing in the app writes
+                # them any more, but old projects may still hold them, so
+                # it is kept deliberately rather than folded into the
+                # grammar module. Level splitting itself is now brace-aware,
+                # so a heading like "Chapter {A!B}" stays one level.
+                clean = grammar.strip_string_macro(heading_raw).strip().replace("/", grammar.LEVEL_SEPARATOR)
+                parts = grammar.split_levels_clean(clean)
                 if not parts: continue
 
                 h_id = head.get("id")
@@ -391,7 +398,7 @@ class IndexTreeView(QTreeView):
 
                 for r_dict in associated_refs:
                     if isinstance(r_dict, dict):
-                        r_dict["entry_path_latex_format"] = "!".join(parts)
+                        r_dict["entry_path_latex_format"] = grammar.join_levels(parts)
 
                 self._insert_visual_node(self.base_model.invisibleRootItem(), parts, associated_refs)
         finally:

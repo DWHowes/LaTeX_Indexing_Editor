@@ -1,6 +1,8 @@
 import os
 import re
 
+from models import index_tag_grammar as grammar
+
 class IndexTreeModelEngine:
     """
     Business Logic & Data Model.
@@ -96,7 +98,7 @@ class IndexTreeModelEngine:
         """Compiles uncommitted metadata parameters for database staging."""
         self._staged_db_entries.append({
             "unique_id_number": int(aid),
-            "heading_raw_text": "!".join(clean_parts),
+            "heading_raw_text": grammar.join_levels(clean_parts),
             "file_path": os.path.normpath(str(ref_data.get("file_path", ""))),
             "line_number": int(ref_data.get("line_number", 0)),
             "column_offset": int(ref_data.get("column_offset", 0)),
@@ -153,10 +155,10 @@ class IndexTreeModelEngine:
             raw_full = str(heading.get("heading_text") or "").strip()
             if not raw_full:
                 continue
-            raw = raw_full.split("!", 1)[0].strip()
+            raw = grammar.split_levels(raw_full)[0].strip()
             if not raw or raw in seen:
                 continue
-            display = raw.partition("@")[2].strip() if "@" in raw else raw
+            display = grammar.display_of(raw)
             seen[raw] = display or raw
 
         return sorted(((display, raw) for raw, display in seen.items()), key=lambda pair: pair[0].lower())

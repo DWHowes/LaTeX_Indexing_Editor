@@ -2,6 +2,8 @@ import json
 import os
 from PySide6.QtCore import QObject, Signal
 
+from models import index_tag_grammar as grammar
+
 class EntryModifierModel(QObject):
     """
     Core Model Layer matching View and Controller structural design patterns.
@@ -23,16 +25,21 @@ class EntryModifierModel(QObject):
         return record.get("heading_raw_text", "") if record else ""
 
     def get_display_label(self, entry_id: int) -> str:
-        """Returns a human-readable label stripped of sort-key and encap syntax."""
-        raw = self.get_heading_text(entry_id)
-        # Take display portion of each level (post-@ if present), drop |encap
-        raw = raw.split("|")[0]
-        levels = raw.split("!")
-        display_parts = []
-        for level in levels:
-            _, _, disp = level.partition("@")
-            display_parts.append(disp if disp else level)
-        return " > ".join(p.strip() for p in display_parts if p.strip())
+        """
+        Returns a human-readable label stripped of sort-key and encap
+        syntax.
+
+        Previously hand-split on "|" and "!" and partitioned on "@", none
+        of which respected brace nesting: a heading like
+        "Chapter {A|B}!Sub" lost everything from the brace onward. Two
+        behaviour changes come with the grammar module, both deliberate:
+        braced separators are now left alone (the bug), and a level whose
+        display half is empty ("sortkey@") now contributes nothing rather
+        than falling back to showing the raw "sortkey@" text -- which is
+        what the tree has always shown for the same heading.
+        """
+        tag = grammar.parse_body(self.get_heading_text(entry_id))
+        return " > ".join(part for part in tag.display_levels if part)
     
     # ------------------------------------------------------------------
     # Cache management

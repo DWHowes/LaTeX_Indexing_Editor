@@ -3,6 +3,7 @@ import sqlite3
 import hashlib
 from pathlib import Path
 from PySide6.QtCore import QObject, Signal, Slot
+from models import index_tag_grammar as grammar
 from models.latex_index_parser import LatexIndexParser
 from models.latex_command_registry_model import LatexCommandRegistryModel
 
@@ -302,7 +303,7 @@ class ProjectLoadWorker(QObject):
                 if self._is_abort_requested: return headings_payload, references_payload
                 if not parts_list or not uid_dict: continue
                     
-                full_heading_path = "!".join(parts_list)
+                full_heading_path = grammar.join_levels(parts_list)
                 path_key = full_heading_path.lower().strip()
 
                 if path_key not in seen_headings:
@@ -372,9 +373,9 @@ class ProjectLoadWorker(QObject):
                 # pure document order. A ")" with no matching pending "("
                 # (malformed source) is left unlinked rather than guessed
                 # at.
-                if encap_value == "(":
+                if grammar.is_range_opener(encap_value):
                     pending_range_opens.setdefault(path_key, []).append(entry_dict)
-                elif encap_value == ")":
+                elif grammar.is_range_closer(encap_value):
                     open_queue = pending_range_opens.get(path_key)
                     opener_entry = open_queue.pop(0) if open_queue else None
                     if open_queue is not None and not open_queue:

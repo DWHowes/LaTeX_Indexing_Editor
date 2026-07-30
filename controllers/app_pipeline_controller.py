@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, Slot, QModelIndex, Qt, Signal
 from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplication, QProgressDialog
 from shiboken6 import isValid
 
+from models import index_tag_grammar as grammar
 from models.latex_entry_model import ReferenceCarrier
 from models.index_tree_model_engine import IndexTreeModelEngine
 from models.macro_id_generator import MacroIDGenerator
@@ -1737,7 +1738,7 @@ class AppPipelineController(QObject):
     def _handle_manual_index_insertion(self, parts_list: list, metadata: dict):
         entry_dict = {
             "unique_id_number":   metadata["id"],
-            "heading_raw_text":   "!".join(parts_list),
+            "heading_raw_text":   grammar.join_levels(parts_list),
             "file_path":          metadata.get("path", ""),
             "line_number":        metadata.get("line", 0),
             "column_offset":      metadata.get("col", 0),
@@ -1758,10 +1759,17 @@ class AppPipelineController(QObject):
         persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
         if persistence and not entry_dict["is_range_closer"]:
             heading_text = entry_dict["heading_raw_text"]
-            depth = heading_text.count("!")
+            # depth/parent come from the grammar module rather than
+            # heading_text.count("!") and a raw split. The two sibling
+            # paths here disagreed: this one derived the parent WITHOUT
+            # stripping the encap first, so a sub-entry carrying one
+            # ("Main!Sub|bold") got a parent heading row of "Main!Sub|bold"
+            # minus its last level -- a parent row that no other code path
+            # would ever resolve to again.
+            depth = grammar.depth_of(heading_text)
             parent_id = None
             if depth > 0:
-                parent_text = "!".join(heading_text.split("!")[:-1])
+                parent_text = grammar.parent_path(heading_text)
                 parent_id = persistence.resolve_or_insert_heading(
                     heading_text=parent_text,
                     name=parent_text,
@@ -2004,10 +2012,10 @@ class AppPipelineController(QObject):
             entry_dict["heading_id"] = heading_id_override
         else:
             heading_text = entry_dict["heading_raw_text"]
-            depth = heading_text.count("!")
+            depth = grammar.depth_of(heading_text)
             parent_id = None
             if depth > 0:
-                parent_text = "!".join(heading_text.split("|")[0].split("!")[:-1])
+                parent_text = grammar.parent_path(heading_text)
                 parent_id = persistence.resolve_or_insert_heading(
                     heading_text=parent_text, name=parent_text, depth=depth - 1, parent_id=None
                 )
@@ -2015,7 +2023,7 @@ class AppPipelineController(QObject):
                 heading_text=heading_text, name=heading_text, depth=depth, parent_id=parent_id
             )
 
-        parts_list = entry_dict["heading_raw_text"].split("|")[0].split("!")
+        parts_list = grammar.level_path(entry_dict["heading_raw_text"])
 
         if add_to_tree:
             self.window.latex_index_window.add_completion_entry(parts_list)

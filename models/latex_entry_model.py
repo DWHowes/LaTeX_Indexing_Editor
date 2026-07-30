@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass
 from typing import Optional, List
 
+from models import index_tag_grammar as grammar
+
 @dataclass
 class IndexEntryModel:
     main: str
@@ -20,12 +22,12 @@ class IndexEntryModel:
         val = value.strip()
         if not val:
             return None
-        if "@" in val:
+        if grammar.SORT_KEY_SEPARATOR in val:
             return val
         if r"\textit" in val or r"\textbf" in val:
             clean_key = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', val)
-            clean_key = clean_key.replace(r'\string', '').strip()
-            return f"{clean_key}@{val}"
+            clean_key = grammar.strip_string_macro(clean_key).strip()
+            return grammar.build_level(clean_key, val)
         return val
 
     def normalized_parts(self) -> List[str]:
@@ -42,7 +44,7 @@ class IndexEntryModel:
         return parts
 
     def chain(self) -> str:
-        return "!".join(self.normalized_parts())
+        return grammar.join_levels(self.normalized_parts())
 
     def metadata(self, assigned_id: int, path: str, line: int, col: int) -> dict:
         """

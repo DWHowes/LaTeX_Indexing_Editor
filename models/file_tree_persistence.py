@@ -6,6 +6,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QModelIndex, Qt
 
+from models import index_tag_grammar as grammar
+
 class FileTreePersistence:
     # Define roles as explicit class constants to isolate them from controllers
     DIRECTORY_FLAG_ROLE = Qt.ItemDataRole.UserRole
@@ -464,7 +466,7 @@ class FileTreePersistence:
                 cursor = conn.execute(
                     "SELECT unique_id_number, heading_raw_text, file_path, line_number, encap "
                     "FROM project_references "
-                    "WHERE encap LIKE 'see{%' OR encap LIKE 'seealso{%' "
+                    f"WHERE {grammar.SQL_IS_CROSS_REFERENCE} "
                     "ORDER BY heading_raw_text COLLATE NOCASE"
                 )
                 return [dict(row) for row in cursor.fetchall()]
@@ -952,18 +954,19 @@ class FileTreePersistence:
         makes has_references trustworthy across every existing project.
 
         Also does NOT use see_references/seealso_references directly --
-        LatexIndexParser._extract_see_modifiers populates those from the
+        index_tag_grammar.extract_see_modifiers populates those from the
         standard imakeidx pipe-modifier syntax too (\\index{term|see
         {Target}} / \\index{term|seealso{Target}}, no backslash -- LaTeX
         prepends one internally when expanding the pipe), not just the
         rarer backslash-prefixed \\see{...}/\\seealso{...} form embedded
         in display text. But that pipe syntax is captured into the encap
-        column regardless (LatexIndexParser via _strip_global_encap_safe,
-        and CrossReferenceController via cross_reference_model.
-        build_xref_index_macro for a cross-reference created through the
-        Cross-References tab), so encap LIKE 'see{%' / 'seealso{%' remains
-        the simplest signal both entry-creation paths agree on regardless
-        of DB vintage. Range closers are excluded from both counts --
+        column regardless (LatexIndexParser via index_tag_grammar.
+        split_encap, and CrossReferenceController via
+        cross_reference_model.build_xref_index_macro for a cross-reference
+        created through the Cross-References tab), so the encap LIKE
+        predicate -- index_tag_grammar.SQL_IS_CROSS_REFERENCE, used below
+        -- remains the simplest signal both entry-creation paths agree on
+        regardless of DB vintage. Range closers are excluded from both counts --
         they're the second half of one logical range entry, not an
         independent reference; the range's opener already accounts for it.
         """
@@ -977,7 +980,10 @@ class FileTreePersistence:
         if not self.db_path:
             return stats
 
-        is_cross_reference_sql = "(encap LIKE 'see{%' OR encap LIKE 'seealso{%')"
+        # SQLite cannot call into index_tag_grammar, so the see/seealso
+        # shape is spelled out once there as SQL_IS_CROSS_REFERENCE and
+        # reused here -- the two halves of the grammar stay in one file.
+        is_cross_reference_sql = grammar.SQL_IS_CROSS_REFERENCE
 
         try:
             with self._get_connection() as conn:
@@ -1042,7 +1048,7 @@ class FileTreePersistence:
                 cursor = conn.execute(
                     "SELECT unique_id_number, heading_id, file_path, line_number, "
                     "column_offset, absolute_position, encap FROM project_references "
-                    "WHERE NOT (encap LIKE 'see{%' OR encap LIKE 'seealso{%') "
+                    f"WHERE NOT {grammar.SQL_IS_CROSS_REFERENCE} "
                     "ORDER BY file_path, heading_id, absolute_position"
                 )
                 rows = [dict(row) for row in cursor.fetchall()]

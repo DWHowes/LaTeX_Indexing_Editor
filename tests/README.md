@@ -14,7 +14,7 @@ No display is required — `tests/conftest.py` forces `QT_QPA_PLATFORM=offscreen
 before anything imports PySide6, so the whole suite (including the tests
 that construct real widgets) runs headlessly in a plain terminal or CI.
 
-## Layout and layers
+## Layout
 
 ```
 tests/
@@ -27,503 +27,784 @@ tests/
   gui_smoke/                     # layer 5: drives the real app through actual user actions
 ```
 
-- **Layer 1 (unit)** — pure logic with no PySide6 dependency, now covering
-  every module identified for it: `latex_index_parser.py` (the deepest
-  coverage of any layer-1 module — highest historical defect density in the
-  project, the FIFO range-pairing fix and the `absolute_end` off-by-one both
-  originated there), `range_consistency_model.py`, `text_sanitizer.py`,
-  `macro_id_generator.py`, `rtf_export_model.py` (pure/file-based methods
-  only — `compile_to_aux`/`generate_ind_file` shell out to a real LaTeX
-  toolchain and remain the only genuinely out-of-scope pieces of the RTF
-  export pipeline; the controller/threading layer built around them is
-  now covered too, see layer 3 below), `name_inverter.py`'s offline
-  rule-based logic (`_fast_invert` and friends — the VIAF/LC network-calling
-  methods are likewise out of scope), and `cross_reference_model.py`.
-  Two real, pre-existing bugs in `_fast_invert` were found and confirmed
-  empirically while writing this coverage, not just inferred from reading
-  (an `UnboundLocalError` on any name where "del" is the Spanish connector,
-  and dead code — a regex guard that could never match — silently breaking
-  the documented two-token "Mac Donald" form). Both are now fixed, with
-  `test_two_token_mac_space_form_combines` and
-  `test_del_connector_does_not_crash` in `test_name_inverter.py` as
-  permanent regression coverage (no longer `xfail`). Also covers
-  `session_backup_manager.py` (real files under `tmp_path` throughout —
-  register/revert/restore-single/clear-all backup sequencing, no
-  os/shutil mocking, since the sequencing itself is the whole point),
-  `latex_entry_model.py` (`IndexEntryModel`/`ReferenceCarrier` — 
-  `process_field`'s `@`/`\textit`/`\textbf`/`\string` sort-key rules,
-  `normalized_parts`/`chain`, and `metadata`'s exact dict shape, all in
-  isolation beyond what `test_latex_index_controller_insert.py` exercises
-  end-to-end), `index_prefs_config_model.py` (`update_data`'s bool/int
-  coercion and legacy `ist_*`→`fmt_*` key migration, the `.ist`/`.xdy`
-  style-file generators and preamble/printindex snippet builders — exact
-  generated strings captured empirically from the real running code
-  rather than guessed, since the escaping is easy to get subtly wrong by
-  inspection alone — and the `seed_project_from_globals`/
-  `load_from_project`/`persist_to_project` round trip via the real
-  `fresh_persistence` fixture), and `help_content_model.py` (`load_toc`,
-  and `render_topic_html`'s Markdown-to-HTML conversion, heading-id
-  slugification, path-traversal refusal, and style templating — real
-  files under `tmp_path`, no `QTextBrowser`), and `theme_config_model.py`
-  (`ThemeConfigModel` — mirrors `IndexPrefsConfigModel`'s update/serialize/
-  seed/load/persist pattern for the dark/light colour dataclasses; see
-  `test_theme_config_model.py`). No new bugs found in any of these five —
-  all held up cleanly.
-- **Layer 2 (persistence)** — `FileTreePersistence` (real sqlite, real
-  temp files, no `QApplication` needed) and the synchronous, non-threaded
-  parts of `ProjectLoadWorker` (`scan_file_tree`, `load_tree_from_db`,
-  `scan_tex_files_for_index_data`, `compute_file_checksums`). Use the
-  `fresh_persistence` and `sample_project_dir` fixtures from the root
-  `conftest.py`.
-- **Layer 3 (controllers)** — `pytest-qt`'s `qtbot`, testing one controller
-  at a time. Covers `ProjectScopeController`, `PrunedFilesController`,
-  `EntryModifierController` (the staging live-preview sync), `IndexEditController`'s
-  rename and orphan-cleanup paths (a real `IndexTreeView` + `EntryModifierModel`
-  + `DocumentIOController` stack doing a real `.tex` rewrite, not stubbed —
-  see `test_index_edit_controller_rename_orphan.py`), `CrossReferenceController`,
-  `RangeConsistencyController`, `LatexIndexController`'s entry-creation
-  path (`handle_insert`/`insert_latex`/`_attach_byte_coordinates` — standard
-  and range-pair macro insertion, page-style/`encap` variants, custom
-  command names, byte-offset math, and the abort paths for an empty main
-  field, an unsaved/Untitled document, and no active editor tab; see
-  `test_latex_index_controller_insert.py`), and `ExternalFileWatcherEngine`
-  (register/unregister/pause/resume against a real `QFileSystemWatcher`,
-  and `_handle_external_file_modification`'s three outcomes — reload,
-  ignored-because-unregistered-or-deleted, and read-failure; see
-  `test_external_file_watcher_engine.py`), and `EntryModifierModel.
-  flush_dirty_to_db`'s see_references/seealso_references JSON-serialization
-  (see `test_entry_modifier_model_dirty_flush.py` — regression coverage
-  for a real, now-fixed bug: in-memory records carry these two fields as
-  plain Python lists, but `FileTreePersistence.update_reference_field`
-  expects a pre-serialized JSON string and silently fails the write
-  otherwise, so every dirty-rename flush for a freshly-scraped project was
-  failing), and the rest of `IndexEditController`'s surface beyond rename/
-  single-delete: the table-originated edit path (`handle_entry_table_edit`/
+Five sections follow, one per layer, then three cross-cutting sections:
+[Recurring bug families](#recurring-bug-families),
+[Gotchas when writing tests](#gotchas-when-writing-tests), and
+[The known-dead-signal xfail convention](#the-known-dead-signal-xfail-convention).
+
+**A note on how to extend this file.** Every entry below is anchored to a
+named module, test file or section — never to a position ("the five above",
+"see the previous paragraph", "as of today"). Positional and time-relative
+references were removed because they silently stopped being true as entries
+were appended over time. When you add coverage, add a named subsection or
+extend a named one, and link to sections by name.
+
+---
+
+## Layer 1 (unit)
+
+Pure logic with no PySide6 dependency, covering every module identified for
+it. One subsection per module; the two `\index`-grammar modules come first
+because they carry most of this layer's weight and most of its history.
+
+Each subsection is named for the module under test, whose tests live in the
+correspondingly named `tests/unit/models/test_<module>.py` — that mapping is
+1:1 throughout this layer, so individual filenames are only cited below when
+a specific test is being pointed at.
+
+### `index_tag_grammar.py`
+
+The single parser/serializer for `\index` tag structure: levels, encap, sort
+keys, see/seealso, range markers, heading depth/parent paths, and whole-tag
+`parse_body`/`parse_macro`/`IndexTag.to_macro`. Everything downstream trusts
+it about brace nesting, escapes and separator precedence, so
+`test_index_tag_grammar.py` is the deepest layer-1 file after
+`test_latex_index_parser.py`, and for the same reason. Two things are worth
+knowing before editing either file:
+
+- It was built by extracting `LatexIndexParser`'s private helpers, and the
+  parser now *calls* it — `_strip_global_encap_safe`, `_split_levels_safe`,
+  `_extract_display_string_safe`, `_extract_balanced_braces` and
+  `_extract_see_modifiers` were **deleted** from that class. Don't
+  reintroduce tag parsing there.
+- The tests landed and passed *before* any call site was converted, and
+  carried a parity class asserting every new function matched the parser's
+  original at each step of the migration. Once the parser itself was
+  converted that class became a tautology and was replaced by
+  `TestLatexIndexParserDelegation`, which asserts the delegation end-to-end
+  through `parse_file` instead.
+
+Converting the ~20 ad-hoc parsing sites it replaced surfaced several real,
+pre-existing bugs, all now fixed: `AppPipelineController`'s two sibling
+heading-resolution paths disagreed about whether to strip the encap before
+deriving a parent heading (so a sub-entry carrying one got a parent heading
+row nothing would ever resolve to again), and both derived depth from
+`heading_text.count("!")`, which counts separators inside braces and inside a
+`see{A!B}` encap; `EntryModifierList` turned out to hold a *fourth* complete
+implementation of the grammar (`_parse_heading_raw_text`), the exact inverse
+of `EntryModifierController._assemble_canonical_heading` and the likeliest
+pair to drift into another round-trip corruption; and
+`IndexEditController._substitute_token_in_heading` silently dropped a
+trailing `!` and used `.split("@")[0]`, which returns `"a{b"` for `a{b@c}d`.
+
+### `latex_index_parser.py`
+
+The deepest coverage of any layer-1 module: highest historical defect density
+in the project, with the FIFO range-pairing fix and the `absolute_end`
+off-by-one both originating here. Since the extraction described under
+[`index_tag_grammar.py`](#index_tag_grammarpy) it owns only the *scanning*
+problem — finding macro calls, skipping comments and optional arguments,
+scrubbing macro definitions, and turning positions into line/column
+coordinates — and delegates everything between the braces.
+
+### `name_inverter.py`
+
+The offline rule-based logic (`_fast_invert` and friends); the VIAF/LC
+network-calling methods are out of scope. Two real, pre-existing bugs were
+found here and confirmed empirically while writing this coverage, not just
+inferred from reading: an `UnboundLocalError` on any name where "del" is the
+Spanish connector, and dead code — a regex guard that could never match —
+silently breaking the documented two-token "Mac Donald" form. Both are now
+fixed, with `test_two_token_mac_space_form_combines` and
+`test_del_connector_does_not_crash` in `test_name_inverter.py` as permanent
+regression coverage (no longer `xfail`).
+
+### `rtf_export_model.py`
+
+Pure/file-based methods only. `compile_to_aux`/`generate_ind_file` shell out
+to a real LaTeX toolchain and remain the only genuinely out-of-scope pieces
+of the RTF export pipeline; the orchestration and threading built around them
+are covered under [RTF export orchestration](#rtf-export-orchestration).
+
+### `index_prefs_config_model.py`
+
+`update_data`'s bool/int coercion and legacy `ist_*`→`fmt_*` key migration,
+the `.ist`/`.xdy` style-file generators and preamble/printindex snippet
+builders, and the `seed_project_from_globals`/`load_from_project`/
+`persist_to_project` round trip via the real `fresh_persistence` fixture. The
+exact generated strings were captured empirically from the real running code
+rather than guessed — the escaping is easy to get subtly wrong by inspection
+alone. No bugs found.
+
+### `session_backup_manager.py`
+
+Register/revert/restore-single/clear-all backup sequencing, real files under
+`tmp_path` throughout, no os/shutil mocking, since the sequencing itself is
+the whole point. No bugs found.
+
+### `latex_entry_model.py`
+
+`IndexEntryModel`/`ReferenceCarrier`: `process_field`'s
+`@`/`\textit`/`\textbf`/`\string` sort-key rules, `normalized_parts`/`chain`,
+and `metadata`'s exact dict shape, all in isolation beyond what
+`test_latex_index_controller_insert.py` exercises end-to-end. No bugs found.
+
+### `help_content_model.py`
+
+`load_toc`, and `render_topic_html`'s Markdown-to-HTML conversion, heading-id
+slugification, path-traversal refusal, and style templating. Real files under
+`tmp_path`, no `QTextBrowser`. No bugs found.
+
+### `theme_config_model.py`
+
+Mirrors `IndexPrefsConfigModel`'s update/serialize/seed/load/persist pattern
+for the dark/light colour dataclasses. No bugs found.
+
+### `app_paths.py`
+
+`get_app_root()`'s dev-vs-frozen resolution; the PyInstaller branch is driven
+by monkeypatching `sys.frozen`/`sys.executable` rather than requiring a real
+frozen build.
+
+### `range_consistency_model.py`, `text_sanitizer.py`, `macro_id_generator.py`, `cross_reference_model.py`
+
+Covered with no special setup or fixtures beyond the defaults.
+
+---
+
+## Layer 2 (persistence)
+
+`FileTreePersistence` (real sqlite, real temp files, no `QApplication`
+needed) and the synchronous, non-threaded parts of `ProjectLoadWorker`
+(`scan_file_tree`, `load_tree_from_db`, `scan_tex_files_for_index_data`,
+`compute_file_checksums`). Use the `fresh_persistence` and
+`sample_project_dir` fixtures from the root `conftest.py`.
+
+Split by concern rather than by class: `test_schema_and_setup.py`,
+`test_reference_crud.py`, `test_project_files.py`,
+`test_metadata_and_commands.py`, `test_index_manifest.py`,
+`test_statistics_and_queries.py`, `test_cross_references.py`,
+`test_sync_checksums.py`, and `test_project_load_worker.py`.
+
+---
+
+## Layer 3 (controllers)
+
+`pytest-qt`'s `qtbot`, testing one controller at a time with hand-built
+collaborators.
+
+### Convention: prefer real collaborators over stubs
+
+Prefer real collaborators where they're cheap and side-effect-free — a stub
+view can silently mask a mismatch between what the controller assumes about
+the view's interface and what it actually is, which is exactly the kind of
+gap [layer 4](#layer-4-integration) exists to catch structurally but a
+narrower layer-3 test can catch functionally, one behavior at a time. Only
+fake collaborators whose own logic is already covered elsewhere and isn't
+what the test in question is about (e.g.
+`IndexEditController.handle_entry_deletion` is faked in the
+`CrossReferenceController`/`RangeConsistencyController` tests, since deletion
+mechanics are `IndexEditController`'s own tested responsibility, not theirs).
+
+### `DocumentIOController`
+
+`test_document_io_controller.py` gives it a dedicated file rather than only
+ever exercising it as a dependency of other controllers' tests:
+`check_unsaved_tex_changes`, `save_tex_file_to_disk`,
+`discard_unsaved_changes`, `handle_file_save_as_resolution`,
+`commit_all_open_buffers` (including the multi-tab and
+partial-write-failure cases), `compute_byte_offset` (both the
+`buffer_text`-supplied and real-file-read paths, including a
+multi-byte-UTF-8 case verifying actual byte math, not character count),
+`write_generated_file`, and the base-file splice injectors
+(`inject_latex_settings`/`inject_project_commands`/`inject_head_note`, each
+including their idempotent-rerun and missing-anchor-fails cases —
+`inject_cross_references` is covered under
+[Cross-references workflow](#cross-references-workflow) instead, so isn't
+duplicated here).
+
+Most importantly, this is the only file covering the **open-editor-tab
+branch** every write primitive (`rewrite_macro_span`,
+`insert_macro_at_position`, `read_macro_span`, `write_generated_file`, the
+splice injectors) has via `_find_open_editor` — every other test that drives
+these methods hits only the on-disk branch, since none of those stacks open
+the target file in a real tab. No app bugs found; everything here is real,
+pre-existing behavior, correctly implemented.
+
+### Write tracking and injection coordinate shift
+
+Two files cover the write-tracking/coordinate-integrity pair, both against
+real files under `tmp_path` and real `EditorTab`/`QTabWidget` instances (same
+`_open_tab` reparenting and pending-timer care as
+`test_document_io_controller.py` — see
+[Deferred rehighlight timers](#deferred-rehighlight-timers-on-editortab)):
+
+- `test_document_io_write_tracking.py` — the bookkeeping
+  `AppPipelineController._refresh_file_sync_checksums` consumes to decide
+  which files may have their `project_file_sync_state` row re-stamped on
+  save. The distinction it pins is the whole point: writes that leave the
+  DB's cached `\index` coordinates valid (macro rewrites and inserts, on disk
+  or in an open tab; buffer saves) count as *synced*, while writes that move
+  positions with nothing updating the DB to match (whole-file generation, and
+  an undo/redo in a tab) must mark the file *desynced* so the drift prompt
+  still fires. A desynced file stays desynced across later synced writes.
+- `test_injection_coordinate_shift.py` — `DocumentIOController`'s splice
+  helpers reporting their edits via `content_shifted`, replayed by
+  `AppPipelineController._handle_injected_content_shift` through
+  `EntryModifierModel.shift_coordinates_after`. Covers all four injectors
+  (settings preamble/printindex, custom commands, head note,
+  cross-references), stacked injections composing, a shorter re-injection
+  moving entries *back*, and a failed splice shifting nothing. See
+  [Cached coordinates going stale after a write](#cached-coordinates-going-stale-after-a-write)
+  for the bug family this belongs to.
+
+### `IndexEditController`
+
+- **Rename and orphan cleanup** — `test_index_edit_controller_rename_orphan.py`,
+  driving a real `IndexTreeView` + `EntryModifierModel` +
+  `DocumentIOController` stack through a real `.tex` rewrite, not stubbed.
+- **Table-originated edits** — `handle_entry_table_edit`/
   `_reconcile_heading_node`, including range-partner heading sync; see
-  `test_index_edit_controller_table_edit.py`), bulk node deletion
-  (`handle_node_deletion`/`count_refs_under_node`/`_prune_subtree_and_ancestors`,
-  including a real, now-fixed bug — see `test_index_edit_controller_bulk_deletion.py`),
-  and the two session-discard rollback paths (`discard_uncommitted_entry`,
-  `discard_dirty_edits`; see `test_index_edit_controller_discard.py`). The
-  table-edit file also needed the real `IndexTreeModelEngine` rather than a
-  bare `_active_headings`-only fake, since `_reconcile_heading_node`
-  re-attaches entries via `IndexTreeView.append_entry`, which calls the
-  engine's real `sanitize_hierarchical_input`/`evaluate_node_type` parsing
-  helpers — a `repository_model=None` engine is safe there because that
-  call site always passes `suppress_transaction=True`, so the one method
-  that would need a real repo (`compile_transaction_record`) never runs.
-  Two more real, pre-existing bugs surfaced and were fixed while writing
-  this coverage: `IndexTreeView.__init__` never initialized
-  `_suppress_transaction_compilation` (only ever assigned inside
-  `populate_hierarchy_tree`), so any code path reaching `append_entry`
-  before that method's first run crashed with `AttributeError`; and
-  `IndexEditController._prune_subtree_and_ancestors`'s ancestor sweep only
-  ever checked whether an ancestor node still had tree *children*, never
-  whether it still carried its own direct `\index` reference — deleting a
-  node's only child silently vanished a parent that still had, say,
-  `\index{Sports}` of its own the moment `\index{Sports!Football}` was its
-  last child, removing it from both the tree and `_active_headings` even
-  though the macro and DB row were untouched (see
-  `test_index_edit_controller_bulk_deletion.py`'s
-  `test_deleting_only_the_child_node_leaves_the_parents_own_reference_intact`).
-  Also covers the rest of `EntryModifierController`'s surface beyond the
-  staging live-preview slice: real row-finalize-on-focus-loss
-  (`_finalize_row_edit`, driven the way a real user edit does — via the
-  real view's own `dataChanged` → `entry_modifier_edit_committed` signal
-  chain, not a hand-called `_on_cell_edited`), context-menu delete
-  (`handle_context_menu_delete_request`, single/batch/declined/
-  dirty-in-progress-edit), and `invert_headings_for_selected` (see
-  `test_entry_modifier_controller_edit_delete_invert.py`). Found a third
-  instance of the see_references/seealso_references JSON-serialization
-  bug here too: `EntryModifierModel.register_new_entry` → `FileTreePersistence.
-  insert_reference` has the identical gap as `flush_dirty_to_db` above —
-  `AppPipelineController._build_duplicate_entry_dict` (the "Duplicate
-  reference(s)" action, see layer 5 below) copies these fields straight
-  from an already-loaded record, a real list, crashing the DB insert.
-  Fixed the same way, in `register_new_entry`; regression coverage added
-  to `test_entry_modifier_model_dirty_flush.py` alongside the original fix.
-  Also covers custom LaTeX command creation/management:
-  `LatexCommandRegistryModel` (the global, `QSettings`-backed command
-  registry — save/list/exists/remove/clear, and the static
-  `filter_indexing_newcommands` classifier; see
-  `test_latex_command_registry_model.py`), `CreateCommandController` (name/
-  body normalization and persistence in `_on_save_requested`, dialog
-  reuse, and a real dialog→controller→registry signal round trip; see
-  `test_create_command_controller.py`), and
-  `ProjectCommandManagerController` (bridging the global registry and a
-  project's own `project_custom_commands` table — add/remove,
-  `commands_changed` emission, and dialog list population; see
-  `test_project_command_manager_controller.py`). `QSettings` is
-  process-global state (the real Windows registry, or an `.ini` file
-  under `IniFormat`) — every file here has its own autouse fixture
-  redirecting it to a per-test `tmp_path` via `IniFormat`, the same
-  redirection `booted_app` does for the whole app, so these tests never
-  touch the real developer machine's registry. No new bugs found in any
-  of the three. Finally, `DocumentIOController` itself now has a
-  dedicated file (`test_document_io_controller.py`) rather than only
-  ever being exercised as a dependency of other controllers' tests:
-  `check_unsaved_tex_changes`, `save_tex_file_to_disk`,
-  `discard_unsaved_changes`, `handle_file_save_as_resolution`,
-  `commit_all_open_buffers` (including the multi-tab and
-  partial-write-failure cases), `compute_byte_offset` (both the
-  `buffer_text`-supplied and real-file-read paths, including a
-  multi-byte-UTF-8 case verifying actual byte math, not character
-  count), `write_generated_file`, and the base-file splice injectors
-  (`inject_latex_settings`/`inject_project_commands`/`inject_head_note`,
-  each including their idempotent-rerun and missing-anchor-fails cases —
-  `inject_cross_references` itself is already covered at the gui_smoke
-  layer, see below, so isn't duplicated here). Most importantly, this is
-  the first file to cover the **open-editor-tab branch** every write
-  primitive (`rewrite_macro_span`, `insert_macro_at_position`,
-  `read_macro_span`, `write_generated_file`, the splice injectors) has via
-  `_find_open_editor` — every other test that drives these methods
-  elsewhere in the suite only ever hits the on-disk branch, since none of
-  those stacks open the target file in a real tab. No app bugs found;
-  everything here is real, pre-existing behavior, correctly implemented.
-  Two more previously-zero-coverage areas: `IndexEditStagingModel` (the
-  session-only staging layer nearly every other controller test in this
-  suite already exercises indirectly via `stage_edit`/`commit`/`discard`,
-  but never for its own edge cases — the "stage back to the original
-  value still emits but clears dirty" case, auto-registration of an
-  unstaged id, `commit()`'s lack of a dirty guard; see
-  `test_index_edit_staging_model.py`, no bugs found), and Advanced Search
-  (`SearchWorker`'s exact/fuzzy line-by-line matching — called directly
-  and synchronously rather than through the real `SafeSearchThread`
-  QThread wrapper, same "drive the sync logic directly" approach as
-  `ProjectLoadWorker`, including column-offset accuracy on indented
-  lines and an unreadable-file-mid-scan case; see `test_search_worker.py`
-  — plus `AdvancedSearchWindow`'s own guards, result-tree grouping, and
-  navigation-signal wiring, including one real end-to-end run through
-  the actual threaded worker via `qtbot.waitUntil`; see
-  `test_advanced_search_window.py`). No bugs found in either — this
-  entire feature area had zero coverage before today despite being a
-  real, user-facing feature.
+  `test_index_edit_controller_table_edit.py`. This file needs the real
+  `IndexTreeModelEngine` rather than a bare `_active_headings`-only fake,
+  because `_reconcile_heading_node` re-attaches entries via
+  `IndexTreeView.append_entry`, which calls the engine's real
+  `sanitize_hierarchical_input`/`evaluate_node_type` parsing helpers. A
+  `repository_model=None` engine is safe there because that call site always
+  passes `suppress_transaction=True`, so `compile_transaction_record` — the
+  one method that would need a real repo — never runs.
+- **Bulk node deletion** — `handle_node_deletion`/`count_refs_under_node`/
+  `_prune_subtree_and_ancestors`; see
+  `test_index_edit_controller_bulk_deletion.py`.
+- **Session-discard rollback** — `discard_uncommitted_entry`,
+  `discard_dirty_edits`; see `test_index_edit_controller_discard.py`.
 
-  Also covers `context_menu_subsystem.py`'s three real right-click menus
-  (`IndexTreeContextMenuManager`, `FileTreeContextMenuManager`,
-  `EditEntryContextMenuManager`) — the signal-WIRING side of this exact
-  module already caused two historical bugs
-  (`prune_file_triggered`/`set_root_file_triggered` built but never
-  connected, caught structurally by `test_signal_wiring.py`), but the
-  menu-BUILDING logic itself (which actions appear, with what data,
-  enabled/disabled under which conditions) had never been tested: the
-  conditional Prune-action omission for the current root file, the
-  multi-selection-vs-clicked-row resolution shared by
-  delete/duplicate/invert-headings, and the Sub2-disables-Invert-headings
-  guard. See `test_context_menu_subsystem.py` — `populate_menu_actions`
-  is called directly and an action's `.trigger()` fires its handler
-  synchronously, so every case is covered without ever calling the real,
-  modal `QMenu.exec()`.
+Two real, pre-existing bugs surfaced while writing this coverage.
+`IndexTreeView.__init__` never initialized `_suppress_transaction_compilation`
+(it was only ever assigned inside `populate_hierarchy_tree`), so any code path
+reaching `append_entry` before that method's first run crashed with
+`AttributeError`. The second is described under
+[Ancestor pruning that ignores a node's own references](#ancestor-pruning-that-ignores-a-nodes-own-references).
 
-  Also covers the view-layer logic directly backing table/tree editing:
-  `EntryModifierList`'s hierarchy-validation gate (`_validate_hierarchy`/
-  `_on_cell_data_changed`/`_restore_row_from_stash` — this is the FIRST
-  gate any table-originated edit passes through before
-  `entry_modifier_edit_committed` can fire and drive the whole staging →
-  `.tex` write → DB flush pipeline; see
-  `test_entry_modifier_list_hierarchy_validation.py`), and
-  `IndexTreeView.append_entry`/`remove_last_entry`/`reinsert_entry` (the
-  tree's own undo/redo for a fresh live insertion, plus `append_entry`'s
-  `suppress_transaction`-gated DB-staging call, previously only ever
-  exercised with `suppress_transaction=True`; see
-  `test_index_tree_view_undo_redo.py`). **Found and fixed another real
-  bug of the exact same shape** as the one already fixed in
-  `IndexEditController._prune_subtree_and_ancestors` (see layer 3's bulk-
-  deletion coverage above): `remove_last_entry`'s ancestor-pruning loop
-  also only checked for tree *children*, never an ancestor's own direct
-  reference. Undoing a fresh insertion that reused an existing ancestor
-  node (one with its own, unrelated `\index` reference) silently deleted
-  that ancestor from the tree too, the instant its only child — the
-  just-undone insertion — was removed. Fixed the same way, via a new
-  `_node_has_own_refs` helper on `IndexTreeView`.
+### `EntryModifierController` and `EntryModifierModel`
 
-  Also covers the theme/preferences controller stack, all previously
-  zero-coverage: `PreferencesPersistence` (the global QSettings-backed
-  store — two one-time migrations that run on every construction, a
-  legacy QSettings org/app location and a legacy `ist_*`→`fmt_*` key
-  rename, plus `load_application_preferences`'s type coercion and
-  `geometry`/`state`/`splitter_state` hex-`QByteArray` round-tripping;
-  see `test_preferences_persistence.py`), `ThemeConfigController` (global-
-  vs-project routing for both loading and saving colours, and reapplying
-  the currently-active theme mode on acceptance; see
-  `test_theme_config_controller.py`), and `IndexPrefsConfigController`
-  (the same global-vs-project seed/load/persist orchestration, plus
-  delegating theme colours to `ThemeConfigController`; see
-  `test_index_prefs_config_controller.py`). **Found and fixed a real bug**
-  in `PreferencesPersistence.load_index_prefs`: its `coerce()` helper
-  compared `dataclasses.fields()`'s `.type` (an actual type object,
-  `bool`/`int`/`str`, since this module has no `from __future__ import
-  annotations`) against the *string* literals `"bool"`/`"int"` — never
-  matching, so every loaded value silently came back as a plain `str`
-  regardless of its real type. Harmless in practice today (the only real
-  caller, `IndexPrefsConfigModel.update_data()`, re-coerces from either
-  strings or already-typed values on the way in) but a real bug in this
-  method's own contract nonetheless — fixed by comparing against the
-  actual type objects (`t is bool`/`t is int`).
+- **Staging live-preview sync** — `test_entry_modifier_controller_staging_sync.py`.
+- **Row finalize, delete, invert** —
+  `test_entry_modifier_controller_edit_delete_invert.py`: real
+  row-finalize-on-focus-loss (`_finalize_row_edit`, driven the way a real user
+  edit does, via the view's own `dataChanged` →
+  `entry_modifier_edit_committed` signal chain, not a hand-called
+  `_on_cell_edited`), context-menu delete
+  (`handle_context_menu_delete_request` — single, batch, declined, and
+  dirty-in-progress-edit), and `invert_headings_for_selected`.
+- **JSON serialization of see/seealso references** —
+  `test_entry_modifier_model_dirty_flush.py`; see
+  [The see/seealso JSON serialization gap](#the-seeseealso-json-serialization-gap).
 
-  `test_rtf_export_controller.py` covers `IndexExportController`,
-  `RtfExportWorker`, and `RtfExportThread` — the RTF export pipeline's own
-  orchestration and threading, as distinct from `RtfExportEngine`'s
-  `compile_to_aux`/`generate_ind_file`, which shell out to a real
-  pdflatex/makeindex/xindy install and stay out of scope (see layer 1
-  above). `compile_to_aux`/`generate_ind_file` are monkeypatched at the
-  INSTANCE level to synthesize each stage's expected on-disk artifact (or
-  deliberately not), exercising every guard branch of
-  `export_project_to_rtf` — missing root file, missing aux with/without a
-  log tail, missing/empty `.idx`, an invalid `.ind`, a `parse_ind`
-  `FileNotFoundError` race, an `.ind` with no recognized entries — plus
-  the full success path (a real `.rtf` file is written and its content
-  checked), the `progress_callback` stage-ordering, and custom output
-  filenames. `RtfExportWorker.process()` is called directly for
-  deterministic signal-emission checks, and `RtfExportThread` is driven
-  through two real threaded runs via `qtbot.waitSignal` to prove the
-  `moveToThread`/signal-relay/`quit()`+`wait()` wiring itself, not just
-  the logic it wraps. No bugs were found in this layer — the
-  orchestration and threading held up cleanly.
+### `EntryModifierList` (view-layer logic)
 
-  Prefer real collaborators over stubs
-  where they're cheap and side-effect-free — a stub view can silently mask a
-  mismatch between what the controller assumes about the view's interface
-  and what it actually is, which is exactly the kind of gap layer 4 exists
-  to catch structurally but a narrower layer-3 test can catch functionally,
-  one behavior at a time. Only fake collaborators whose own logic is already
-  covered elsewhere and isn't what the test in question is about (e.g.
-  `IndexEditController.handle_entry_deletion` is faked in the
-  `CrossReferenceController`/`RangeConsistencyController` tests, since
-  deletion mechanics are `IndexEditController`'s own tested responsibility,
-  not theirs).
+The hierarchy-validation gate (`_validate_hierarchy`/`_on_cell_data_changed`/
+`_restore_row_from_stash`) — the FIRST gate any table-originated edit passes
+through before `entry_modifier_edit_committed` can fire and drive the whole
+staging → `.tex` write → DB flush pipeline. See
+`test_entry_modifier_list_hierarchy_validation.py`.
 
-  **Gotcha worth knowing**: `AppStyleConfiguration.event_broker()` is a
-  process-wide singleton (not per-`QApplication` or per-widget). Some real
-  view classes connect its `theme_mutated` signal to a raw lambda rather
-  than a bound method, so Qt's destroy-time auto-disconnect never fires for
-  it — constructing and destroying many short-lived widgets (e.g. a fresh
-  `IndexTreeView` per test) leaks a dead connection per instance. The root
-  `conftest.py`'s `_reset_theme_broker_connections` autouse fixture clears
-  every connection after each test so this can't accumulate across test
-  boundaries and crash a later, unrelated test the moment anything emits
-  `theme_mutated` again. You don't need to do anything about this yourself —
-  it's handled globally — but if you ever see
-  `RuntimeError: Internal C++ object ... already deleted` pointing at a
-  `theme_mutated`-connected lambda, this is why, and the fixture is the
-  first place to check.
+### `IndexTreeView` (view-layer logic)
 
-  **A different flavor of the same "already deleted" error**, found
-  while writing `test_document_io_controller.py`: `EditorTab.__init__`
-  defers its `LatexHighlighter`'s first `rehighlight()` via
-  `QTimer.singleShot(0, ...)`. Harmless in the real app (the event loop
-  is always spinning), but a test that constructs an `EditorTab`, does
-  nothing to pump the event loop, and lets the test end has that 0ms
-  timer still pending at teardown — it can end up firing during a
-  *later* test's event processing, against an already-destroyed
-  `LatexHighlighter`/`EditorTab`. If you construct an `EditorTab` in a
-  test, call `qtbot.wait(50)` right after (see
-  `test_document_io_controller.py`'s `_open_tab` helper) so the deferred
-  rehighlight fires safely while the widget is still alive, instead of
-  leaking a pending timer into whatever test runs next.
+`append_entry`/`remove_last_entry`/`reinsert_entry` — the tree's own
+undo/redo for a fresh live insertion, plus `append_entry`'s
+`suppress_transaction`-gated DB-staging call, which no other test exercises
+with `suppress_transaction=False`. See `test_index_tree_view_undo_redo.py`,
+and [Ancestor pruning that ignores a node's own
+references](#ancestor-pruning-that-ignores-a-nodes-own-references) for the
+bug it found.
 
-  **Also from that same file**: never call `qtbot.addWidget()` on both a
-  container (e.g. a `QTabWidget`) *and* a child you're about to
-  `addTab()`/reparent into it. Qt parent-child ownership already
-  guarantees the child's cleanup once the container is destroyed;
-  registering both makes pytest-qt try to `.close()` the child a second
-  time after the container's own teardown already deleted its C++
-  object, raising the same `RuntimeError: Internal C++ object ...
-  already deleted`. Register only the outermost container.
+### `context_menu_subsystem.py`
 
-  **`QPlainTextEdit.setPlainText()`/`EditorTab.load_document_content()`
-  do NOT mark the document modified** — they're both "load fresh
-  content" operations and explicitly leave `isModified()` `False`. A
-  test that wants to simulate a real in-progress user edit (as opposed
-  to loading a document) needs an actual incremental edit
-  (`cursor.insertText(...)`, see `test_project_save_workflow.py`) or an
-  explicit `editor.document().setModified(True)` right after
-  `setPlainText()` (see `test_document_io_controller.py`'s
-  `TestCommitAllOpenBuffers`) — `setPlainText()` alone will silently
-  leave `isModified()` `False` and any code gated on it (like
-  `commit_all_open_buffers`) will skip the tab entirely.
+The three real right-click menus (`IndexTreeContextMenuManager`,
+`FileTreeContextMenuManager`, `EditEntryContextMenuManager`). The
+signal-WIRING side of this module caused two historical bugs
+(`prune_file_triggered`/`set_root_file_triggered` built but never connected,
+now caught structurally by `test_signal_wiring.py`), but the menu-BUILDING
+logic — which actions appear, with what data, enabled or disabled under which
+conditions — had never been tested: the conditional Prune-action omission for
+the current root file, the multi-selection-vs-clicked-row resolution shared
+by delete/duplicate/invert-headings, and the Sub2-disables-Invert-headings
+guard. See `test_context_menu_subsystem.py`, and
+[`QMenu.exec()` cannot be monkeypatched](#qmenuexec-cannot-be-monkeypatched)
+for why `populate_menu_actions` is called directly.
 
-  **`QMenu.exec()` cannot be reliably monkeypatched** — found while
-  writing `test_context_menu_subsystem.py`.
-  `monkeypatch.setattr(QMenu, "exec", lambda self, *a, **k: ...)` looked
-  like it should intercept the real, blocking modal call, but it didn't
-  take effect (same class of issue as `QTimer.singleShot` above — a
-  C++-bound method PySide6 doesn't let a plain Python attribute
-  assignment override at the actual call site) and the test hung the
-  whole run waiting for a popup click that could never come headlessly.
-  Don't drive a code path that reaches a real `QMenu.exec()`/`.exec_()`
-  call at all — test the menu-building logic directly instead
-  (`populate_menu_actions(menu, index)`, then inspect `menu.actions()` or
-  call `action.trigger()` to fire its handler synchronously without ever
-  showing the menu). If you must exercise the small guard code
-  *before* `exec()` (e.g. "an invalid index shows no menu at all"), only
-  drive the branch that returns before `exec()` is ever reached — never
-  the branch that gets there. If a background/foreground test run of
-  this kind of code ever seems to hang with no output, don't wait it out —
-  it's almost certainly a real modal; kill the process and fix the test
-  to avoid the modal entirely rather than trying to suppress it.
+### Custom LaTeX commands
 
-  **A real, pre-existing app bug found while writing
-  `test_live_insertion_persistence.py`** (not a test-harness-only
-  artifact — this could crash the real running app too):
-  `LatexEntryAutoCompleter`'s `field.textChanged` handler was a raw
-  lambda closing over `self.completer`. `LatexIndexWindow.
-  _attach_completer` re-runs on every project (re)load/resync, and
-  `field.setCompleter(new_completer)` for the replacement immediately
-  deletes the OLD `QCompleter` (it was parented to `field`, which Qt
-  auto-deletes-and-replaces on `setCompleter`) — but the OLD lambda
-  stayed connected to `field.textChanged` (never explicitly
-  disconnected, and `deleteLater()` on the *helper* object doesn't
-  touch it since the closure lives on the signal connection itself, not
-  the object being deleted). Typing into the Main/Sub1/Sub2 field after
-  a couple of project reloads fired every accumulated stale lambda,
-  crashing on the dangling `QCompleter` reference. Fixed by giving
-  `LatexEntryAutoCompleter` a `detach()` method that explicitly
-  disconnects its `textChanged` connection, called by `_attach_completer`
-  right before replacing it.
-  A `QMessageBox.warning`/similar real modal call reachable from a failure
-  path needs monkeypatching before you drive that path in a test — it
-  blocks forever waiting for a click that can never come headlessly (see
-  `test_range_consistency_controller.py`'s `test_shows_warning_dialog_on_failure`
-  for the pattern: `monkeypatch.setattr(QMessageBox, "warning", ...)`).
-- **Layer 4 (integration)** — the root `conftest.py`'s `booted_app` fixture
-  constructs the *entire* real application object graph, the same
-  construction chain as `main.py`, with every real-machine touchpoint
-  (Windows registry via `QSettings`, the real user home directory, the
-  `data/name_cache.db` sqlite file, `.session_logs/`) redirected into
-  `tmp_path`. Nothing calls `.show()` or `app.exec()` — tests only
-  construct and inspect.
-  - `test_signal_wiring.py` is the structural regression net for the bug
-    class this test suite was originally built to catch: a `Signal`
-    declared and emitted correctly but never `.connect()`-ed to anything
-    (see `FileTreeContextMenuManager.prune_file_triggered`/
-    `set_root_file_triggered` in the project history — both were exactly
-    this, silently doing nothing until fixed). It walks every app-defined
-    `QObject` reachable from the booted app and asserts every `Signal`
-    declared on it has a connected receiver. **When you add a new
-    controller/view with its own signals, you don't need to update this
-    test** — as long as your object is reachable via a plain `self.x = ...`
-    attribute from something already in the graph, the walk finds it
-    automatically.
-- **Layer 5 (gui_smoke)** — drives the real, booted app through actual user
-  actions. `tests/gui_smoke/conftest.py` holds the shared setup every file
-  here needs: `QFileDialog`/`QInputDialog` are monkeypatched to bypass the
-  native OS dialogs (unautomatable headlessly), then the real
-  `select_project_folder_workflow()` runs, including the real background
-  `SafeProjectLoadThread` and regex parse of `sample_project_dir` (the
-  `opened_project` fixture; `open_project`/`tree_file_names` are the
-  underlying callables, exposed as fixtures so other test files in this
-  directory can reuse them without a fragile cross-file import of
-  underscore-prefixed helpers). Covers: project open/base-file
-  auto-detection, prune/reopen/restore (the exact bug this session started
-  from — prune resurrecting on reopen — proven fixed end-to-end, not just
-  at the controller level), "Set as root file" (both the `QModelIndex`
-  context-menu path and the plain string path), "Resync Workspace Files
-  from Disk" (files added/removed/un-pruned on disk outside the app),
-  "Resync Index Data from Disk" (`\index` content changed on disk), the
-  Cross-References workflow (add/remove writes `cross_refs.tex` for real,
-  "Insert Cross-References File..." splices `\input{cross_refs.tex}` into
-  the real base file and is idempotent on a second run), and the auto-resync
-  safety gate (`AppPipelineController._is_safe_to_auto_resync`,
-  `_handle_external_file_change`, `_reload_open_tab_if_unmodified` — the
-  logic that decides whether an externally-detected file change can be
-  auto-healed or must be deferred because an unsaved tab, an unsaved DB
-  insertion, a dirty rename, or the sticky `_tree_modified` flag is riding
-  on ids a resync would invalidate; see `test_auto_resync_safety.py`, driven
-  through `_handle_external_file_change` directly rather than a real
-  `QFileSystemWatcher` OS event since that engine-level timing is already
-  covered separately in layer 3), and the project save workflow
-  (`AppPipelineController.execute_project_save_workflow` — .tex buffer
-  commits, dirty-rename DB flush, `_tree_modified` clearing, and status
-  messaging; see `test_project_save_workflow.py`). That file's own
-  docstring/tests document a real quirk found but deliberately left
-  unfixed: `DocumentIOController.commit_all_open_buffers()` returns `True`
-  whenever a tabs widget exists at all, even with nothing to save, so the
-  save workflow's "No uncommitted modifications detected." message is
-  unreachable in practice — always reports "Workspace saved successfully."
-  instead. Also covers the "Duplicate reference(s)" context-menu action
-  (`AppPipelineController._handle_duplicate_references_request` — a
-  standalone entry, a real `|(`/`|)` range pair (the sample project's
-  "Widgets" entry, whose `range_partner_id` linking comes for free from
-  `ProjectLoadWorker`'s real FIFO pairing at load time — no manual record
-  patching needed), a lone range closer being skipped, and a batch of
-  both; see `test_duplicate_references.py`). This is where the third
-  instance of the see_references/seealso_references JSON-serialization
-  bug was found (see layer 3 above). Also covers the live-insertion
-  pipeline end to end — a real "Insert Index Tag" click
-  (`LatexIndexController.handle_insert`) through
-  `AppPipelineController._handle_manual_index_insertion`'s bookkeeping,
-  all the way to what's actually in the database, both immediately and
-  after an explicit save, plus the discard-rollback path (see
-  `test_live_insertion_persistence.py`). No earlier test drove this full
-  chain — coverage previously stopped at the `.tex` macro text
-  (`test_latex_index_controller_insert.py`) or started from an
-  already-loaded record. Driving it for real found a genuine,
-  previously-unknown bug: `_handle_manual_index_insertion` never called
-  `EntryModifierModel.shift_coordinates_after` for a fresh live
-  insertion, unlike every other coordinate-changing path (rename, table
-  edit, delete, duplicate). Inserting a second `\index` entry earlier in
-  the same open file than an existing one silently desynced that
-  existing entry's cached `absolute_position`/`absolute_end` from where
-  its macro actually landed — the next rename or delete of it would then
-  target the wrong byte span. Fixed by shifting every other cached
-  reference in the same file, mirroring what
-  `_handle_duplicate_references_request` already did. Use
-  `qtbot.waitUntil` (not `waitSignal` on the load thread directly) to wait
-  for a background load to finish — polling an observable end-state (the
-  tree populating) sidesteps having to reason precisely about the thread's
-  queued-connection timing.
+`LatexCommandRegistryModel` (the global, `QSettings`-backed command registry
+— save/list/exists/remove/clear, and the static
+`filter_indexing_newcommands` classifier; see
+`test_latex_command_registry_model.py`), `CreateCommandController` (name/body
+normalization and persistence in `_on_save_requested`, dialog reuse, and a
+real dialog→controller→registry signal round trip; see
+`test_create_command_controller.py`), and `ProjectCommandManagerController`
+(bridging the global registry and a project's own `project_custom_commands`
+table — add/remove, `commands_changed` emission, and dialog list population;
+see `test_project_command_manager_controller.py`). No bugs found in any of
+these three.
 
-  **Gotcha**: pytest's default import mode can't distinguish two test files
-  with the same basename in different directories without `__init__.py`
-  files (`tests/gui_smoke/test_cross_reference_workflow.py` is named that,
-  not `test_cross_references.py`, specifically to avoid colliding with
-  `tests/persistence/test_cross_references.py` — collecting the whole
-  suite errors out with "import file mismatch" the moment two exist). Keep
-  test file basenames unique across the whole `tests/` tree, not just
-  within a directory.
+`QSettings` is process-global state (the real Windows registry, or an `.ini`
+file under `IniFormat`) — every file here has its own autouse fixture
+redirecting it to a per-test `tmp_path` via `IniFormat`, the same redirection
+`booted_app` does for the whole app, so these tests never touch the real
+developer machine's registry.
+
+### Theme and preferences
+
+`PreferencesPersistence` (the global QSettings-backed store — two one-time
+migrations that run on every construction, a legacy QSettings org/app
+location and a legacy `ist_*`→`fmt_*` key rename, plus
+`load_application_preferences`'s type coercion and
+`geometry`/`state`/`splitter_state` hex-`QByteArray` round-tripping; see
+`test_preferences_persistence.py`), `ThemeConfigController` (global-vs-project
+routing for both loading and saving colours, and reapplying the
+currently-active theme mode on acceptance; see
+`test_theme_config_controller.py`), and `IndexPrefsConfigController` (the
+same global-vs-project seed/load/persist orchestration, plus delegating theme
+colours to `ThemeConfigController`; see
+`test_index_prefs_config_controller.py`).
+
+**A real bug found and fixed here**: `PreferencesPersistence.load_index_prefs`'s
+`coerce()` helper compared `dataclasses.fields()`'s `.type` (an actual type
+object — `bool`/`int`/`str`, since this module has no
+`from __future__ import annotations`) against the *string* literals
+`"bool"`/`"int"`. It never matched, so every loaded value silently came back
+as a plain `str` regardless of its real type. Harmless in practice, since the
+only real caller (`IndexPrefsConfigModel.update_data()`) re-coerces from
+either strings or already-typed values on the way in, but a real bug in this
+method's own contract nonetheless. Fixed by comparing against the actual type
+objects (`t is bool`/`t is int`).
+
+### RTF export orchestration
+
+`test_rtf_export_controller.py` covers `IndexExportController`,
+`RtfExportWorker` and `RtfExportThread` — the RTF export pipeline's own
+orchestration and threading, as distinct from `RtfExportEngine`'s
+`compile_to_aux`/`generate_ind_file`, which shell out to a real
+pdflatex/makeindex/xindy install and stay out of scope (see
+[`rtf_export_model.py`](#rtf_export_modelpy)).
+
+`compile_to_aux`/`generate_ind_file` are monkeypatched at the INSTANCE level
+to synthesize each stage's expected on-disk artifact (or deliberately not),
+exercising every guard branch of `export_project_to_rtf` — missing root file,
+missing aux with and without a log tail, missing/empty `.idx`, an invalid
+`.ind`, a `parse_ind` `FileNotFoundError` race, and an `.ind` with no
+recognized entries — plus the full success path (a real `.rtf` file is
+written and its content checked), the `progress_callback` stage-ordering, and
+custom output filenames. `RtfExportWorker.process()` is called directly for
+deterministic signal-emission checks, and `RtfExportThread` is driven through
+two real threaded runs via `qtbot.waitSignal` to prove the
+`moveToThread`/signal-relay/`quit()`+`wait()` wiring itself, not just the
+logic it wraps. No bugs found — the orchestration and threading held up
+cleanly.
+
+### Advanced search
+
+`SearchWorker`'s exact/fuzzy line-by-line matching, called directly and
+synchronously rather than through the real `SafeSearchThread` QThread wrapper
+— the same "drive the sync logic directly" approach used for
+`ProjectLoadWorker` — including column-offset accuracy on indented lines and
+an unreadable-file-mid-scan case (`test_search_worker.py`). Plus
+`AdvancedSearchWindow`'s own guards, result-tree grouping and
+navigation-signal wiring, including one real end-to-end run through the
+actual threaded worker via `qtbot.waitUntil` (`test_advanced_search_window.py`).
+No bugs found.
+
+### `IndexEditStagingModel`
+
+The session-only staging layer nearly every other controller test exercises
+indirectly via `stage_edit`/`commit`/`discard`, covered here for its own edge
+cases: the "stage back to the original value still emits but clears dirty"
+case, auto-registration of an unstaged id, and `commit()`'s lack of a dirty
+guard. See `test_index_edit_staging_model.py`. No bugs found.
+
+### `ExternalFileWatcherEngine`
+
+Register/unregister/pause/resume against a real `QFileSystemWatcher`, and
+`_handle_external_file_modification`'s three outcomes — reload,
+ignored-because-unregistered-or-deleted, and read-failure. See
+`test_external_file_watcher_engine.py`.
+
+### `LatexIndexController` (entry creation)
+
+`handle_insert`/`insert_latex`/`_attach_byte_coordinates` — standard and
+range-pair macro insertion, page-style/`encap` variants, custom command
+names, byte-offset math, and the abort paths for an empty main field, an
+unsaved/Untitled document, and no active editor tab. See
+`test_latex_index_controller_insert.py`.
+
+### Others
+
+`ProjectScopeController`, `PrunedFilesController`, `CrossReferenceController`
+and `RangeConsistencyController` each have their own
+`test_<controller_name>.py`, with no setup notes beyond this layer's
+conventions.
+
+---
+
+## Layer 4 (integration)
+
+The root `conftest.py`'s `booted_app` fixture constructs the *entire* real
+application object graph, the same construction chain as `main.py`, with
+every real-machine touchpoint (Windows registry via `QSettings`, the real
+user home directory, the `data/name_cache.db` sqlite file, `.session_logs/`)
+redirected into `tmp_path`. Nothing calls `.show()` or `app.exec()` — tests
+only construct and inspect.
+
+`test_signal_wiring.py` is the structural regression net for the bug class
+this test suite was originally built to catch: a `Signal` declared and
+emitted correctly but never `.connect()`-ed to anything (see
+`FileTreeContextMenuManager.prune_file_triggered`/`set_root_file_triggered`
+in the project history — both were exactly this, silently doing nothing until
+fixed). It walks every app-defined `QObject` reachable from the booted app
+and asserts every `Signal` declared on it has a connected receiver. **When
+you add a new controller/view with its own signals, you don't need to update
+this test** — as long as your object is reachable via a plain `self.x = ...`
+attribute from something already in the graph, the walk finds it
+automatically. See also
+[The known-dead-signal xfail convention](#the-known-dead-signal-xfail-convention).
+
+---
+
+## Layer 5 (gui_smoke)
+
+Drives the real, booted app through actual user actions.
+`tests/gui_smoke/conftest.py` holds the shared setup every file here needs:
+`QFileDialog`/`QInputDialog` are monkeypatched to bypass the native OS
+dialogs (unautomatable headlessly), then the real
+`select_project_folder_workflow()` runs, including the real background
+`SafeProjectLoadThread` and regex parse of `sample_project_dir`. That's the
+`opened_project` fixture; `open_project`/`tree_file_names` are the underlying
+callables, exposed as fixtures so other files in this directory can reuse
+them without a fragile cross-file import of underscore-prefixed helpers.
+
+Use `qtbot.waitUntil` (not `waitSignal` on the load thread directly) to wait
+for a background load to finish — polling an observable end-state, such as
+the tree populating, sidesteps having to reason precisely about the thread's
+queued-connection timing.
+
+### Project lifecycle
+
+Project open and base-file auto-detection (`test_base_file.py`);
+prune/reopen/restore and "Set as root file" via both the `QModelIndex`
+context-menu path and the plain string path (`test_project_lifecycle.py`). A
+pruned file resurrecting on reopen was a real reported bug, proven fixed
+end-to-end here rather than only at the controller level.
+
+### Resync
+
+"Resync Workspace Files from Disk" — files added, removed or un-pruned on
+disk outside the app (`test_resync_workspace_files.py`) — and "Resync Index
+Data from Disk", `\index` content changed on disk
+(`test_resync_index_data.py`).
+
+### Cross-references workflow
+
+Add/remove writes `cross_refs.tex` for real, and "Insert Cross-References
+File..." splices `\input{cross_refs.tex}` into the real base file and is
+idempotent on a second run.
+
+### Auto-resync safety gate
+
+`AppPipelineController._is_safe_to_auto_resync`, `_handle_external_file_change`
+and `_reload_open_tab_if_unmodified` — the logic deciding whether an
+externally-detected file change can be auto-healed or must be deferred
+because an unsaved tab, an unsaved DB insertion, a dirty rename, or the
+sticky `_tree_modified` flag is riding on ids a resync would invalidate. See
+`test_auto_resync_safety.py`, driven through `_handle_external_file_change`
+directly rather than a real `QFileSystemWatcher` OS event, since that
+engine-level timing is covered by
+[`ExternalFileWatcherEngine`](#externalfilewatcherengine).
+
+### Project save workflow
+
+`AppPipelineController.execute_project_save_workflow` — `.tex` buffer
+commits, dirty-rename DB flush, `_tree_modified` clearing, and status
+messaging; see `test_project_save_workflow.py`. That file's own
+docstring/tests document a real quirk found but deliberately left unfixed:
+`DocumentIOController.commit_all_open_buffers()` returns `True` whenever a
+tabs widget exists at all, even with nothing to save, so the save workflow's
+"No uncommitted modifications detected." message is unreachable in practice —
+it always reports "Workspace saved successfully." instead.
+
+### Checksum re-stamping on save
+
+`test_file_sync_checksums_on_save.py` — the regression a user reported
+directly: delete a node from the index tree, save, close, reopen, and the
+"Files Changed Outside the Editor" prompt appeared, because nothing anywhere
+updated `project_file_sync_state` after a save. Every checksum still
+described the file as it was at the previous full scan, so the app flagged
+the user's own saved work as an external edit.
+
+The complementary half is covered here too and matters as much: a save must
+NOT stamp a file whose `\index` coordinates the DB no longer matches (an undo
+in a tab), or a file this app never wrote at all, since those are exactly
+what the drift prompt has to keep catching.
+
+`_check_for_external_drift_and_prompt` is driven directly with a
+monkeypatched `QMessageBox.question` rather than through a real close/reopen
+cycle — the prompt is the observable behaviour under test, and reopening
+in-process is already covered by `test_project_lifecycle.py`. Note its autouse
+`_clean_pipeline_state` fixture: `booted_app` is module-scoped, so this file
+resets `_tree_modified`, dirty records, staged DB entries and write tracking
+after every test, the same leakage risk `test_auto_resync_safety.py` guards
+against.
+
+### Duplicate references
+
+`AppPipelineController._handle_duplicate_references_request` — a standalone
+entry, a real `|(`/`|)` range pair (the sample project's "Widgets" entry,
+whose `range_partner_id` linking comes for free from `ProjectLoadWorker`'s
+real FIFO pairing at load time, so no manual record patching is needed), a
+lone range closer being skipped, and a batch of both. See
+`test_duplicate_references.py`, and
+[The see/seealso JSON serialization gap](#the-seeseealso-json-serialization-gap)
+for the bug it exposed.
+
+### Live insertion persistence
+
+A real "Insert Index Tag" click (`LatexIndexController.handle_insert`) through
+`AppPipelineController._handle_manual_index_insertion`'s bookkeeping, all the
+way to what's actually in the database — both immediately and after an
+explicit save — plus the discard-rollback path. See
+`test_live_insertion_persistence.py`. No other test drives this full chain;
+coverage otherwise stops at the `.tex` macro text
+(`test_latex_index_controller_insert.py`) or starts from an already-loaded
+record. Driving it for real found two genuine bugs, described under
+[Cached coordinates going stale after a write](#cached-coordinates-going-stale-after-a-write)
+and [Stale lambdas outliving the object they close
+over](#stale-lambdas-outliving-the-object-they-close-over).
+
+---
+
+## Recurring bug families
+
+Three bug shapes have each appeared in more than one place in this codebase.
+They are recorded together here so a new instance is recognizable as an
+instance, rather than looking novel.
+
+### The see/seealso JSON serialization gap
+
+In-memory records carry `see_references`/`seealso_references` as plain Python
+lists, but `FileTreePersistence` expects a pre-serialized JSON string and
+silently fails the write otherwise. Found three times:
+
+1. `EntryModifierModel.flush_dirty_to_db` → `update_reference_field` — every
+   dirty-rename flush for a freshly-scraped project was failing.
+2. `EntryModifierModel.register_new_entry` → `insert_reference` — the
+   identical gap, reached from
+   `AppPipelineController._build_duplicate_entry_dict`, which copies these
+   fields straight from an already-loaded record (a real list) and crashed
+   the DB insert.
+3. Confirmed end-to-end through the "Duplicate reference(s)" action; see
+   [Duplicate references](#duplicate-references).
+
+All fixed; regression coverage for the first two lives in
+`test_entry_modifier_model_dirty_flush.py`. **If you add a new write path for
+these two fields, serialize at the persistence boundary.**
+
+### Ancestor pruning that ignores a node's own references
+
+An ancestor-pruning loop that checks only whether a tree node still has
+*children*, never whether it still carries its own direct `\index` reference,
+will silently delete a parent that is still real. Found twice:
+
+1. `IndexEditController._prune_subtree_and_ancestors` — deleting a node's only
+   child vanished a parent that still had, say, `\index{Sports}` of its own
+   the moment `\index{Sports!Football}` was its last child, removing it from
+   both the tree and `_active_headings` even though the macro and DB row were
+   untouched. Pinned by
+   `test_index_edit_controller_bulk_deletion.py`'s
+   `test_deleting_only_the_child_node_leaves_the_parents_own_reference_intact`.
+2. `IndexTreeView.remove_last_entry` — the same loop, same omission. Undoing a
+   fresh insertion that reused an existing ancestor node (one with its own
+   unrelated `\index` reference) silently deleted that ancestor the instant
+   its only child, the just-undone insertion, was removed. Fixed via a new
+   `_node_has_own_refs` helper on `IndexTreeView`.
+
+### Cached coordinates going stale after a write
+
+The DB caches each entry's `absolute_position`/`absolute_end`. Any write that
+moves text must either update those coordinates or mark the file desynced;
+the damage is otherwise silent, because navigation lands at a stale position
+and `rewrite_macro_span`'s "does this span look like a macro" guard then
+rejects later edits to those entries and aborts with no message. Found three
+times:
+
+1. `AppPipelineController._handle_manual_index_insertion` never called
+   `EntryModifierModel.shift_coordinates_after` for a fresh live insertion,
+   unlike every other coordinate-changing path (rename, table edit, delete,
+   duplicate). Inserting a second `\index` entry earlier in the same open file
+   than an existing one desynced that existing entry. Fixed by shifting every
+   other cached reference in the same file, mirroring what
+   `_handle_duplicate_references_request` already did.
+2. The block injectors moved every `\index` macro after the insertion point
+   with nothing re-deriving the stored coordinates. Fixed via
+   `content_shifted` → `_handle_injected_content_shift`; see
+   [Write tracking and injection coordinate
+   shift](#write-tracking-and-injection-coordinate-shift).
+3. Saves never re-stamped `project_file_sync_state`, so the app reported the
+   user's own edits as external ones; see
+   [Checksum re-stamping on save](#checksum-re-stamping-on-save).
+
+---
+
+## Gotchas when writing tests
+
+### `EditorTab` is near-read-only
+
+Its key whitelist blocks typing, cut and paste, so **Ctrl+Z/Ctrl+Y is the only
+buffer mutation a user can actually reach**. Tests that mutate a document with
+a bare `QTextCursor` are exercising the mechanism, not a reachable user
+action; write the undo case on its own terms when that is what you mean.
+
+### The theme broker is a process-wide singleton
+
+`AppStyleConfiguration.event_broker()` is process-wide, not per-`QApplication`
+or per-widget. Some real view classes connect its `theme_mutated` signal to a
+raw lambda rather than a bound method, so Qt's destroy-time auto-disconnect
+never fires for it — constructing and destroying many short-lived widgets
+(e.g. a fresh `IndexTreeView` per test) leaks a dead connection per instance.
+The root `conftest.py`'s `_reset_theme_broker_connections` autouse fixture
+clears every connection after each test so this can't accumulate across test
+boundaries and crash a later, unrelated test the moment anything emits
+`theme_mutated` again. You don't need to do anything about this yourself, but
+if you ever see `RuntimeError: Internal C++ object ... already deleted`
+pointing at a `theme_mutated`-connected lambda, this is why, and the fixture
+is the first place to check.
+
+### Deferred rehighlight timers on `EditorTab`
+
+`EditorTab.__init__` defers its `LatexHighlighter`'s first `rehighlight()` via
+`QTimer.singleShot(0, ...)`. Harmless in the real app, where the event loop is
+always spinning, but a test that constructs an `EditorTab`, does nothing to
+pump the event loop, and then ends has that 0ms timer still pending at
+teardown — it can fire during a *later* test's event processing, against an
+already-destroyed `LatexHighlighter`/`EditorTab`, producing the same
+"already deleted" `RuntimeError`. If you construct an `EditorTab` in a test,
+call `qtbot.wait(50)` right after (see `test_document_io_controller.py`'s
+`_open_tab` helper) so the deferred rehighlight fires safely while the widget
+is still alive.
+
+### Don't `qtbot.addWidget()` both a container and its child
+
+Never register both a container (e.g. a `QTabWidget`) and a child you're about
+to `addTab()`/reparent into it. Qt parent-child ownership already guarantees
+the child's cleanup once the container is destroyed; registering both makes
+pytest-qt try to `.close()` the child a second time after the container's
+teardown already deleted its C++ object, raising the same "already deleted"
+`RuntimeError`. Register only the outermost container.
+
+### `setPlainText()` does not mark a document modified
+
+`QPlainTextEdit.setPlainText()` and `EditorTab.load_document_content()` are
+both "load fresh content" operations and explicitly leave `isModified()`
+`False`. A test simulating a real in-progress user edit needs an actual
+incremental edit (`cursor.insertText(...)`, see
+`test_project_save_workflow.py`) or an explicit
+`editor.document().setModified(True)` right afterwards (see
+`test_document_io_controller.py`'s `TestCommitAllOpenBuffers`).
+`setPlainText()` alone leaves `isModified()` `False`, and any code gated on it
+— like `commit_all_open_buffers` — will skip the tab entirely.
+
+### `QMenu.exec()` cannot be monkeypatched
+
+`monkeypatch.setattr(QMenu, "exec", lambda self, *a, **k: ...)` looks like it
+should intercept the real, blocking modal call, but it does not take effect —
+the same class of issue as `QTimer.singleShot`, a C++-bound method PySide6
+won't let a plain Python attribute assignment override at the actual call
+site — and the test hangs the whole run waiting for a popup click that can
+never come headlessly.
+
+Don't drive a code path that reaches a real `QMenu.exec()`/`.exec_()` at all.
+Test the menu-building logic directly instead: call
+`populate_menu_actions(menu, index)`, then inspect `menu.actions()` or call
+`action.trigger()` to fire its handler synchronously without ever showing the
+menu. If you must exercise the small guard code *before* `exec()` (e.g. "an
+invalid index shows no menu at all"), drive only the branch that returns
+before `exec()` is reached — never the branch that gets there.
+
+**If a test run ever seems to hang with no output, don't wait it out** — it's
+almost certainly a real modal. Kill the process and fix the test to avoid the
+modal entirely rather than trying to suppress it.
+
+### Monkeypatch modal dialogs on failure paths
+
+A `QMessageBox.warning`/`question`/similar reachable from a failure path needs
+monkeypatching *before* you drive that path — it blocks forever waiting for a
+click that can never come headlessly. See
+`test_range_consistency_controller.py`'s
+`test_shows_warning_dialog_on_failure` for the pattern:
+`monkeypatch.setattr(QMessageBox, "warning", ...)`.
+
+### Stale lambdas outliving the object they close over
+
+Found while writing `test_live_insertion_persistence.py`, and a real app bug,
+not a test-harness artifact: `LatexEntryAutoCompleter`'s `field.textChanged`
+handler was a raw lambda closing over `self.completer`.
+`LatexIndexWindow._attach_completer` re-runs on every project (re)load/resync,
+and `field.setCompleter(new_completer)` immediately deletes the OLD
+`QCompleter` (it was parented to `field`, which Qt auto-deletes-and-replaces
+on `setCompleter`) — but the OLD lambda stayed connected to
+`field.textChanged`, never explicitly disconnected, and `deleteLater()` on the
+*helper* object doesn't touch it, since the closure lives on the signal
+connection itself rather than the object being deleted. Typing into the
+Main/Sub1/Sub2 field after a couple of project reloads fired every accumulated
+stale lambda and crashed on the dangling `QCompleter` reference. Fixed by
+giving `LatexEntryAutoCompleter` a `detach()` method that explicitly
+disconnects its `textChanged` connection, called by `_attach_completer` right
+before replacing it.
+
+### Test file basenames must be unique suite-wide
+
+pytest's default import mode can't distinguish two test files with the same
+basename in different directories without `__init__.py` files.
+`tests/gui_smoke/test_cross_reference_workflow.py` is named that, not
+`test_cross_references.py`, specifically to avoid colliding with
+`tests/persistence/test_cross_references.py` — collecting the whole suite
+errors out with "import file mismatch" the moment two exist. Keep basenames
+unique across the whole `tests/` tree, not just within a directory.
+
+---
 
 ## The known-dead-signal xfail convention
 
-Writing `test_signal_wiring.py` originally surfaced 9 pre-existing
-unconnected signals beyond the ones this test suite was built to catch in
-the first place. Each was individually triaged (deleted if genuinely dead
-code, wired up if it was a real gap, or left as documented future work) —
-see the project history around `KNOWN_DEAD_SIGNALS` for the reasoning
-behind each call. `KNOWN_DEAD_SIGNALS` is currently empty as a result.
+Writing `test_signal_wiring.py` originally surfaced 9 pre-existing unconnected
+signals beyond the ones this test suite was built to catch in the first place.
+Each was individually triaged — deleted if genuinely dead code, wired up if it
+was a real gap, or left as documented future work; see the project history
+around `KNOWN_DEAD_SIGNALS` for the reasoning behind each call.
+`KNOWN_DEAD_SIGNALS` is empty as a result.
 
 If you find a *new* unconnected signal that's a genuine bug (not a
-lazily-constructed dialog/thread that simply doesn't exist yet at boot),
-pin it as its own `@pytest.mark.xfail(strict=True)` case using the
-`_find_one` helper in `test_signal_wiring.py`, and add its
-`(qualname, signal_name)` pair to `KNOWN_DEAD_SIGNALS` so the sweep test
-doesn't double-report it. `strict=True` means: if someone wires it up
-later without touching this file, that specific test starts
-**unexpectedly passing**, which pytest reports as a hard failure (XPASS) —
-forcing a conscious edit (delete the xfail, remove the entry from
-`KNOWN_DEAD_SIGNALS`) instead of the fix going unnoticed. Don't just add a
-signal to an exclusion list without a dedicated xfail test — that makes
-the sweep quietly ignore it forever with no forcing function to revisit it.
+lazily-constructed dialog/thread that simply doesn't exist yet at boot), pin
+it as its own `@pytest.mark.xfail(strict=True)` case using the `_find_one`
+helper in `test_signal_wiring.py`, and add its `(qualname, signal_name)` pair
+to `KNOWN_DEAD_SIGNALS` so the sweep test doesn't double-report it.
+`strict=True` means: if someone wires it up later without touching this file,
+that specific test starts **unexpectedly passing**, which pytest reports as a
+hard failure (XPASS) — forcing a conscious edit (delete the xfail, remove the
+entry from `KNOWN_DEAD_SIGNALS`) instead of the fix going unnoticed. Don't
+just add a signal to an exclusion list without a dedicated xfail test — that
+makes the sweep quietly ignore it forever with no forcing function to revisit
+it.
+
+---
 
 ## Fixture project
 
-`tests/fixtures/sample_project/` is deliberately small and used across
-layers 2 and 5:
+`tests/fixtures/sample_project/` is deliberately small and used by
+[layer 2](#layer-2-persistence) and [layer 5](#layer-5-gui_smoke):
 
-- `main.tex` — base file (`\documentclass`, `\begin{document}`, pulls in
-  the two chapters below). Deliberately does **not** `\input{cross_refs.tex}`
-  itself -- that line is what "Insert Cross-References File..." exists to
-  splice in, so the fixture starts without it to let gui_smoke tests
-  actually exercise that injection.
+- `main.tex` — base file (`\documentclass`, `\begin{document}`, pulls in the
+  two chapters below). Deliberately does **not** `\input{cross_refs.tex}`
+  itself — that line is what "Insert Cross-References File..." exists to
+  splice in, so the fixture starts without it to let gui_smoke tests actually
+  exercise that injection.
 - `01.Intro/intro.tex` — a plain entry and a one-level sub-entry.
 - `10.Chapter10/chapter10.tex` — a page-range pair (`|(` / `|)`) and a
   `see{}` cross-reference.
-- `10.Chapter10/fig10/descript.tex` — deliberately **zero** `\index`
-  entries, a natural candidate for prune-related tests.
-- `cross_refs.tex` — present but empty, standing in for the
-  auto-managed file `CrossReferenceController` regenerates; used to test
-  that it's excluded from `project_files` tracking while still being
-  browsable in the Workspace Files tree.
+- `10.Chapter10/fig10/descript.tex` — deliberately **zero** `\index` entries,
+  a natural candidate for prune-related tests.
+- `cross_refs.tex` — present but empty, standing in for the auto-managed file
+  `CrossReferenceController` regenerates; used to test that it's excluded from
+  `project_files` tracking while still being browsable in the Workspace Files
+  tree.
 
 `sample_project_dir` (in the root `conftest.py`) copies this into a fresh
 `tmp_path` per test, so tests that mutate files on disk never affect the

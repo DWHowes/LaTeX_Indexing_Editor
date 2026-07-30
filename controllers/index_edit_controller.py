@@ -3,6 +3,7 @@ from PySide6.QtCore import QObject, Signal, Slot, Qt, QTimer
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import QMessageBox
 
+from models import index_tag_grammar as grammar
 from views.index_tree_view import IndexTreeView
 from controllers.document_io_controller import DocumentIOController
 
@@ -281,13 +282,13 @@ class IndexEditController(QObject):
 
         for head in engine._active_headings:
             heading_text = head.get("heading_text") or head.get("name") or ""
-            parts = [p.strip() for p in heading_text.split("!") if p.strip()]
+            parts = grammar.split_levels_clean(heading_text)
             if len(parts) < depth:
                 continue
             if [p.lower() for p in parts[:depth]] != old_prefix_norm:
                 continue
             new_parts = list(new_path_parts) + parts[depth:]
-            new_heading_text = "!".join(new_parts)
+            new_heading_text = grammar.join_levels(new_parts)
             head["heading_text"] = new_heading_text
             head["name"] = new_heading_text
 
@@ -409,73 +410,33 @@ class IndexEditController(QObject):
         Only substitutes the first exact match (case-insensitive on the
         sort-key portion) so that editing a sub-level doesn't accidentally
         replace a same-named main level.
+
+        Parsing is strip=False throughout: this rewrites heading text that
+        goes straight back into a macro span, so surrounding whitespace is
+        the caller's to keep, not this method's to normalize away.
         """
-        # Split on unbraced ! — same logic as _parse_heading_raw_text
-        levels: list[str] = []
-        current: list[str] = []
-        depth = 0
-        # Strip encap first
-        encap = ""
-        for i in range(len(heading_raw_text) - 1, -1, -1):
-            ch = heading_raw_text[i]
-            if ch == "}" :
-                depth += 1
-            elif ch == "{":
-                depth -= 1
-            elif ch == "|" and depth == 0:
-                encap = heading_raw_text[i + 1:]
-                heading_raw_text = heading_raw_text[:i]
-                break
-        depth = 0
-        for ch in heading_raw_text:
-            if ch == "{":
-                depth += 1
-                current.append(ch)
-            elif ch == "}":
-                depth -= 1
-                current.append(ch)
-            elif ch == "!" and depth == 0:
-                levels.append("".join(current))
-                current = []
-            else:
-                current.append(ch)
-        if current:
-            levels.append("".join(current))
+        tag = grammar.parse_body(heading_raw_text, strip=False)
 
         substituted = False
         new_levels = []
-        old_sort = old_token.split("@")[0].strip().lower()
+        old_sort = grammar.sort_key_of(old_token).lower()
 
-        for level in levels:
-            level_sort = level.split("@")[0].strip().lower()
-            if not substituted and level_sort == old_sort:
+        for level in tag.levels:
+            if not substituted and grammar.sort_key_of(level).lower() == old_sort:
                 new_levels.append(new_token)
                 substituted = True
             else:
                 new_levels.append(level)
 
-        result = "!".join(new_levels)
-        if encap:
-            result = f"{result}|{encap}"
-        return result
+        return tag.with_levels(new_levels).to_body()
 
     @staticmethod
     def _strip_encap_suffix(heading_text: str) -> str:
         """
         Returns heading_text with any trailing "|encap" suffix removed,
-        respecting brace depth (same unbraced-"|" scan already used by
-        _substitute_token_in_heading). No-ops if there's no unbraced "|".
+        respecting brace depth. No-ops if there's no unbraced "|".
         """
-        depth = 0
-        for i in range(len(heading_text) - 1, -1, -1):
-            ch = heading_text[i]
-            if ch == "}":
-                depth += 1
-            elif ch == "{":
-                depth -= 1
-            elif ch == "|" and depth == 0:
-                return heading_text[:i]
-        return heading_text
+        return grammar.strip_encap(heading_text, strip=False)
 
     # ------------------------------------------------------------------
     # Range-partner syncing
@@ -855,7 +816,7 @@ class IndexEditController(QObject):
 
     def _prune_single_node(self, parts: list[str], engine) -> None:
         """Removes exactly one tree node by path plus its heading row, if any."""
-        heading_id = self._find_heading_id_by_text(engine, "!".join(parts))
+        heading_id = self._find_heading_id_by_text(engine, grammar.join_levels(parts))
         self._remove_tree_node_by_path(parts)
 
         if heading_id is not None:
@@ -1041,7 +1002,7 @@ class IndexEditController(QObject):
         # new one. append_entry (rather than calling _insert_visual_node
         # directly) also re-sorts and re-expands the tree afterward so a
         # freshly created node is immediately visible in place.
-        parts = [p.strip() for p in new_heading_clean.split("!") if p.strip()]
+        parts = grammar.split_levels_clean(new_heading_clean)
         if parts and record:
             # suppress_transaction=True: record already exists (it's being
             # re-attached after a rename or a discard revert, not inserted
@@ -1131,7 +1092,7 @@ class IndexEditController(QObject):
             h.get("id", 0) for h in engine._active_headings if h.get("id") is not None
         ]
         new_id = (max(existing_ids) + 1) if existing_ids else 1
-        parts = [p.strip() for p in heading_text.split("!") if p.strip()]
+        parts = grammar.split_levels_clean(heading_text)
         new_heading = {
             "id": new_id,
             "parent_id": None,
@@ -1162,7 +1123,7 @@ class IndexEditController(QObject):
         ]
 
         # Remove the tree node — find it by ToolTipRole token match
-        parts = [p.strip() for p in heading_text.split("!") if p.strip()]
+        parts = grammar.split_levels_clean(heading_text)
         if parts:
             self._remove_tree_node_by_path(parts)
 
@@ -1179,7 +1140,7 @@ class IndexEditController(QObject):
         confirmed no records remain under that heading_id, via
         _remove_orphaned_heading.
         """
-        parts = [p.strip() for p in heading_text.split("!") if p.strip()]
+        parts = grammar.split_levels_clean(heading_text)
         if not parts:
             return
 

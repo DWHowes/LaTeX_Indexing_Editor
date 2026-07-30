@@ -1,6 +1,8 @@
 from PySide6.QtCore import QObject, Slot
 from PySide6.QtWidgets import QMessageBox
 
+from models import index_tag_grammar as grammar
+
 
 class EntryModifierController(QObject):
     """
@@ -134,7 +136,7 @@ class EntryModifierController(QObject):
             if not disp:
                 return ""
             if sort and sort.lower() != disp.lower():
-                return f"{sort}@{disp}"
+                return grammar.build_level(sort, disp)
             return disp
 
         levels = [
@@ -150,17 +152,16 @@ class EntryModifierController(QObject):
         if not levels:
             return None
 
-        result = "!".join(levels)
-        encap = fields.get("encap", "")
         # "standard" is the literal placeholder value plain entries carry
         # (see IndexEntryModel.metadata()/the DB column default) -- it is
         # not a real LaTeX suffix and must not be appended, unlike an
         # actual directive (textbf/textit/see/seealso/range marker).
         # Without this guard, editing ANY cell of a plain entry silently
         # appended a bogus "|standard" to its heading on every commit.
-        if encap and encap != "standard":
-            result = f"{result}|{encap}"
-        return result
+        # encap_from_stored is that guard, expressed once in the grammar
+        # module instead of re-tested here.
+        encap = grammar.encap_from_stored(fields.get("encap", ""))
+        return grammar.IndexTag(tuple(levels), encap).to_body()
 
     # ------------------------------------------------------------------
     # Row completion -> write + commit
@@ -237,7 +238,7 @@ class EntryModifierController(QObject):
             if not disp:
                 return ""
             if sort and sort.lower() != disp.lower():
-                return f"{sort}@{disp}"
+                return grammar.build_level(sort, disp)
             return disp
 
         attempted = 0
@@ -255,14 +256,12 @@ class EntryModifierController(QObject):
             if not levels:
                 continue
 
-            new_canonical = "!".join(levels)
-            encap = fields.get("encap", "")
             # "standard" is the literal placeholder value plain entries carry
             # (see IndexEntryModel.metadata()/the DB column default) -- it is
             # not a real LaTeX suffix and must not be appended, unlike an
             # actual directive (textbf/textit/see/seealso/range marker).
-            if encap and encap != "standard":
-                new_canonical = f"{new_canonical}|{encap}"
+            encap = grammar.encap_from_stored(fields.get("encap", ""))
+            new_canonical = grammar.IndexTag(tuple(levels), encap).to_body()
 
             attempted += 1
             self._staging_model.stage_edit(entry_id, new_canonical)

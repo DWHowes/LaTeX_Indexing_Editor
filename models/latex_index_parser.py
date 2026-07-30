@@ -2,10 +2,22 @@ import re
 import bisect
 from pathlib import Path
 
+from models import index_tag_grammar as grammar
+
 class LatexIndexParser:
-    """Scans raw LaTeX text streams to extract structural index macro parameters cleanly."""
-    
-    INDEX_PATTERN = re.compile(r'\\(index)\b')
+    """
+    Scans raw LaTeX text streams to extract structural index macro
+    parameters cleanly.
+
+    This class owns the *scanning* problem -- finding macro calls in a
+    document, skipping comments and optional arguments, scrubbing macro
+    definitions, and turning byte positions into line/column coordinates.
+    The structure of what it finds between the braces belongs to
+    index_tag_grammar, which was originally extracted from the private
+    helpers here and which this class now calls rather than duplicating.
+    """
+
+    INDEX_PATTERN = grammar.MACRO_PATTERN
     MACRO_START_PATTERN = re.compile(r'\\(newcommand|renewcommand|providecommand|DeclareRobustCommand|def)(?=\b|\\)')
 
     @classmethod
@@ -17,13 +29,7 @@ class LatexIndexParser:
         The matched command name (without backslash) is always available
         via match.group(1), same as the plain INDEX_PATTERN.
         """
-        names = ["index"]
-        for name in (extra_command_names or []):
-            bare = name.lstrip("\\")
-            if bare and bare not in names:
-                names.append(bare)
-        alternation = "|".join(re.escape(name) for name in names)
-        return re.compile(rf'\\({alternation})\b')
+        return grammar.build_macro_pattern(extra_command_names)
 
     @classmethod
     def parse_file(
@@ -66,15 +72,19 @@ class LatexIndexParser:
             if start_pos >= len(working_content) or working_content[start_pos] != '{':
                 continue
 
-            inner_content, end_abs = cls._extract_balanced_braces(working_content, start_pos + 1)
+            inner_content, end_abs = grammar.extract_balanced_braces(working_content, start_pos + 1)
             if end_abs == -1:
                 continue
 
             end_line_idx, end_col_idx = cls._compute_coordinates(end_abs - 1, line_offsets)
 
-            clean_inner_content, encap_format = cls._strip_global_encap_safe(inner_content)
-            clean_inner_content, see_refs, seealso_refs = cls._extract_see_modifiers(clean_inner_content, encap_format)
-            levels = cls._split_levels_safe(clean_inner_content)
+            clean_inner_content, encap_format = grammar.split_encap(
+                grammar.strip_string_macro(inner_content)
+            )
+            clean_inner_content, see_refs, seealso_refs = grammar.extract_see_modifiers(
+                clean_inner_content, encap_format
+            )
+            levels = grammar.split_levels(clean_inner_content)
 
             parts_list = []
             for level in levels:
@@ -82,13 +92,12 @@ class LatexIndexParser:
                 level_cleaned = " ".join(level_cleaned.split())
                 if not level_cleaned:
                     continue
-                display_text = cls._extract_display_string_safe(level_cleaned)
-                parts_list.append(display_text.strip())
+                parts_list.append(grammar.display_of(level_cleaned))
 
             if not parts_list:
                 continue
 
-            safe_encap = encap_format if encap_format else "standard"
+            safe_encap = grammar.encap_or_standard(encap_format)
             stable_uid = f"{norm_path_str}:{line_idx}:{col_idx}"
             see_payload = cls._build_see_reference_payload(see_refs, seealso_refs)
 
@@ -129,65 +138,6 @@ class LatexIndexParser:
         line_num = line_idx + 1
         col_num = (absolute_pos - line_offsets[line_idx]) + 1
         return line_num, col_num
-
-    @classmethod
-    def _extract_balanced_braces(cls, text: str, start_pos: int) -> tuple[str, int]:
-        brace_count = 1
-        current_pos = start_pos
-        result_chars = []
-        text_len = len(text)
-        
-        while current_pos < text_len:
-            char = text[current_pos]
-            if char == '\\' and (current_pos + 1 < text_len) and text[current_pos + 1] in ('{', '}'):
-                result_chars.append(text[current_pos:current_pos + 2])
-                current_pos += 2
-                continue
-                
-            if char == '{':
-                brace_count += 1
-            elif char == '}':
-                brace_count -= 1
-                if brace_count == 0:
-                    return "".join(result_chars), current_pos + 1
-                    
-            result_chars.append(char)
-            current_pos += 1
-        return "", -1
-
-    @classmethod
-    def _strip_global_encap_safe(cls, text: str) -> tuple[str, str]:
-        text = text.strip().replace(r'\string', '')
-        brace_level = 0
-        text_len = len(text)
-        
-        for i in range(text_len - 1, -1, -1):
-            char = text[i]
-            if char == '}':
-                brace_level += 1
-            elif char == '{':
-                brace_level -= 1
-            elif char == '|' and brace_level == 0:
-                if i > 0 and text[i-1] == '\\':
-                    continue
-                clean_path = text[:i].strip()
-                encap_format = text[i+1:].strip()
-                # Previously both range markers were collapsed into the
-                # generic string "range", losing which end of the range
-                # this particular reference is. That ambiguous value then
-                # flowed through to EntryModifierList's encap column and
-                # back out through EntryModifierController
-                # ._assemble_canonical_heading on any table edit to that
-                # row (even edits to unrelated fields, since the row's
-                # full heading -- including encap -- is always reassembled
-                # from the currently displayed columns) as a literal
-                # "|range" suffix -- not valid makeindex syntax, silently
-                # corrupting the macro in place of the original "|(" or
-                # "|)". Keeping the raw "(" / ")" here instead lets it
-                # round-trip through table edits unchanged.
-                return clean_path, encap_format
-                
-        return text, "standard"
 
     @classmethod
     def _scan_to_char(cls, text: str, idx: int, target: str) -> int:
@@ -354,117 +304,6 @@ class LatexIndexParser:
             idx += 1
             
         return -1
-
-    @classmethod
-    def _split_levels_safe(cls, text: str) -> list[str]:
-        levels = []
-        current_part = []
-        brace_level = 0
-        idx = 0
-        text_len = len(text)
-        
-        while idx < text_len:
-            char = text[idx]
-            if char == '\\' and (idx + 1 < text_len) and text[idx + 1] in ('!', '@', '|', '{', '}'):
-                current_part.append(text[idx:idx+2])
-                idx += 2
-                continue
-                
-            if char == '{':
-                brace_level += 1
-            elif char == '}':
-                brace_level -= 1
-                
-            if char == '!' and brace_level == 0:
-                levels.append("".join(current_part))
-                current_part = []
-            else:
-                current_part.append(char)
-            idx += 1
-            
-        final_segment = "".join(current_part)
-        levels.append(final_segment)
-        return levels
-
-    @classmethod
-    def _extract_display_string_safe(cls, level_text: str) -> str:
-        brace_level = 0
-        idx = 0
-        text_len = len(level_text)
-        
-        while idx < text_len:
-            char = level_text[idx]
-            if char == '\\' and (idx + 1 < text_len) and level_text[idx + 1] == '@':
-                idx += 2
-                continue
-                
-            if char == '{':
-                brace_level += 1
-            elif char == '}':
-                brace_level -= 1
-            elif char == '@' and brace_level == 0:
-                return level_text[idx+1:].strip()
-            idx += 1
-            
-        return level_text.strip()
-
-    @classmethod
-    def _extract_see_modifiers(cls, text: str, encap_format: str = "") -> tuple[str, list[str], list[str]]:
-        """
-        Populates see/seealso targets from either syntax a project might
-        use:
-          1. A literal \\see{...}/\\seealso{...} occurring inside the
-             index term's own display text (rare) -- stripped out of
-             `text` below.
-          2. The standard imakeidx pipe-modifier form,
-             \\index{term|see{Target}} / \\index{term|seealso{Target}} --
-             no backslash, since LaTeX prepends one internally when
-             expanding the pipe encap. This is what real projects
-             actually use. `encap_format` is the already-isolated suffix
-             after the top-level pipe (from _strip_global_encap_safe,
-             called on the raw text before this), so it's matched
-             directly rather than re-parsing pipe/brace nesting here.
-             Deliberately not re-stripped from `text` -- encap_format
-             came from a separate string and `text` here is already the
-             pipe-free remainder that _strip_global_encap_safe returned.
-        """
-        see_refs = []
-        seealso_refs = []
-        cleaned_chars = list(text)
-
-        see_pattern = re.compile(r'\\(seealso|see)\{')
-        for match in see_pattern.finditer(text):
-            keyword = match.group(1)
-            inner, _ = cls._extract_balanced_braces(text, match.end())
-            if inner:
-                ref = inner.strip()
-                if keyword == "seealso":
-                    seealso_refs.append(ref)
-                else:
-                    see_refs.append(ref)
-
-            end_pos = match.end() + len(inner) + 1
-            for i in range(match.start(), end_pos):
-                if i < len(cleaned_chars):
-                    cleaned_chars[i] = ' '
-
-        cleaned_text = "".join(cleaned_chars).strip()
-
-        if cleaned_text.endswith('|'):
-            cleaned_text = cleaned_text[:-1].strip()
-        if cleaned_text.startswith('|'):
-            cleaned_text = cleaned_text[1:].strip()
-
-        pipe_see_match = re.match(r'(seealso|see)\{(.*)\}$', encap_format, re.DOTALL)
-        if pipe_see_match:
-            ref = pipe_see_match.group(2).strip()
-            if ref:
-                if pipe_see_match.group(1) == "seealso":
-                    seealso_refs.append(ref)
-                else:
-                    see_refs.append(ref)
-
-        return cleaned_text, see_refs, seealso_refs
 
     @classmethod
     def _build_see_reference_payload(cls, see_list: list[str], seealso_list: list[str]) -> dict:

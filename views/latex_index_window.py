@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QEvent, Qt, Signal, QSize, Slot
 
 from controllers.app_style_configuration import AppStyleConfiguration
+from models import index_tag_grammar as grammar
 from views.latex_entry_auto_completer import LatexEntryAutoCompleter
 
 class EntryWindowTitleBar(QWidget):
@@ -270,7 +271,10 @@ class LatexIndexWindow(QDockWidget):
         mains, sub1s, sub2s = set(), set(), set()
         for ref in heading_data:
             raw = ref.get("heading_raw_text", "")
-            parts = raw.split("!")
+            # Was raw.split("!"), which neither dropped the encap nor
+            # respected braces -- so a single-level "Main|bold" entry
+            # offered "Main|bold" as a main-heading completion.
+            parts = grammar.level_path(raw)
             if parts:
                 mains.add(parts[0].strip())
             if len(parts) > 1:

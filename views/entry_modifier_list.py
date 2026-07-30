@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Signal, Slot, Qt, QPoint, QSettings
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 
+from models import index_tag_grammar as grammar
 from views.entry_modifier_table_view import EntryModifierTableView
 
 # ---------------------------------------------------------------------------
@@ -45,11 +46,11 @@ def _parse_index_level(raw: str) -> tuple[str, str]:
         "redistribution from policies@\\textit{redistribution from} policies"
             → ("redistribution from policies", "\\textit{redistribution from} policies")
         "analysis"  → ("", "analysis")   # no @ — no explicit sort override
+
+    Brace-aware since the grammar module took this over: a level of
+    ``a{b@c}d`` is one display string, not a sort key of ``a{b``.
     """
-    if "@" in raw:
-        sort_key, _, display = raw.partition("@")
-        return sort_key.strip(), display.strip()
-    return "", raw.strip()
+    return grammar.split_sort_key(raw)
 
 
 def _parse_heading_raw_text(heading_raw_text: str) -> dict:
@@ -65,44 +66,16 @@ def _parse_heading_raw_text(heading_raw_text: str) -> dict:
         sub1_sort, sub1_disp,
         sub2_sort, sub2_disp,
         encap
+
+    Parsing is strip=False so the encap round-trips through the table
+    byte-for-byte; the individual level halves are stripped by
+    _parse_index_level as before. This is the exact inverse of
+    EntryModifierController._assemble_canonical_heading, and both now
+    share one grammar so they cannot drift apart.
     """
-    # Split encap from the end (last ``|`` not inside braces)
-    encap = ""
-    # Walk right-to-left to find an unbraced ``|``
-    depth = 0
-    split_pos = -1
-    for i in range(len(heading_raw_text) - 1, -1, -1):
-        ch = heading_raw_text[i]
-        if ch == "}":
-            depth += 1
-        elif ch == "{":
-            depth -= 1
-        elif ch == "|" and depth == 0:
-            split_pos = i
-            break
-
-    if split_pos != -1:
-        encap = heading_raw_text[split_pos + 1:]
-        heading_raw_text = heading_raw_text[:split_pos]
-
-    # Split on ``!`` (makeindex level separator), respecting braces
-    levels: list[str] = []
-    current: list[str] = []
-    depth = 0
-    for ch in heading_raw_text:
-        if ch == "{":
-            depth += 1
-            current.append(ch)
-        elif ch == "}":
-            depth -= 1
-            current.append(ch)
-        elif ch == "!" and depth == 0:
-            levels.append("".join(current))
-            current = []
-        else:
-            current.append(ch)
-    if current:
-        levels.append("".join(current))
+    tag = grammar.parse_body(heading_raw_text, strip=False)
+    levels = tag.levels
+    encap = tag.encap
 
     def _level(idx: int) -> tuple[str, str]:
         return _parse_index_level(levels[idx]) if idx < len(levels) else ("", "")

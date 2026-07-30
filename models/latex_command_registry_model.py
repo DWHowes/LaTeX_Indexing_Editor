@@ -6,6 +6,15 @@ class LatexCommandRegistryModel:
     SETTINGS_GROUP = "latex_commands"
 
     _NEWCOMMAND_START_RE = re.compile(r'^\s*\\(?:newcommand|renewcommand|providecommand)\*?\s*\{')
+
+    # Deliberately NOT index_tag_grammar.MACRO_PATTERN: this asks a
+    # different question. The grammar's pattern recognizes an indexing
+    # macro whose tag is about to be parsed (including project-adopted
+    # custom command names); this one asks whether a \newcommand body
+    # *calls* plain \index at all, which is how a candidate custom
+    # command gets discovered in the first place -- so it must match the
+    # bare name only, and must accept a following "[" (an optional
+    # argument) as well as "{".
     _INDEX_CALL_RE = re.compile(r'\\index\s*[\{\[]')
 
     def __init__(self):

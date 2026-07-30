@@ -1,5 +1,7 @@
 from collections import defaultdict
 
+from models import index_tag_grammar as grammar
+
 
 def _position_key(entry: dict):
     """
@@ -21,8 +23,13 @@ def _entry_id(entry: dict) -> int:
 
 
 def _is_cross_reference(entry: dict) -> bool:
-    encap = str(entry.get("encap") or "")
-    return encap.startswith("see{") or encap.startswith("seealso{")
+    # Was a startswith("see{") prefix test; now a full-shape parse via the
+    # grammar module. The two differ only for a malformed encap like
+    # "see{X}junk", which the prefix test counted as a cross-reference and
+    # this does not -- the stricter reading is the right one here, since
+    # such an entry carries no usable target and the parser cannot produce
+    # it anyway (split_encap cuts at the LAST top-level pipe).
+    return grammar.is_xref_encap(str(entry.get("encap") or ""))
 
 
 def find_range_consistency_issues(records: list) -> list:
@@ -83,9 +90,9 @@ def find_range_consistency_issues(records: list) -> list:
         points = []
         for entry in group_entries:
             encap = entry.get("encap")
-            if encap == "(":
+            if grammar.is_range_opener(encap):
                 openers.append(entry)
-            elif encap == ")":
+            elif grammar.is_range_closer(encap):
                 closers.append(entry)
             else:
                 points.append(entry)
@@ -106,7 +113,7 @@ def find_range_consistency_issues(records: list) -> list:
         valid_ranges = []  # list of (open_entry, close_entry)
         open_queue = []
         for entry in open_close_stream:
-            if entry.get("encap") == "(":
+            if grammar.is_range_opener(entry.get("encap")):
                 open_queue.append(entry)
             else:  # ")"
                 if open_queue:
