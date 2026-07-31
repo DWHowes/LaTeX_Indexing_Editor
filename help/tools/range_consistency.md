@@ -18,7 +18,9 @@ Running the check opens a list of every problem found, grouped by category, each
 - Overlapping ranges are merged into a single continuous range spanning from the first one's start to the second one's end.
 - An enclosed point reference is deleted.
 
-Fixes are applied immediately to the `.tex` source and the project database — the same as any other insert or delete made through the editor, not staged for [Save](../getting_started/saving_and_closing.md). After applying, the list refreshes so you can see what's left.
+Fixes go through exactly the same path as any other delete made through the editor: the `\index` macro changes in the open tab's buffer (or on disk, for a file with no tab open), and the project database is updated when you [save](../getting_started/saving_and_closing.md). After applying, the list refreshes so you can see what's left.
+
+Note that the check itself reads from the database, so it reports on your project as last saved. Save before running it if you've been editing ranges.
 
 ## See also
 

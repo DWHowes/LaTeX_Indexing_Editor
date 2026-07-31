@@ -19,7 +19,9 @@ Whether you get a single point reference or a page-range reference depends on **
 
 ## What happens on insert
 
-The editor builds the correct `\index` macro (or your chosen custom command) from the fields you filled in and writes it into the source file at the cursor/selection — immediately, not on next save. The new entry appears in the index tree and the entry table right away too.
+The editor builds the correct `\index` macro (or your chosen custom command) from the fields you filled in and writes it into the file at the cursor/selection, and the new entry appears in the index tree and the entry table right away.
+
+Both of those are in memory, though — the macro is in the tab's buffer and the entry is in the editor's working copy of the index. The file on disk and the project database catch up when you [save](../getting_started/saving_and_closing.md). Nothing is lost in between (undo still works, the entry is fully usable), but a project closed without saving won't have it.
 
 ## See also
 

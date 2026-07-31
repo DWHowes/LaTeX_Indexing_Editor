@@ -8,7 +8,7 @@
 - **Total index references** — the number of ordinary page references in the project. A page-range reference (see [Range References](../index_tree/range_references.md)) counts once, not twice, even though it's two `\index` macros in the source.
 - **Total cross-references** — the number of "see" / "see also" pointers (see [Cross-References](../index_tree/cross_references.md)), counted separately from ordinary page references.
 
-The dialog reads straight from the project database, so the numbers reflect whatever was last loaded or [resynced](../tools/resync.md) — if you've hand-edited a `.tex` file outside the editor since then, resync first for an up-to-date count.
+The dialog reads straight from the project database, so the numbers reflect the project **as last saved**, not the entries currently on screen — index changes are written to the database when you [save](../getting_started/saving_and_closing.md). Save first for a count that includes this session's work. Likewise, if you've hand-edited a `.tex` file outside the editor, [resync](../tools/resync.md) first.
 
 ## See also
 

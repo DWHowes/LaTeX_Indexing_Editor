@@ -14,7 +14,9 @@ To remove just one `\index` occurrence — leaving the rest of that heading's re
 
 Right-click a node in the tree and choose **Delete Term** to remove it completely: every `\index` reference at or below that node (including any sub-headings under it), across every file in the project. You'll be asked to confirm first, with a count of how many references will be removed.
 
-This permanently removes the `\index` macro(s) from the source `.tex` file(s) right away — it isn't staged for [Save](../getting_started/saving_and_closing.md), and it can't be undone once you save the project (before saving, discarding the affected tabs would still revert it, same as any other change made this session).
+This removes the `\index` macro(s) from the source `.tex` file(s) — from the tab's buffer for any file you have open, and straight to the file on disk for any you don't. The matching database rows go when you [save](../getting_started/saving_and_closing.md).
+
+Until then it's reversible: `Ctrl+Z` steps back through the deleted references one at a time, and discarding the affected tabs reverts them wholesale, same as any other change made this session. Once you save, it's permanent.
 
 ## See also
 

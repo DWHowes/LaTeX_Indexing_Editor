@@ -12,6 +12,8 @@ You can hide columns you don't need: right-click the table's header row to toggl
 
 Click into a cell and type to change it. An edit here rewrites the corresponding `\index` macro in the source file — the same way a rename in the index tree does — so there's no separate "apply" step beyond finishing the edit.
 
+The rewrite goes into the open tab's buffer (or straight to the file, if that file isn't open in a tab); the project database is updated when you [save](../getting_started/saving_and_closing.md).
+
 ## Searching
 
 The search box above the table filters rows live by Main, Sub1, and Sub2 display text — type to narrow the list down to matching entries.

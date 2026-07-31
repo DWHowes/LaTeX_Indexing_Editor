@@ -6,7 +6,7 @@
 
 1. Select one or more rows in the [entry table](../entry_table/editing.md).
 2. Right-click and choose **Duplicate references**.
-3. Each selected entry is copied — same page style, same location — with a fresh copy inserted immediately after the original in the source.
+3. Each selected entry is copied — same page style, same location — with a fresh copy inserted immediately after the original in the source. As with any other index edit, the new copies reach the project database when you [save](../getting_started/saving_and_closing.md).
 4. The new copies start out identical to the originals. Retype the Main/Sub1/Sub2 heading on each new row to point it at the different heading you actually want it cross-posted under.
 
 ## Range references

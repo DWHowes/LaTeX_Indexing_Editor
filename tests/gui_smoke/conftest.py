@@ -16,12 +16,21 @@ def _open_project(qtbot, monkeypatch, pipeline_ctrl, project_dir: str, project_n
     code path.
 
     QMessageBox.question is suppressed for the duration of the open too.
-    Finishing a load can raise two real modals -- the external-drift
-    prompt, and the offer to migrate cross-references written inline in
-    the source (the sample project has one, in 10.Chapter10/chapter10.tex)
-    -- and a real modal blocks the whole run forever headlessly rather
-    than failing. "No" is returned so neither is accepted: a test that
-    wants either prompt drives it directly afterwards with its own
+    Three real modals sit on this path, and a real modal blocks the whole
+    run forever headlessly rather than failing:
+
+    - the external-drift prompt, and the offer to migrate cross-references
+      written inline in the source (the sample project has one, in
+      10.Chapter10/chapter10.tex), both raised as a load finishes;
+    - the unwritten-index-changes prompt, raised BEFORE the load: opening
+      a project closes whichever one is already open, and since index
+      writes became deferred to Save, a previous test in the same module
+      (booted_app is module-scoped) can easily leave the journal dirty.
+
+    Discard is returned. It is not Yes, so neither of the first two is
+    accepted, and it is the right answer for the third -- this fixture is
+    abandoning the current project, not saving it. A test that wants any
+    of these prompts drives it directly afterwards with its own
     monkeypatch, which is how test_file_sync_checksums_on_save.py asserts
     on the drift prompt.
     """
@@ -29,7 +38,7 @@ def _open_project(qtbot, monkeypatch, pipeline_ctrl, project_dir: str, project_n
     monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: (project_name, True)))
     monkeypatch.setattr(
         QMessageBox, "question",
-        staticmethod(lambda *a, **k: QMessageBox.StandardButton.No),
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.Discard),
     )
 
     pipeline_ctrl.select_project_folder_workflow()

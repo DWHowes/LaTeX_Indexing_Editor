@@ -19,6 +19,7 @@ import sqlite3
 
 import pytest
 from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import QMessageBox
 
 
 @pytest.fixture(autouse=True)
@@ -120,6 +121,34 @@ class TestExecuteProjectSaveWorkflow:
         message = pipeline_ctrl.window.status_bar.currentMessage().lower()
         assert "failed to save" in message
 
+    def test_a_scoped_single_file_save_writes_the_heading_row_too(self, opened_project):
+        """
+        Regression test. Closing one tab with "Save" flushes only that
+        file's reference rows -- but a reference row names a heading_id,
+        and heading rows are journalled in memory alongside it. The scoped
+        flush wrote the reference and not the heading, so a reopened
+        project had references hanging off a heading that was never
+        created. The scoped path now drains through the same
+        _drain_pending_changes as a full save, which writes heading
+        INSERTS first (deletes are still held back for the full save --
+        other, unsaved files can still point at the heading).
+        """
+        pipeline_ctrl, project_dir = opened_project
+        persistence = pipeline_ctrl.scope_ctrl.get_persistence_model()
+        engine = pipeline_ctrl.idx_ctrl.model_engine
+        intro_path = project_dir / "01.Intro" / "intro.tex"
+
+        heading_id = engine.resolve_heading_path("ScopedSaveHeading")
+        assert engine.has_pending_heading_changes() is True
+
+        pipeline_ctrl._confirm_pending_insertions(str(intro_path))
+
+        with sqlite3.connect(persistence.db_path) as conn:
+            row = conn.execute(
+                "SELECT heading_text FROM project_headings WHERE id = ?", (heading_id,)
+            ).fetchone()
+        assert row is not None and row[0] == "ScopedSaveHeading"
+
     def test_no_changes_still_reports_success(self, opened_project):
         """
         Documents an existing quirk found while writing this coverage,
@@ -140,3 +169,90 @@ class TestExecuteProjectSaveWorkflow:
 
         message = pipeline_ctrl.window.status_bar.currentMessage().lower()
         assert "saved successfully" in message
+
+
+class TestUnwrittenIndexChangesOnProjectClose:
+    """
+    The second gate on File -> Close Project. close_all_tabs() only ever
+    asks about editor-tab buffers, so once index writes became deferred to
+    Save, an edit touching a file with no open tab had no modified tab to
+    prompt about and the close dropped it silently -- while its .tex
+    rewrite had already gone to disk. These drive the real close workflow
+    with QMessageBox.question monkeypatched per button, the same pattern
+    the conftest uses (a constructed box's .exec() could not be
+    intercepted -- see tests/README.md).
+
+    Each test reopens the project afterwards so the module-scoped
+    booted_app is left with one, as every other test here expects.
+    """
+
+    @staticmethod
+    def _answer(monkeypatch, button):
+        monkeypatch.setattr(
+            QMessageBox, "question", staticmethod(lambda *a, **k: button)
+        )
+
+    def _make_pending_rename(self, pipeline_ctrl):
+        item = _find_tree_item(pipeline_ctrl, "Introduction")
+        pipeline_ctrl.index_edit_ctrl._process_heading_rename(item, "Introduction", "ClosePromptRename")
+        assert pipeline_ctrl._has_pending_db_writes() is True
+
+    def test_cancel_aborts_the_close_and_keeps_the_changes(self, opened_project, monkeypatch):
+        pipeline_ctrl, _project_dir = opened_project
+        self._make_pending_rename(pipeline_ctrl)
+        self._answer(monkeypatch, QMessageBox.StandardButton.Cancel)
+
+        assert pipeline_ctrl._execute_project_close_workflow() is False
+
+        assert pipeline_ctrl.scope_ctrl.active_project_name != "Untitled Project"
+        assert pipeline_ctrl._has_pending_db_writes() is True
+
+    def test_save_writes_them_before_the_project_closes(
+        self, opened_project, monkeypatch, qtbot, open_project
+    ):
+        pipeline_ctrl, project_dir = opened_project
+        persistence = pipeline_ctrl.scope_ctrl.get_persistence_model()
+        db_path = persistence.db_path
+        self._make_pending_rename(pipeline_ctrl)
+        uid = next(iter(pipeline_ctrl.entry_modifier_model._dirty_ids))
+        assert _read_heading_raw_text(db_path, uid) == "Introduction"
+
+        self._answer(monkeypatch, QMessageBox.StandardButton.Save)
+        assert pipeline_ctrl._execute_project_close_workflow() is True
+
+        assert _read_heading_raw_text(db_path, uid) == "ClosePromptRename"
+        open_project(qtbot, monkeypatch, pipeline_ctrl, str(project_dir))
+
+    def test_discard_abandons_them(self, opened_project, monkeypatch, qtbot, open_project):
+        pipeline_ctrl, project_dir = opened_project
+        db_path = pipeline_ctrl.scope_ctrl.get_persistence_model().db_path
+        self._make_pending_rename(pipeline_ctrl)
+        uid = next(iter(pipeline_ctrl.entry_modifier_model._dirty_ids))
+
+        self._answer(monkeypatch, QMessageBox.StandardButton.Discard)
+        assert pipeline_ctrl._execute_project_close_workflow() is True
+
+        assert _read_heading_raw_text(db_path, uid) == "Introduction"
+        open_project(qtbot, monkeypatch, pipeline_ctrl, str(project_dir))
+
+    def test_a_clean_close_raises_no_prompt_at_all(
+        self, opened_project, monkeypatch, qtbot, open_project
+    ):
+        """
+        The prompt is gated on _has_pending_db_writes() alone, not on the
+        sticky _tree_modified the exit prompt also consults -- otherwise
+        every close after any tree edit would raise it with nothing
+        actually outstanding.
+        """
+        pipeline_ctrl, project_dir = opened_project
+        pipeline_ctrl._tree_modified = True
+        asked = []
+        monkeypatch.setattr(
+            QMessageBox, "question",
+            staticmethod(lambda *a, **k: asked.append(a) or QMessageBox.StandardButton.Cancel),
+        )
+
+        assert pipeline_ctrl._execute_project_close_workflow() is True
+
+        assert asked == []
+        open_project(qtbot, monkeypatch, pipeline_ctrl, str(project_dir))

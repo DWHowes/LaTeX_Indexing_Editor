@@ -413,7 +413,7 @@ class AppPipelineController(QObject):
 
         self._refresh_undo_actions()
             
-    def _drain_pending_changes(self, persistence, engine):
+    def _drain_pending_changes(self, persistence, engine, file_path: str | None = None):
         """
         Writes every pending index change in one transaction.
 
@@ -421,6 +421,18 @@ class AppPipelineController(QObject):
         heading inserts first, because a reference row names a heading_id
         that has to exist; heading deletes last, because the references
         pointing at a heading have to be gone before it is.
+
+        file_path scopes the drain to one file's references -- the
+        single-tab Save path, where only that one file's .tex is durably
+        on disk (see EntryModifierModel.flush_dirty_to_db for why the
+        others must not be written yet). Heading INSERTS still flush in
+        full even when scoped: a heading belongs to no single file, and
+        the reference rows about to be written name heading_ids that have
+        to exist first -- writing them without their heading row is what
+        left a reopened project with references hanging off a heading
+        that was never created. Heading DELETES are held back instead,
+        because references in the other, still-unsaved files can still
+        point at the heading being removed.
 
         The whole drain is one transaction so a save is all-or-nothing.
         If it raises, the journals are put back exactly as they were --
@@ -443,10 +455,13 @@ class AppPipelineController(QObject):
             with persistence.transaction():
                 heading_inserts = engine.flush_heading_inserts(persistence) if engine else (0, 0)
                 dirty_success, dirty_failures = (
-                    self.entry_modifier_model.flush_dirty_to_db()
+                    self.entry_modifier_model.flush_dirty_to_db(file_path)
                     if self.entry_modifier_model else (0, 0)
                 )
-                heading_deletes = engine.flush_heading_deletes(persistence) if engine else (0, 0)
+                heading_deletes = (
+                    (0, 0) if file_path
+                    else (engine.flush_heading_deletes(persistence) if engine else (0, 0))
+                )
         except Exception as exc:
             if reference_journal is not None:
                 reference_journal.restore(reference_backup)
@@ -661,10 +676,17 @@ class AppPipelineController(QObject):
         edits alike — can be written now. Scoped to this file so a
         still-unsaved rename in a DIFFERENT open tab isn't pushed to the
         DB ahead of its own save.
+
+        Goes through _drain_pending_changes rather than calling the
+        reference flush on its own, so this path gets the same transaction,
+        the same rollback-on-failure, and — the reason it had to change —
+        the pending heading rows those references name.
         """
         norm_path = os.path.normpath(file_path) if file_path else ""
         if norm_path and self.entry_modifier_model:
-            self.entry_modifier_model.flush_dirty_to_db(norm_path)
+            persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+            engine = self.idx_ctrl.model_engine if self.idx_ctrl else None
+            self._drain_pending_changes(persistence, engine, norm_path)
 
         # Closing a tab with "Save" is a real edit-to-disk path of its own,
         # not just a step on the way to a project save, so re-stamp here
@@ -680,9 +702,10 @@ class AppPipelineController(QObject):
         file could have accumulated since it was opened/last saved:
 
         1. Fresh \\index insertions — removed from the tree and table
-           views and the in-memory cache, with the project_references/
-           project_headings rows deleted (they were committed immediately
-           at insertion time — see _handle_manual_index_insertion).
+           views and the in-memory cache. There are no project_references/
+           project_headings rows to delete: an insertion is journalled,
+           not written, until a save drains it, so cancelling its journal
+           entry is the whole database half of this rollback.
         2. Unsaved renames (tree or table edits) — the in-memory cache is
            reverted to the DB's still-current value and the tree/table
            views are refreshed to match (see IndexEditController.
@@ -1326,8 +1349,53 @@ class AppPipelineController(QObject):
         if self.scope_ctrl.active_project_name == "Untitled Project":
             self.window.status_bar.showMessage("No project is open.", 3000)
             return
+        if not self._confirm_resync_over_unsaved_changes():
+            self.window.status_bar.showMessage("Resync cancelled.", 2000)
+            return
         self._resync_index_data_from_disk()
         self.window.status_bar.showMessage("Index data resynced from disk.", 3000)
+
+    def _confirm_resync_over_unsaved_changes(self) -> bool:
+        """
+        Guards the manual resync when something is still unsaved. Returns
+        False if the user cancels.
+
+        A resync rebuilds project_headings/project_references from the .tex
+        files and nothing else, so anything held only in memory -- every
+        journalled index change, and any tab buffer not yet on disk -- is
+        discarded by it. The automatic resync already refuses to run in
+        that state (_is_safe_to_auto_resync), and this deliberate action
+        used to be the one way past that check with no warning at all.
+
+        Save is offered rather than only Yes/No because saving first makes
+        the resync lossless: the changes reach the files, and the rebuild
+        then picks them straight back up. Reference ids are still
+        reassigned from scratch either way -- see
+        _resync_index_data_from_disk.
+
+        Static QMessageBox.question, not a constructed box: this handler is
+        driven directly by the smoke tests, and a constructed box's .exec()
+        cannot be monkeypatched (tests/README.md).
+        """
+        if self._is_safe_to_auto_resync():
+            return True
+
+        reply = QMessageBox.question(
+            self.window,
+            "Unsaved Changes",
+            "Resyncing rebuilds the index data from your .tex files, and will "
+            "discard any changes that haven't been saved yet.\n\n"
+            "Save them first?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+        )
+
+        if reply == QMessageBox.StandardButton.Cancel:
+            return False
+        if reply == QMessageBox.StandardButton.Save:
+            self.execute_project_save_workflow()
+        return True
 
     @Slot()
     def _handle_manual_workspace_resync_request(self) -> None:
@@ -1702,6 +1770,73 @@ class AppPipelineController(QObject):
             self._rtf_viewer_dialog.apply_theme_configuration(is_dark)
             self._rtf_viewer_dialog.show()
 
+    def _prompt_for_unwritten_index_changes(self) -> bool:
+        """
+        Second gate on project close, for index edits that exist only in
+        memory. Returns False if the user cancels the close.
+
+        close_all_tabs() asks about editor-tab buffers and nothing else.
+        Since index writes became deferred to Save, an edit that touches a
+        file with no open tab — a heading rename sweep, a Delete Term, a
+        range-consistency fix — leaves no modified tab for that walk to
+        find, so closing the project dropped it without a word. The .tex
+        half of such an edit has already gone to disk (a file with no open
+        tab is rewritten as it is edited), so dropping only the database
+        half leaves the source and the database disagreeing.
+
+        Gated on _has_pending_db_writes() alone, not _tree_modified as the
+        exit prompt is: that flag is sticky for the whole session and is
+        never cleared by a single-tab Save, so including it would raise
+        this prompt on closes with nothing actually outstanding.
+
+        Uses the static QMessageBox.question rather than building a box and
+        calling .exec() the way the shutdown prompt does. A close happens
+        on a path the test suite drives constantly -- reopening a project
+        closes the current one first -- and a constructed modal's .exec()
+        is a C++-bound call monkeypatch cannot intercept, so it would hang
+        the whole run instead of failing it (tests/README.md, "QMenu.exec()
+        cannot be monkeypatched"). The static form is patchable, which is
+        the only reason this prompt can live here at all.
+        """
+        if not self._has_pending_db_writes():
+            return True
+
+        reply = QMessageBox.question(
+            self.window,
+            "Unsaved Index Changes",
+            "This project has index changes that haven't been written to its "
+            "database yet. Save them before closing?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+        )
+
+        if reply == QMessageBox.StandardButton.Cancel:
+            return False
+
+        if reply == QMessageBox.StandardButton.Save:
+            self.execute_project_save_workflow()
+            return True
+
+        # Discard -- and anything else the prompt returns, which is what a
+        # headless stub gives back. Put every file still carrying unwritten
+        # index changes
+        # back to its session-start content, so the source stops claiming
+        # an edit the database is about to forget. Snapshot the paths
+        # first — _discard_all_pending_insertions reads the same set and
+        # empties it as it goes. Tabs are all resolved by this point: a
+        # tab the user saved had its file flushed above and is no longer
+        # dirty, so it is never touched here.
+        dirty_files = (
+            set(self.entry_modifier_model.get_dirty_file_paths())
+            if self.entry_modifier_model else set()
+        )
+        self._discard_all_pending_insertions()
+        if self.backup_manager:
+            for path in dirty_files:
+                self.backup_manager.restore_file_from_backup(path)
+        return True
+
     @Slot()
     def _execute_project_close_workflow(self) -> bool:
         """
@@ -1710,6 +1845,10 @@ class AppPipelineController(QObject):
         callers must check the return value before proceeding.
         """
         if not self.lc_ctrl.close_all_tabs(prompt=True, doc_io=self.doc_io):
+            self.window.status_bar.showMessage("Project close cancelled.", 2000)
+            return False
+
+        if not self._prompt_for_unwritten_index_changes():
             self.window.status_bar.showMessage("Project close cancelled.", 2000)
             return False
 

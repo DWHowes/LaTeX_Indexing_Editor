@@ -23,7 +23,7 @@ Every cross-reference in the project, three columns: **Source**, **Type**, **Cro
 
 To remove one or more rows, select them and either press **Delete** or right-click and choose **Remove Selected Cross-Reference(s)**.
 
-Every add, edit, or removal here takes effect immediately — there's nothing to separately save, and no staging step the way ordinary entry-table edits have.
+Every add, edit, or removal here is written to the project database and to `cross_refs.tex` immediately — there's nothing to separately save, unlike ordinary index entries, which [wait for a save](../getting_started/saving_and_closing.md). Cross-references work this way because `cross_refs.tex` is generated rather than scanned, so there's no `.tex` source to rebuild them from if they were held back and lost.
 
 ## Linking it into the base document
 

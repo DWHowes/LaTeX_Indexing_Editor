@@ -795,6 +795,20 @@ the method you're adding it to and monkeypatch them in the same commit.
 example: `test_cross_reference_controller.py` was already calling
 `_on_migration_approved` directly, so the new guard's warning wedged the run.
 
+**Second worked example, and the one that shows which modal form to reach
+for:** `AppPipelineController._prompt_for_unwritten_index_changes`, the
+unsaved-index-changes gate on project close. Project close is on the path
+`_open_project` takes every time (opening a project closes whichever one is
+already open, and `booted_app` is module-scoped, so a previous test's dirty
+journal is enough to raise it) — the whole `gui_smoke` layer hung. It was
+first written the way the shutdown prompt is written, constructing a
+`QMessageBox` and calling `.exec()`, which **cannot** be intercepted, for the
+same C++-bound reason as `QMenu.exec()` above. Rewriting it to use the static
+`QMessageBox.question(parent, title, text, Save | Discard | Cancel)` made it
+patchable, and the conftest's existing `question` stub — now returning
+`Discard` — covers it. **If a modal has to go on a path tests drive, use a
+static `QMessageBox` method, never a constructed box.**
+
 ### Stale lambdas outliving the object they close over
 
 Found while writing `test_live_insertion_persistence.py`, and a real app bug,
