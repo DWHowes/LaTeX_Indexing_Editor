@@ -92,7 +92,49 @@ def _parse_heading_raw_text(heading_raw_text: str) -> dict:
     )
 
 
-_BOLD_ENCAP_VALUES = frozenset({"bold", "textbf", "bf"})
+# The encap names the Page column renders as bold or italic. These are the
+# built-in defaults; a project that wraps page numbers in its own macro
+# (\strong, \important, a Table-of-Authorities style) would otherwise get a
+# plain, mis-styled cell for it, so both lists are user-editable from
+# Preferences -> General and pushed in here by set_encap_style_values().
+DEFAULT_BOLD_ENCAP_VALUES = ("bold", "textbf", "bf")
+DEFAULT_ITALIC_ENCAP_VALUES = ("textit", "it", "italic")
+
+_BOLD_ENCAP_VALUES = frozenset(DEFAULT_BOLD_ENCAP_VALUES)
+
+
+def set_encap_style_values(bold_values=None, italic_values=None) -> None:
+    """
+    Replaces the bold and/or italic encap name sets.
+
+    Module-level rather than per-instance because _make_encap_item is a
+    free function called while building every row, and threading a config
+    object through that path would touch far more than this preference is
+    worth. A None or empty argument leaves that list at its current value
+    rather than blanking it -- an empty list would silently turn off
+    bold/italic rendering altogether, which is never what an empty
+    preferences field means.
+
+    Values are normalised the same way _is_bold_encap compares them
+    (stripped and lowercased), so "TextBF " entered in the dialog matches
+    a "textbf" encap in the source.
+    """
+    global _BOLD_ENCAP_VALUES, _ITALIC_ENCAP_VALUES
+
+    def _normalise(raw):
+        if isinstance(raw, str):
+            raw = raw.split(",")
+        return frozenset(
+            str(item).strip().lower() for item in (raw or []) if str(item).strip()
+        )
+
+    bold = _normalise(bold_values)
+    if bold:
+        _BOLD_ENCAP_VALUES = bold
+
+    italic = _normalise(italic_values)
+    if italic:
+        _ITALIC_ENCAP_VALUES = italic
 
 
 def _is_bold_encap(value: str) -> bool:
@@ -126,7 +168,7 @@ def _make_encap_item(value: str) -> QStandardItem:
     return item
 
 
-_ITALIC_ENCAP_VALUES = frozenset({"textit", "it", "italic"})
+_ITALIC_ENCAP_VALUES = frozenset(DEFAULT_ITALIC_ENCAP_VALUES)
 
 
 def _is_italic_encap(value: str) -> bool:

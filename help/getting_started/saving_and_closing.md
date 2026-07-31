@@ -26,7 +26,17 @@ Three things are written immediately and never wait for a save:
 
 If the database write fails, the status bar says so explicitly and **nothing is written**. Your changes are still there, still pending, and the next save tries again.
 
-Because index changes accumulate in memory between saves, it's worth saving regularly during a long editing run — see [If the application closes unexpectedly](#if-the-application-closes-unexpectedly) below.
+## Auto-save
+
+Because index changes accumulate in memory between saves, the editor also saves for you on a timer — **every 5 minutes** by default, adjustable (or switchable off) in [Preferences → General](../preferences/general.md).
+
+An automatic save is exactly the same operation as `Ctrl+S`, with the same four steps. Three consequences worth knowing:
+
+- **It moves the Discard baseline**, because clearing the session backups is part of a save. See [About session backups](#about-session-backups) below.
+- **The clock restarts whenever you save yourself**, so the interval always means "this long since the last save".
+- **It stays out of your way** — a tick with nothing to write does nothing at all, a tick that arrives while a dialog is open or a cell edit is half-finished waits for the next one, and nothing about it ever raises a dialog. A successful automatic save is a brief status-bar note and nothing more.
+
+Auto-save reduces what a crash can cost; it doesn't eliminate it. Saving at a natural stopping point is still worth the keystroke.
 
 ## Closing a project (Ctrl+W)
 
@@ -54,11 +64,11 @@ Closing the application window (or **File → Exit**, `Alt+F4`) works differentl
 
 The first time the editor writes to a file during a session, it keeps a backup copy of that file's original, pristine content. **Discard** (whether for a single tab or the whole workspace) restores from that backup rather than trying to undo individual edits — so discarding always gets you back to exactly where the file stood when the session started touching it, however many changes were made in between. Backups are cleared automatically once you save.
 
-This is also why a save moves the line Discard rolls back to: **Discard reverts to the last save**, not to when you opened the project.
+This is also why a save moves the line Discard rolls back to: **Discard reverts to the last save — automatic or manual** — not to when you opened the project.
 
 ## If the application closes unexpectedly
 
-Index changes that hadn't been saved are gone — they only existed in memory. Entries you inserted into an open tab are gone from the `.tex` file too, for the same reason.
+Index changes that hadn't been saved are gone — they only existed in memory. Entries you inserted into an open tab are gone from the `.tex` file too, for the same reason. With auto-save on, this is bounded by the interval: at most the last few minutes of work.
 
 Changes made to files with **no open tab** are the one asymmetric case: their `\index` macros are already on disk, but the matching database rows were never written. The editor detects this the next time the project opens — it compares each file against the checksum it recorded and raises **Files Changed Outside the Editor**, offering to resync the index data from those files. Accepting rebuilds the index data from what's actually in your `.tex` sources. See [Resyncing Index Data from Disk](../tools/resync.md).
 
@@ -67,3 +77,4 @@ Changes made to files with **no open tab** are the one asymmetric case: their `\
 - [Opening and Creating a Project](../getting_started/opening_a_project.md)
 - [Editing and Deleting Entries](../index_tree/editing_deleting.md)
 - [Resyncing Index Data from Disk](../tools/resync.md)
+- [Preferences → General](../preferences/general.md) — the auto-save interval and switch

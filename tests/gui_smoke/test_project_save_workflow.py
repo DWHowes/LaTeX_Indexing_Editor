@@ -149,26 +149,53 @@ class TestExecuteProjectSaveWorkflow:
             ).fetchone()
         assert row is not None and row[0] == "ScopedSaveHeading"
 
-    def test_no_changes_still_reports_success(self, opened_project):
+    def test_saving_an_untouched_project_reports_nothing_to_do(self, opened_project):
         """
-        Documents an existing quirk found while writing this coverage,
-        deliberately NOT changed here (fixing it means changing
-        DocumentIOController.commit_all_open_buffers's return contract,
-        which has its own callers elsewhere -- out of scope for this pass):
-        commit_all_open_buffers() returns True whenever a tabs widget
-        exists at all, regardless of whether anything was actually
-        modified, so execute_project_save_workflow's tex_success is
-        effectively always True in the real app. The "No uncommitted
-        modifications detected." branch is consequently unreachable in
-        practice -- calling it with a genuinely untouched project still
-        reports "Workspace saved successfully."
+        This used to assert the opposite, documenting a quirk left in
+        deliberately: commit_all_open_buffers() returns True whenever a
+        tabs widget exists at all, regardless of whether anything was
+        written, so tex_success was effectively always True and the "No
+        uncommitted modifications detected." branch was unreachable.
+
+        Auto-save made that quirk load-bearing rather than cosmetic -- see
+        test_a_save_with_nothing_to_do_keeps_the_session_backups below --
+        so execute_project_save_workflow now asks
+        check_unsaved_tex_changes() before committing, and the branch is
+        reachable.
         """
         pipeline_ctrl, _project_dir = opened_project
 
-        pipeline_ctrl.execute_project_save_workflow()
+        assert pipeline_ctrl.execute_project_save_workflow() is False
 
         message = pipeline_ctrl.window.status_bar.currentMessage().lower()
-        assert "saved successfully" in message
+        assert "no uncommitted modifications" in message
+
+    def test_a_save_with_nothing_to_do_keeps_the_session_backups(self, opened_project):
+        """
+        The reason the quirk above had to go. Session backups ARE the
+        Discard baseline, so clearing them for a save that wrote nothing
+        would silently destroy the user's way back to their last save --
+        twelve times an hour once auto-save is running.
+        """
+        pipeline_ctrl, project_dir = opened_project
+        intro_path = project_dir / "01.Intro" / "intro.tex"
+        pipeline_ctrl.backup_manager.register_file_for_session(str(intro_path))
+        assert pipeline_ctrl.backup_manager.backup_registry
+
+        pipeline_ctrl.execute_project_save_workflow()
+
+        assert pipeline_ctrl.backup_manager.backup_registry
+
+    def test_a_save_that_writes_something_does_clear_the_backups(self, opened_project):
+        pipeline_ctrl, project_dir = opened_project
+        intro_path = project_dir / "01.Intro" / "intro.tex"
+        tab = _open_tab(pipeline_ctrl, intro_path)
+        tab.textCursor().insertText("% touched\n")
+        tab.document().setModified(True)
+
+        assert pipeline_ctrl.execute_project_save_workflow() is True
+
+        assert not pipeline_ctrl.backup_manager.backup_registry
 
 
 class TestUnwrittenIndexChangesOnProjectClose:

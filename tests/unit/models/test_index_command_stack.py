@@ -496,3 +496,49 @@ class TestInvalidation:
         assert stack.drop_commands_for_file("other.tex") == 0
         assert stack.drop_commands_for_entries([99]) == 0
         assert len(stack) == 1
+
+
+class TestConfigurableLimit:
+    """
+    The undo depth became a user preference (Preferences -> General), so
+    the bound has to be changeable on a live stack rather than only at
+    construction.
+    """
+
+    def test_lowering_the_limit_trims_the_oldest_commands_immediately(self):
+        stack = IndexCommandStack(limit=10)
+        for i in range(10):
+            stack.push(insertion_command(f"op {i}", [], []))
+
+        stack.set_limit(3)
+
+        assert stack.limit == 3
+        # Waiting for the next push to trim would leave the stack over its
+        # stated depth for however long the user goes without editing, and
+        # the preference would look like it had not taken effect.
+        assert stack.undo_label() == "op 9"
+        labels = [stack.peek_undo().label]
+        stack.complete_undo()
+        labels.append(stack.peek_undo().label)
+        stack.complete_undo()
+        labels.append(stack.peek_undo().label)
+        stack.complete_undo()
+        assert labels == ["op 9", "op 8", "op 7"]
+        assert stack.can_undo is False
+
+    def test_raising_the_limit_keeps_what_is_already_recorded(self):
+        stack = IndexCommandStack(limit=2)
+        for i in range(4):
+            stack.push(insertion_command(f"op {i}", [], []))
+
+        stack.set_limit(100)
+
+        assert stack.limit == 100
+        assert stack.undo_label() == "op 3"
+
+    def test_a_zero_or_negative_limit_is_clamped_to_one(self):
+        stack = IndexCommandStack(limit=10)
+
+        stack.set_limit(0)
+
+        assert stack.limit == 1

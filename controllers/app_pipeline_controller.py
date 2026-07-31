@@ -4,17 +4,19 @@ from pathlib import Path
 from typing import Optional, Callable
 from concurrent.futures import ThreadPoolExecutor
 
-from PySide6.QtCore import QObject, Slot, QModelIndex, Qt, Signal
+from PySide6.QtCore import QObject, Slot, QModelIndex, Qt, Signal, QTimer
 from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplication, QProgressDialog
 from shiboken6 import isValid
 
 from models import index_tag_grammar as grammar
 from models.index_command_stack import (
+    DEFAULT_LIMIT,
     EntrySnapshot,
     IndexCommandStack,
     MacroEdit,
     insertion_command,
 )
+from views.entry_modifier_list import set_encap_style_values
 from models.latex_entry_model import ReferenceCarrier
 from models.index_tree_model_engine import IndexTreeModelEngine
 from models.macro_id_generator import MacroIDGenerator
@@ -76,6 +78,17 @@ class AppPipelineController(QObject):
         self._tree_modified = False
         self._load_thread = None
         self._search_window = None
+
+        # Auto-save. Runs only while a project is open; see
+        # _restart_autosave_timer and _on_autosave_tick. Interval and
+        # on/off come from the General preferences tab and are applied by
+        # apply_general_preferences(), which main.py calls at startup and
+        # the preferences dialog calls again on accept.
+        self._autosave_enabled = True
+        self._autosave_interval_minutes = 5
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(False)
+        self._autosave_timer.timeout.connect(self._on_autosave_tick)
         # Every .tex file the active project tracks for external-change
         # detection, captured at load time so the save path can re-stamp
         # checksums without a file_tree_payload to walk -- see
@@ -166,11 +179,12 @@ class AppPipelineController(QObject):
                                                        )        
 
         self._index_prefs_model = IndexPrefsConfigModel()
-        self._index_prefs_ctrl = IndexPrefsConfigController(model=self._index_prefs_model, 
-                                                            prefs_persistence=self.prefs, 
+        self._index_prefs_ctrl = IndexPrefsConfigController(model=self._index_prefs_model,
+                                                            prefs_persistence=self.prefs,
                                                             theme_controller=self._theme_controller,
-                                                            parent_window=self.window
-                                                            )        
+                                                            parent_window=self.window,
+                                                            on_general_changed=self.apply_general_preferences,
+                                                            )
 
         # Map context menu structures straight to the newly instantiated widgets
         self._file_context_manager = FileTreeContextMenuManager(self.file_tree_widget)
@@ -1045,6 +1059,10 @@ class AppPipelineController(QObject):
         # Enable menu items that are gated behind an active project context
         self.window.menu_bar.update_menu_item_state(is_enabled=True)
 
+        # Auto-save only runs against an open project, so its clock starts
+        # here and is stopped again by _execute_project_close_workflow.
+        self._restart_autosave_timer()
+
         # Set up autocompletion for the index entry window
         self.window.latex_index_window.setup_autocompletion(references)
 
@@ -1278,6 +1296,137 @@ class AppPipelineController(QObject):
         has_unsaved_tex = bool(self.doc_io.check_unsaved_tex_changes()) if self.doc_io else False
         has_pending_writes = self._has_pending_db_writes()
         return not (has_unsaved_tex or has_pending_writes or self._tree_modified)
+
+    # ------------------------------------------------------------------
+    # Auto-save
+    # ------------------------------------------------------------------
+
+    def _restart_autosave_timer(self) -> None:
+        """
+        (Re)starts the auto-save clock, or stops it if auto-save is off or
+        no project is open.
+
+        Called on project open, on project close, after every explicit
+        save, and whenever the interval preference changes. Restarting on
+        an explicit save is the point: without it a tick landing seconds
+        after the user pressed Ctrl+S would save again for no reason, and
+        the interval would drift away from "N minutes since the last
+        save" towards "N minutes since the app started".
+        """
+        if not self._autosave_enabled or self.scope_ctrl is None:
+            self._autosave_timer.stop()
+            return
+        if self.scope_ctrl.active_project_name == "Untitled Project":
+            self._autosave_timer.stop()
+            return
+
+        self._autosave_timer.start(max(1, int(self._autosave_interval_minutes)) * 60 * 1000)
+
+    def _has_unsaved_work(self) -> bool:
+        """
+        Whether anything at all is waiting to be saved.
+
+        Deliberately the BROAD test -- the same one the exit prompt uses,
+        not the narrower _has_pending_db_writes() the project-close prompt
+        uses. The two prompts differ because a false positive costs the
+        user a modal; here it costs one save that writes nothing, which
+        execute_project_save_workflow now detects and treats as a no-op.
+        The failure modes are asymmetric, so this errs broad.
+        """
+        has_unsaved_tex = bool(self.doc_io.check_unsaved_tex_changes()) if self.doc_io else False
+        return has_unsaved_tex or self._has_pending_db_writes() or self._tree_modified
+
+    def _is_safe_to_auto_save(self) -> bool:
+        """
+        Sibling of _is_safe_to_auto_resync: whether this instant is a safe
+        one to write at. A False here SUPPRESSES one tick; the timer keeps
+        running and the next tick tries again.
+
+        Three things make it unsafe:
+
+        1. A background thread is mid-flight. A project load is rebuilding
+           the very caches the drain reads; an RTF export is compiling the
+           .tex files a save would rewrite underneath it.
+        2. A modal is open. Two of the three save-related prompts (project
+           close and manual resync) call execute_project_save_workflow
+           themselves, so a tick landing while one is up would re-enter
+           the drain against journals it is already reading.
+        3. A table cell edit is staged. The staging model holds a value the
+           user is still typing; saving mid-edit would write a half-entered
+           heading, and the tree-rename guard already refuses for the same
+           reason.
+        """
+        if self._load_thread is not None and isValid(self._load_thread) and self._load_thread.isRunning():
+            return False
+
+        export_thread = getattr(self, "_rtf_export_thread", None)
+        if export_thread is not None and isValid(export_thread) and export_thread.isRunning():
+            return False
+
+        if QApplication.activeModalWidget() is not None:
+            return False
+
+        # has_unsaved_changes(), not is_dirty -- the latter takes a
+        # unique_id and answers about one entry, so referencing it bare
+        # yields a bound method, which is always truthy and would suppress
+        # every tick forever.
+        if self.index_edit_staging_model is not None and self.index_edit_staging_model.has_unsaved_changes():
+            return False
+
+        return True
+
+    @Slot()
+    def _on_autosave_tick(self) -> None:
+        """
+        One auto-save tick. Silent by design: no modal ever, on success or
+        failure. A dialog every few minutes would make the feature worse
+        than not having it, and a failed drain leaves the journals intact
+        with the changes still pending, so the next tick simply retries.
+        """
+        if self.scope_ctrl is None or self.scope_ctrl.active_project_name == "Untitled Project":
+            self._autosave_timer.stop()
+            return
+
+        if not self._has_unsaved_work():
+            return
+
+        if not self._is_safe_to_auto_save():
+            return
+
+        # execute_project_save_workflow restarts the timer itself, so the
+        # next tick is a full interval after this one completes rather
+        # than a full interval after it began.
+        if self.execute_project_save_workflow():
+            self.window.status_bar.showMessage("Workspace auto-saved.", 3000)
+
+    def apply_general_preferences(self, prefs: dict) -> None:
+        """
+        Pushes the General preferences tab's four settings out to the
+        things that actually consume them. Called at startup from main.py
+        and again whenever the preferences dialog is accepted, so every
+        one of them takes effect without a restart.
+        """
+        self._autosave_enabled = bool(prefs.get("autosave_enabled", True))
+        try:
+            self._autosave_interval_minutes = max(1, int(prefs.get("autosave_interval_minutes", 5)))
+        except (TypeError, ValueError):
+            self._autosave_interval_minutes = 5
+        self._restart_autosave_timer()
+
+        try:
+            self._index_commands.set_limit(int(prefs.get("undo_stack_size", DEFAULT_LIMIT)))
+        except (TypeError, ValueError):
+            pass
+
+        set_encap_style_values(
+            prefs.get("encap_bold_values"),
+            prefs.get("encap_italic_values"),
+        )
+
+        if self.session_logger is not None:
+            self.session_logger.set_log_folder_name(
+                str(prefs.get("log_directory_name", "session_logs"))
+            )
 
     def _reload_open_tab_if_unmodified(self, absolute_path: str, new_content: str) -> None:
         """
@@ -1852,6 +2001,10 @@ class AppPipelineController(QObject):
             self.window.status_bar.showMessage("Project close cancelled.", 2000)
             return False
 
+        # Past the point of no return: stop the clock before the project's
+        # state is torn down, so a tick can't land on a half-closed project.
+        self._autosave_timer.stop()
+
         if self.idx_ctrl:
             self.idx_ctrl.clear_staged_entries()
             self.idx_ctrl.clear_active_manifests()
@@ -1899,6 +2052,14 @@ class AppPipelineController(QObject):
     def execute_project_save_workflow(self):
         """Coordinates synchronization blocks across file buffers and sqlite."""
         self.window.status_bar.set_status_text("Saving project workspace modifications...")
+        # Asked BEFORE the commit, because committing clears the flag it
+        # reads. commit_all_open_buffers returns "nothing failed", not
+        # "something was written" -- it is True whenever a tabs widget
+        # exists at all -- so it cannot answer whether this save had any
+        # work to do. That distinction did not matter while every save was
+        # a deliberate Ctrl+S; on the auto-save timer it decides whether a
+        # tick that wrote nothing still throws the session backups away.
+        had_tex_work = bool(self.doc_io.check_unsaved_tex_changes()) if self.doc_io else False
         tex_success = self.doc_io.commit_all_open_buffers() if self.doc_io else False
 
         # Flushes every rename/edit made this session (tree-side heading
@@ -1930,7 +2091,14 @@ class AppPipelineController(QObject):
         # and reports the user's own work as an external change.
         self._refresh_file_sync_checksums()
 
-        if tex_success or db_success:
+        # Something was genuinely written, as opposed to the save simply
+        # not having failed. Only this clears the backups: they are the
+        # Discard baseline, and discarding them for a save that wrote
+        # nothing would quietly destroy the user's way back to their last
+        # save while leaving the impression a save had happened.
+        wrote_something = (had_tex_work and tex_success) or db_success
+
+        if wrote_something:
             self._tree_modified = False
             self.backup_manager.clear_session_backups()
             # Don't stomp the dirty-flush warning set above -- it would
@@ -1938,8 +2106,19 @@ class AppPipelineController(QObject):
             # user ever sees it, silently hiding a real save failure.
             if not dirty_failures:
                 self.window.status_bar.showMessage("Workspace saved successfully.", 3000)
-        else:
+        elif not dirty_failures:
+            # Same reasoning as the success message above: this branch is
+            # now genuinely reachable (it never was while tex_success was
+            # effectively always True), so it has to leave a real flush
+            # failure's warning on screen rather than overwrite it.
             self.window.status_bar.showMessage("No uncommitted modifications detected.", 2000)
+
+        # Whether or not there was anything to write, the user has just
+        # declared "now" the save point -- restart the clock so an
+        # auto-save tick doesn't land moments later.
+        self._restart_autosave_timer()
+
+        return wrote_something
 
     def _initialize_advanced_search_subsystem(self):
         """Initializes and tracks advanced search dialog frames at the root level."""

@@ -11,7 +11,12 @@ from views.theme_config_dialog import _ThemeTab
 
 class IndexPrefsConfigDialog(QDialog):
     sig_config_accepted = Signal(dict, dict, dict)  # prefs, dark_colours, light_colours
-    
+    # The General tab travels separately because it is application-scoped:
+    # sig_config_accepted's payload gets written into the open project's
+    # project_metadata, which is the wrong home for a setting that has
+    # nothing to do with which book is open.
+    sig_general_accepted = Signal(dict)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Application Preferences")
@@ -214,7 +219,90 @@ class IndexPrefsConfigDialog(QDialog):
         vtab_rtf_layout.addWidget(self.chk_rtf_display_on_creation)
         vtab_rtf_layout.addStretch()
 
+        # PRIMARY VERTICAL TAB 4: GENERAL APPLICATION BEHAVIOUR
+        #
+        # Application-scoped, unlike LaTeX Settings: these are properties
+        # of the installation, not of one book, so they are persisted
+        # straight to QSettings and never copied into project_metadata.
+        # That is why they travel on their own signal -- see _on_accepted.
+        self.vtab_general = QWidget()
+        vgeneral_layout = QVBoxLayout(self.vtab_general)
+        vgeneral_layout.setContentsMargins(5, 5, 5, 5)
+
+        grp_editing = QGroupBox("Editing")
+        form_editing = QFormLayout(grp_editing)
+
+        self.spn_undo_stack_size = QSpinBox()
+        self.spn_undo_stack_size.setRange(1, 10000)
+        # A form layout stretches its field column, which on a number this
+        # short reads as an unfinished layout rather than a deliberate one.
+        self.spn_undo_stack_size.setMaximumWidth(120)
+        self.spn_undo_stack_size.setToolTip(
+            "How many index operations Undo can step back through.\n"
+            "Lowering this discards the oldest steps immediately."
+        )
+        form_editing.addRow("Undo stack size:", self.spn_undo_stack_size)
+        vgeneral_layout.addWidget(grp_editing)
+
+        grp_autosave = QGroupBox("Auto-Save")
+        form_autosave = QFormLayout(grp_autosave)
+
+        self.chk_autosave_enabled = QCheckBox("Save the project automatically")
+        form_autosave.addRow(self.chk_autosave_enabled)
+
+        self.spn_autosave_interval = QSpinBox()
+        self.spn_autosave_interval.setRange(1, 120)
+        self.spn_autosave_interval.setSuffix(" minutes")
+        self.spn_autosave_interval.setMaximumWidth(160)
+        form_autosave.addRow("Interval:", self.spn_autosave_interval)
+
+        lbl_autosave_note = QLabel(
+            "An automatic save is a real save: it also becomes the point "
+            "Discard reverts to. The clock restarts whenever you save "
+            "yourself, and a save is skipped when there is nothing to write."
+        )
+        lbl_autosave_note.setWordWrap(True)
+        form_autosave.addRow(lbl_autosave_note)
+        vgeneral_layout.addWidget(grp_autosave)
+
+        grp_logging = QGroupBox("Session Logs")
+        form_logging = QFormLayout(grp_logging)
+
+        self.txt_log_directory_name = QLineEdit()
+        self.txt_log_directory_name.setMaximumWidth(280)
+        self.txt_log_directory_name.setPlaceholderText("session_logs")
+        self.txt_log_directory_name.setToolTip(
+            "Folder name, not a full path — the folder is created inside "
+            "the open project's own directory."
+        )
+        form_logging.addRow("Log folder name:", self.txt_log_directory_name)
+        vgeneral_layout.addWidget(grp_logging)
+
+        grp_encap = QGroupBox("Page Number Styles")
+        form_encap = QFormLayout(grp_encap)
+
+        lbl_encap_note = QLabel(
+            "Which encap names the Entry Table's Page column shows as bold "
+            "or italic. Add your own here if your project styles page "
+            "numbers with a custom command. Separate names with commas, and "
+            "leave off the backslash."
+        )
+        lbl_encap_note.setWordWrap(True)
+        form_encap.addRow(lbl_encap_note)
+
+        self.txt_encap_bold = QLineEdit()
+        self.txt_encap_bold.setPlaceholderText("bold, textbf, bf")
+        form_encap.addRow("Bold:", self.txt_encap_bold)
+
+        self.txt_encap_italic = QLineEdit()
+        self.txt_encap_italic.setPlaceholderText("textit, it, italic")
+        form_encap.addRow("Italic:", self.txt_encap_italic)
+        vgeneral_layout.addWidget(grp_encap)
+
+        vgeneral_layout.addStretch()
+
         # Mount Primary West View Elements to Root Frame
+        self.vertical_tabs.addTab(self.vtab_general, "General")
         self.vertical_tabs.addTab(self.vtab_latex, "LaTeX Settings")
         self.vertical_tabs.addTab(self.vtab_themes, "UI Themes")
         self.vertical_tabs.addTab(self.vtab_rtf_export, "RTF Export")
@@ -227,6 +315,7 @@ class IndexPrefsConfigDialog(QDialog):
         main_layout.addWidget(self.button_box)
 
         # Wire Up Presentation Reactivity Toggles
+        self.chk_autosave_enabled.toggled.connect(self.spn_autosave_interval.setEnabled)
         self.chk_imakeidx.toggled.connect(self._toggle_imakeidx_widgets)
         self.chk_idxlayout.toggled.connect(self._toggle_idxlayout_widgets)
         self.chk_hyperref.toggled.connect(self._toggle_hyperref_widgets)
@@ -325,6 +414,34 @@ class IndexPrefsConfigDialog(QDialog):
 
         self.chk_rtf_display_on_creation.setChecked(data.get("rtf_display_on_creation", False))
 
+    def populate_general_fields(self, data: dict) -> None:
+        """
+        Fills the General tab. Separate from populate_fields() because its
+        source is separate: application preferences from QSettings, not
+        the project's index prefs model.
+        """
+        self.spn_undo_stack_size.setValue(int(data.get("undo_stack_size", 200)))
+
+        autosave_on = bool(data.get("autosave_enabled", True))
+        self.chk_autosave_enabled.setChecked(autosave_on)
+        self.spn_autosave_interval.setValue(int(data.get("autosave_interval_minutes", 5)))
+        self.spn_autosave_interval.setEnabled(autosave_on)
+
+        self.txt_log_directory_name.setText(str(data.get("log_directory_name", "session_logs")))
+
+        self.txt_encap_bold.setText(self._join_encap(data.get("encap_bold_values")))
+        self.txt_encap_italic.setText(self._join_encap(data.get("encap_italic_values")))
+
+    @staticmethod
+    def _join_encap(value) -> str:
+        if isinstance(value, (list, tuple)):
+            return ", ".join(str(item).strip() for item in value if str(item).strip())
+        return str(value or "")
+
+    @staticmethod
+    def _split_encap(text: str) -> list:
+        return [part.strip() for part in str(text).split(",") if part.strip()]
+
     def populate_theme_fields(self, dark_colours: dict, light_colours: dict) -> None:
         """Called by controller before exec() — mirrors populate_fields() pattern."""
         for field, row in self._dark_tab._rows.items():
@@ -381,11 +498,24 @@ class IndexPrefsConfigDialog(QDialog):
             "rtf_display_on_creation": self.chk_rtf_display_on_creation.isChecked(),
         }
 
+        # An empty encap field means "leave the current list alone", not
+        # "recognise nothing" -- set_encap_style_values treats it that way
+        # too, so a cleared field restores rather than disables.
+        general_payload = {
+            "undo_stack_size": self.spn_undo_stack_size.value(),
+            "autosave_enabled": self.chk_autosave_enabled.isChecked(),
+            "autosave_interval_minutes": self.spn_autosave_interval.value(),
+            "log_directory_name": self.txt_log_directory_name.text().strip(),
+            "encap_bold_values": self._split_encap(self.txt_encap_bold.text()),
+            "encap_italic_values": self._split_encap(self.txt_encap_italic.text()),
+        }
+
         dark_colours, light_colours = self.current_theme_colours()
 
+        self.sig_general_accepted.emit(general_payload)
         self.sig_config_accepted.emit(payload, dark_colours, light_colours)
-        
-        self.accept()        
+
+        self.accept()
 
     def apply_theme_configuration(self, is_dark: bool) -> None:
         colours = DarkThemeColours() if is_dark else LightThemeColours()

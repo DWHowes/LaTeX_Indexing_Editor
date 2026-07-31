@@ -213,6 +213,25 @@ class IndexCommandStack:
         self._redo: list[IndexCommand] = []
         self._limit = max(1, int(limit))
 
+    def set_limit(self, limit: int) -> None:
+        """
+        Changes how many commands the stack keeps, applying the new bound
+        to what is already recorded.
+
+        Lowering it drops the OLDEST commands, matching push()'s own
+        trimming -- the alternative, waiting for the next push to trim,
+        would leave the stack over its stated depth for however long the
+        user goes without editing, and the Preferences dialog would appear
+        not to have taken effect.
+        """
+        self._limit = max(1, int(limit))
+        del self._undo[:-self._limit]
+        del self._redo[:-self._limit]
+
+    @property
+    def limit(self) -> int:
+        return self._limit
+
     # -- recording -------------------------------------------------------
 
     def push(self, command: IndexCommand) -> None:

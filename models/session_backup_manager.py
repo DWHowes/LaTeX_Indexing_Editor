@@ -30,13 +30,22 @@ class SessionBackupManager:
 
     def ensure_backup_infrastructure_exists(self) -> str:
         """
-        Defensive guard. Verifies and forces creation of the hidden session 
+        Defensive guard. Verifies and forces creation of the hidden session
         storage folders on disk before initializing input/output operations.
         """
         if not self.backup_dir:
-            # Fallback allocation inside the current working execution path
-            self.backup_dir = os.path.abspath(os.path.join(os.getcwd(), ".session_backups"))
-            
+            # clear_session_backups() blanks backup_dir after removing the
+            # emptied folder, so this runs after every save that had
+            # something to clear -- not just at startup. Re-derive from the
+            # project root first; the cwd fallback below is for a manager
+            # that never had a project anchored at all, and silently
+            # scattering a live project's backups into the working
+            # directory is exactly what it must not do.
+            if self.project_root:
+                self.backup_dir = os.path.join(self.project_root, ".session_backups")
+            else:
+                self.backup_dir = os.path.abspath(os.path.join(os.getcwd(), ".session_backups"))
+
         try:
             if not os.path.exists(self.backup_dir):
                 os.makedirs(self.backup_dir, exist_ok=True)

@@ -96,6 +96,13 @@ if __name__ == "__main__":
             name_inverter=name_inverter
         )
 
+        # Push the General preferences out to everything that consumes
+        # them (auto-save interval, undo depth, encap styles, log folder).
+        # Done here rather than inside the controller's constructor because
+        # the logger is one of the consumers, and it is deliberately built
+        # before QSettings is readable -- see SessionLogger.set_log_folder_name.
+        pipeline_controller.apply_general_preferences(preferences_payload)
+
         geometry = preferences_payload.get("geometry")
         state = preferences_payload.get("state")
         splitter_state = preferences_payload.get("splitter_state")

@@ -13,12 +13,17 @@ class IndexPrefsConfigController:
         model: IndexPrefsConfigModel,
         prefs_persistence: PreferencesPersistence,
         theme_controller: ThemeConfigController,
-        parent_window=None
+        parent_window=None,
+        on_general_changed=None,
     ) -> None:
         self._model = model
         self._prefs = prefs_persistence
         self._theme_controller = theme_controller
         self._parent_window = parent_window
+        # Called with the freshly-saved General payload so the application
+        # can apply it live (AppPipelineController.apply_general_preferences).
+        # Optional so this controller stays constructible on its own in tests.
+        self._on_general_changed = on_general_changed
         self._active_project_name: str | None = None
         # Held during an open project; cleared on project close.
         self._file_persistence = None   
@@ -64,6 +69,9 @@ class IndexPrefsConfigController:
 
         dialog = IndexPrefsConfigDialog(self._parent_window)
         dialog.populate_fields(self._model.serialize_to_dict())
+        # Application-scoped, so read straight from QSettings rather than
+        # from the index prefs model, which is project-overlaid.
+        dialog.populate_general_fields(self._prefs.load_application_preferences())
         dialog.populate_theme_fields(
             self._theme_controller.model.serialize_dark(),
             self._theme_controller.model.serialize_light(),
@@ -72,6 +80,7 @@ class IndexPrefsConfigController:
         is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
         dialog.apply_theme_configuration(is_dark)
 
+        dialog.sig_general_accepted.connect(self._handle_general_update)
         dialog.sig_config_accepted.connect(self._handle_model_update)
 
         dialog.exec()
@@ -86,3 +95,14 @@ class IndexPrefsConfigController:
 
         # Theme — delegate entirely to theme controller
         self._theme_controller.handle_accepted(dark_colours, light_colours)
+
+    def _handle_general_update(self, payload: dict) -> None:
+        """
+        Persists the General tab to QSettings, then hands it to the
+        application so it takes effect now rather than at the next launch.
+        Persisting first means a failure in the apply step still leaves the
+        setting saved for next time.
+        """
+        self._prefs.update_general_preferences(payload)
+        if self._on_general_changed is not None:
+            self._on_general_changed(payload)

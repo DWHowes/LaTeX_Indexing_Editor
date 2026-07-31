@@ -10,14 +10,25 @@ class SessionLogger(QObject):
     Captures sys.stdout and sys.stderr console output across all app layers, 
     prepending real-time timestamp indices and writing them to an active session log file.
     """
-    def __init__(self, target_directory: str = None, parent=None):
+    DEFAULT_FOLDER_NAME = "session_logs"
+
+    def __init__(self, target_directory: str = None, folder_name: str = None, parent=None):
         super().__init__(parent)
 
-        self._write_lock = threading.Lock()        
-        
+        self._write_lock = threading.Lock()
+
+        # The folder name is a user preference (Preferences -> General).
+        # It used to be a hard-coded ".session_logs" -- hidden on Windows,
+        # which is wrong for a folder whose whole purpose is for the user
+        # to open it and read what happened. The backup folder stays
+        # hidden by contrast: nothing in there is meant to be opened by
+        # hand. Note the leading dot is gone as well as the attribute; a
+        # dot-prefixed folder reads as hidden on macOS and Linux too.
+        self._folder_name = (folder_name or self.DEFAULT_FOLDER_NAME).strip() or self.DEFAULT_FOLDER_NAME
+
         # Establish log folder infrastructure boundaries natively
         if not target_directory:
-            target_directory = os.path.abspath(os.path.join(os.getcwd(), ".session_logs"))
+            target_directory = os.path.abspath(os.path.join(os.getcwd(), self._folder_name))
         os.makedirs(target_directory, exist_ok=True)
 
         # Compile unique file signature names tracking session start coordinates
@@ -63,28 +74,49 @@ class SessionLogger(QObject):
                 self._original_stdout.write(f"LOG FAULT: {str(io_fault)}\n")
                 self._original_stdout.write(formatted_entry)
 
+    def set_log_folder_name(self, folder_name: str) -> None:
+        """
+        Applies the log-folder-name preference, moving the session's log
+        into a folder of the new name alongside the current one.
+
+        Needed because the logger is deliberately constructed before
+        preferences can be read -- QSettings needs the organisation and
+        application names that QApplication sets afterwards, and starting
+        the logger later would drop the startup output it exists to
+        capture, including PreferencesPersistence's own one-time migration
+        messages. So the session starts in the default folder and moves
+        here once the preference is known.
+        """
+        cleaned = (folder_name or "").strip() or self.DEFAULT_FOLDER_NAME
+        if cleaned == self._folder_name:
+            return
+
+        self._folder_name = cleaned
+        current_dir = os.path.dirname(os.path.abspath(self.log_file_path))
+        self._relocate_log_to(os.path.join(os.path.dirname(current_dir), cleaned))
+
     def realign_log_to_project_root(self, project_root_path: str):
         """
         Dynamic Output Redirection.
-        Closes the active log buffer, moves all early startup logs into a 
-        hidden '.session_logs' directory under the chosen project root, and 
-        seamlessly updates the active stream targets.
+        Closes the active log buffer, moves all early startup logs into the
+        log directory under the chosen project root, and seamlessly updates
+        the active stream targets.
         """
         if not project_root_path or not os.path.exists(project_root_path):
             return
+        self._relocate_log_to(os.path.abspath(os.path.join(project_root_path, self._folder_name)))
 
+    def _relocate_log_to(self, new_target_dir: str) -> None:
+        """
+        Moves the active log file into new_target_dir and repoints the
+        intercepted streams at it. Shared by the project-root realign and
+        the folder-name preference; both are the same operation.
+
+        No hidden attribute is applied -- see __init__ for why the log
+        folder is deliberately visible.
+        """
         try:
-            # Establish the new log directory structure under the user's project root
-            new_target_dir = os.path.abspath(os.path.join(project_root_path, ".session_logs"))
             os.makedirs(new_target_dir, exist_ok=True)
-            
-            # Apply hidden file attribute on Windows to keep the user workspace clean
-            if os.name == 'nt':
-                import ctypes
-                try:
-                    ctypes.windll.kernel32.SetFileAttributesW(new_target_dir, 0x02)
-                except Exception:
-                    pass
 
             old_file_path = self.log_file_path
             new_file_path = os.path.join(new_target_dir, os.path.basename(old_file_path))
@@ -117,8 +149,18 @@ class SessionLogger(QObject):
                     sys.stdout = self
                     sys.stderr = self
 
+            # Don't leave the folder we just emptied behind -- a renamed
+            # log folder would otherwise leave its predecessor sitting in
+            # the project root looking like it still holds something.
+            old_dir = os.path.dirname(os.path.abspath(old_file_path))
+            try:
+                if os.path.isdir(old_dir) and not os.listdir(old_dir):
+                    os.rmdir(old_dir)
+            except OSError:
+                pass
+
             # Commit a dynamic marker indicating the explicit output redirect coordinates
-            print(f"[SYSTEM] Stream output redirected to active workspace: {new_target_dir}")            
+            print(f"[SYSTEM] Stream output redirected to active workspace: {new_target_dir}")
 
         except Exception as redirect_err:
             self._original_stdout.write(f"LOGGER RE-ROUTE ERROR: Cannot shift log tables: {str(redirect_err)}\n")

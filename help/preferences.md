@@ -1,8 +1,12 @@
 # Preferences
 
-**Edit → Preferences...** (`Ctrl+,`) opens a single dialog covering LaTeX/indexing engine settings, colour theming, and RTF export, across three tabs.
+**Edit → Preferences...** (`Ctrl+,`) opens a single dialog covering general application behaviour, LaTeX/indexing engine settings, colour theming, and RTF export, across four tabs.
 
 Font family/size and the dark/light mode toggle are **not** in this dialog — they're on the main toolbar, and apply immediately as you change them.
+
+## General
+
+Application-wide behaviour: the undo depth, [auto-save](getting_started/saving_and_closing.md), the session log folder, and which page-number styles the entry table recognises. See [General](preferences/general.md) for each setting in detail.
 
 ## LaTeX Settings
 
@@ -29,9 +33,12 @@ One setting: **Display RTF file on creation** — when checked, exporting to RTF
 
 ## Global vs. per-project
 
-LaTeX/indexing settings and theme colours can be different per project: the first time you open a project, it inherits whatever your global defaults were at that moment, and from then on that project's own copy is independent — changing Preferences with a project open only affects that project, not your global defaults or any other project. Font, size, and the dark/light toggle don't have this per-project behavior — they're a single global setting shared by every project.
+LaTeX/indexing settings and theme colours can be different per project: the first time you open a project, it inherits whatever your global defaults were at that moment, and from then on that project's own copy is independent — changing Preferences with a project open only affects that project, not your global defaults or any other project.
+
+Everything on the **General** tab is global, along with font, size, and the dark/light toggle — one setting shared by every project, with no per-project copy.
 
 ## See also
 
+- [General](preferences/general.md)
 - [The Base File](getting_started/base_file.md)
 - [RTF Export](tools/rtf_export.md)
