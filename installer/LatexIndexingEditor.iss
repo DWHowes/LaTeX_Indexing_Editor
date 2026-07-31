@@ -7,7 +7,7 @@
 #define MyAppName "LaTeX Indexing Editor"
 ; Keep in step with APP_VERSION in models/app_version.py, which is what the
 ; About box reports -- Inno cannot read the Python module.
-#define MyAppVersion "0.1.0-alpha"
+#define MyAppVersion "0.2.0-alpha"
 #define MyAppPublisher "DH Indexing"
 #define MyAppExeName "LatexIndexingEditor.exe"
 #define MySourceDir "..\dist\LatexIndexingEditor"
@@ -60,3 +60,10 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: no
 ; runtime state next to the executable -- clean those up on uninstall
 ; along with the files Inno tracked from [Files].
 Type: filesandordirs; Name: "{app}\data"
+; Session logs written before a project is opened land beside the exe.
+; The folder used to be hidden ('.session_logs'); it is now visible and
+; user-configurable (Preferences > General), so leaving it behind after an
+; uninstall would be conspicuous. Both names are removed, since an install
+; upgraded from an earlier version can have the old one.
+Type: filesandordirs; Name: "{app}\session_logs"
+Type: filesandordirs; Name: "{app}\.session_logs"

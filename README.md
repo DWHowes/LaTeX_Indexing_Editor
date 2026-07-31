@@ -42,9 +42,9 @@ No Python, no setup — just download and run the installer.
 
 1. **Download the installer**
 
-   **[⬇ Download LatexIndexingEditor-Setup-0.1.0-alpha.exe](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases/download/v0.1.0-alpha/LatexIndexingEditor-Setup-0.1.0-alpha.exe)**
+   **[⬇ Download LatexIndexingEditor-Setup-0.2.0-alpha.exe](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases/download/v0.2.0-alpha/LatexIndexingEditor-Setup-0.2.0-alpha.exe)**
 
-   (Windows only. See the [release page](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases/tag/v0.1.0-alpha) for release notes, or the [full list of releases](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases) for other versions.)
+   (Windows only. See the [release page](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases/tag/v0.2.0-alpha) for release notes, or the [full list of releases](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases) for other versions.)
 
 2. **Run the installer**
 

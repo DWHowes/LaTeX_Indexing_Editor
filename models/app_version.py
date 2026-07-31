@@ -9,7 +9,7 @@ truth and the installer's own MyAppVersion has to be kept in step with it.
 """
 
 APP_NAME = "LaTeX Indexing Editor"
-APP_VERSION = "0.1.0-alpha"
+APP_VERSION = "0.2.0-alpha"
 APP_PUBLISHER = "DH Indexing"
 APP_TAGLINE = "Back-of-book indexing for LaTeX manuscripts"
 APP_URL = "https://github.com/DWHowes/LaTeX_Indexing_Editor"
@@ -18,5 +18,5 @@ APP_LICENCE = "MIT Licence"
 
 
 def version_string() -> str:
-    """e.g. 'Version 0.1.0-alpha' -- the form shown in the About box."""
+    """e.g. 'Version 0.2.0-alpha' -- the form shown in the About box."""
     return f"Version {APP_VERSION}"
