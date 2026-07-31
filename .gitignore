@@ -13,6 +13,7 @@ documentation
 !tests/fixtures/**/*.tex
 *.zip
 *.png
+!icons/*.png
 *.log
 .pytest_cache
 .coverage

@@ -45,6 +45,8 @@ Every shortcut in the application, grouped by where it applies. Menu shortcuts a
 |---|---|
 | `F1` | Contents... |
 
+**About LaTeX Indexing Editor...** has no shortcut — use the Help menu. It reports the version you're running, along with the Python and Qt versions underneath it, which are the details worth quoting when reporting a problem.
+
 ## Global (works anywhere in the window)
 
 | Shortcut | Action |

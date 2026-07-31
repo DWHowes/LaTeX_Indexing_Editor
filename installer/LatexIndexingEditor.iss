@@ -5,6 +5,8 @@
 ;   dist\LatexIndexingEditor\  (see LatexIndexingEditor.spec)
 
 #define MyAppName "LaTeX Indexing Editor"
+; Keep in step with APP_VERSION in models/app_version.py, which is what the
+; About box reports -- Inno cannot read the Python module.
 #define MyAppVersion "0.1.0-alpha"
 #define MyAppPublisher "DH Indexing"
 #define MyAppExeName "LatexIndexingEditor.exe"
@@ -30,6 +32,9 @@ OutputBaseFilename=LatexIndexingEditor-Setup-{#MyAppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
+; The installer's own icon. The uninstall entry points at the exe, which
+; carries the same icon embedded by PyInstaller.
+SetupIconFile=..\icons\lidx.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesInstallIn64BitMode=x64
 

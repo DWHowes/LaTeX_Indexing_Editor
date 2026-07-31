@@ -1,5 +1,6 @@
 import sys
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon
 
 from views.latex_editor import LatexEditor
 from models.session_logger import SessionLogger
@@ -8,6 +9,7 @@ from models.text_sanitizer import TextSanitizer
 from models.session_backup_manager import SessionBackupManager
 from models.name_inverter import NameInverter
 from models.app_paths import get_app_root
+from models.app_version import APP_NAME, APP_VERSION
 
 # Import all core operational controllers
 from controllers.app_pipeline_controller import AppPipelineController
@@ -30,8 +32,15 @@ if __name__ == "__main__":
         app = QApplication(sys.argv)
 
         app.setOrganizationName("DH Indexing")
-        app.setOrganizationDomain("dhindexing.ca") 
-        app.setApplicationName("LaTeX Indexing Editor")        
+        app.setOrganizationDomain("dhindexing.ca")
+        app.setApplicationName(APP_NAME)
+        app.setApplicationVersion(APP_VERSION)
+
+        # Set on the QApplication, not just the main window, so every
+        # dialog inherits it and the taskbar button picks it up. The .ico
+        # carries all six sizes, so Windows chooses a purpose-rendered
+        # bitmap rather than resampling one.
+        app.setWindowIcon(QIcon(str(get_app_root() / "icons" / "lidx.ico")))
 
         # Initialize global shared non-UI models
         preferences_model = PreferencesPersistence()

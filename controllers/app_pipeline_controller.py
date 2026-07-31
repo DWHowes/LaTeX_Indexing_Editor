@@ -288,6 +288,7 @@ class AppPipelineController(QObject):
         self.window.menu_bar.inject_cross_references_requested.connect(self._handle_inject_cross_references)
         self.window.menu_bar.tools_menu_about_to_show.connect(self._refresh_cross_ref_menu_state)
         self.window.menu_bar.help_contents_requested.connect(self.help_ctrl.show_help)
+        self.window.menu_bar.about_requested.connect(self.help_ctrl.show_about)
         self.project_command_controller.commands_changed.connect(self._refresh_index_command_options)
 
         # Structural Layout Hotkey Configurations

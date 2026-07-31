@@ -2,6 +2,8 @@ from PySide6.QtWidgets import QMenuBar
 from PySide6.QtCore import Signal, Qt, Slot
 from PySide6.QtGui import QKeySequence, QAction
 
+from models.app_version import APP_NAME
+
 class MainMenuBar(QMenuBar):
     # Explicit PySide6 Event Interface Contracts
     open_project_requested = Signal()
@@ -29,6 +31,7 @@ class MainMenuBar(QMenuBar):
     migrate_legacy_xrefs_requested = Signal()
     inject_cross_references_requested = Signal()
     help_contents_requested = Signal()
+    about_requested = Signal()
     edit_menu_about_to_show = Signal()
     tools_menu_about_to_show = Signal()
 
@@ -210,6 +213,12 @@ class MainMenuBar(QMenuBar):
         help_menu = self.addMenu("&Help")
         self.help_contents_action = help_menu.addAction("&Contents...", QKeySequence("F1"))
         self.help_contents_action.triggered.connect(lambda: self.help_contents_requested.emit())
+
+        help_menu.addSeparator()
+        # No shortcut: About is a once-a-year action, and every key
+        # combination worth spending is already doing something.
+        self.about_action = help_menu.addAction(f"&About {APP_NAME}...")
+        self.about_action.triggered.connect(lambda: self.about_requested.emit())
 
         # --- Global Action Container Tracking ---
         # Free-floating action container tracking the dark mode shortcut globally
