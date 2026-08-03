@@ -405,6 +405,22 @@ class NameInverter:
         return None
     
     def fetch_authority_from_autosuggest_entry(self, entry: Dict) -> Optional[str]:
+        """Resolve an AutoSuggest hit to a heading, without its life dates.
+
+        The date qualifier is stripped here, at the single exit point, rather
+        than inside one branch of the resolution below. It used to be applied
+        only on the LC Linked Data path, so the same person came back as
+        "Marshall, John" when AutoSuggest carried an LC id and
+        "Marshall, John, 1755-1835" when it fell through to VIAF's own record
+        -- VIAF main headings carry dates as a matter of course. Indexers
+        strike the dates out either way, so every path now normalises.
+        """
+        heading = self._resolve_authority_heading(entry)
+        if not heading:
+            return None
+        return self._strip_lc_date_qualifier(heading) or None
+
+    def _resolve_authority_heading(self, entry: Dict) -> Optional[str]:
         if not entry:
             return None
 

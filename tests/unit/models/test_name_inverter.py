@@ -139,6 +139,35 @@ class TestStripLcDateQualifier:
         assert inverter._strip_lc_date_qualifier("Smith, J. D.") == "Smith, J. D."
 
 
+class TestFetchAuthorityFromAutosuggestEntry:
+    """Only the network-free route through this method: an entry carrying no
+    LC id and no VIAF id falls straight through to its own term/name field,
+    which is where the shared date-qualifier stripping can be observed."""
+
+    def test_empty_entry_returns_none(self, inverter):
+        assert inverter.fetch_authority_from_autosuggest_entry({}) is None
+
+    def test_term_fallback_has_life_dates_stripped(self, inverter):
+        entry = {"term": "Marshall, John, 1755-1835"}
+        assert inverter.fetch_authority_from_autosuggest_entry(entry) == "Marshall, John"
+
+    def test_name_fallback_has_life_dates_stripped(self, inverter):
+        entry = {"name": "Churchill, Winston, 1874-1965."}
+        assert inverter.fetch_authority_from_autosuggest_entry(entry) == "Churchill, Winston"
+
+    def test_open_ended_birth_year_stripped(self, inverter):
+        entry = {"term": "Jones, John Paul, 1946-"}
+        assert inverter.fetch_authority_from_autosuggest_entry(entry) == "Jones, John Paul"
+
+    def test_heading_without_dates_is_unchanged(self, inverter):
+        entry = {"term": "Aristotle"}
+        assert inverter.fetch_authority_from_autosuggest_entry(entry) == "Aristotle"
+
+    def test_trailing_initials_are_not_mistaken_for_dates(self, inverter):
+        entry = {"term": "Smith, J. D."}
+        assert inverter.fetch_authority_from_autosuggest_entry(entry) == "Smith, J. D."
+
+
 class TestExtractViafIdsFromEntry:
     def test_empty_entry_returns_empty_list(self, inverter):
         assert inverter._extract_viaf_ids_from_entry({}) == []
