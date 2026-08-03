@@ -1,5 +1,6 @@
 """
-NameInverter -- covers only the offline, network-free surface: _fast_invert
+NameInverter -- covers only the offline, network-free surface: construction
+with and without a cache, _fast_invert
 (the rule-based inversion cascade), _strip_lc_date_qualifier,
 _extract_viaf_ids_from_entry, _parse_viaf_html_heading (pure string
 parsing, given HTML directly rather than fetched), cache_resolved_heading,
@@ -19,6 +20,80 @@ def inverter(tmp_path):
     inv = NameInverter(viaf_cache_path=str(tmp_path / "name_cache.db"), viaf_enabled=True)
     yield inv
     inv.close()
+
+
+class TestConstructionWithoutACache:
+    """The cache is optional. With VIAF disabled, or with no path given, the
+    object must still be usable and disposable -- _conn was previously assigned
+    only on the branch that opens the database, so every later read of it
+    raised AttributeError instead."""
+
+    def test_close_does_not_raise_when_no_cache_was_opened(self):
+        inv = NameInverter(viaf_cache_path=None, viaf_enabled=True)
+        inv.close()
+        inv.close()  # idempotent
+
+    def test_close_does_not_raise_when_viaf_is_disabled(self):
+        inv = NameInverter(viaf_enabled=False)
+        inv.close()
+
+    def test_invert_falls_back_to_rules_with_no_cache_and_no_network(self):
+        # viaf_enabled=False short-circuits _viaf_autosuggest, so this reaches
+        # the cache probe in invert() without making a request.
+        inv = NameInverter(viaf_enabled=False)
+        try:
+            result = inv.invert("John Smith", prefer_authority=True)
+            assert result.display_value == "Smith, John"
+            assert result.rule_suggestion == "Smith, John"
+            assert result.authority_term is None
+            assert result.used_authority is False
+        finally:
+            inv.close()
+
+    def test_cache_resolved_heading_is_a_no_op_without_a_cache(self):
+        inv = NameInverter(viaf_enabled=False)
+        try:
+            inv.cache_resolved_heading("John Smith", "Smith, John")
+        finally:
+            inv.close()
+
+
+class TestCachePathHandling:
+    """Opening the cache must either work or leave a usable cacheless object --
+    never raise out of the constructor."""
+
+    def test_bare_relative_filename_opens_in_the_working_directory(self, tmp_path, monkeypatch):
+        # dirname("name_cache.db") is "", which makedirs cannot be handed.
+        monkeypatch.chdir(tmp_path)
+        inv = NameInverter(viaf_cache_path="name_cache.db", viaf_enabled=True)
+        try:
+            assert inv._conn is not None
+            assert (tmp_path / "name_cache.db").exists()
+            # A seeded row short-circuits invert() before any network call.
+            inv.cache_resolved_heading("John Smith", "Smith, John")
+            assert inv.invert("John Smith", prefer_authority=True).authority_term == "Smith, John"
+        finally:
+            inv.close()
+
+    def test_missing_parent_directories_are_created(self, tmp_path):
+        target = tmp_path / "nested" / "deeper" / "name_cache.db"
+        inv = NameInverter(viaf_cache_path=str(target), viaf_enabled=True)
+        try:
+            assert inv._conn is not None
+            assert target.exists()
+        finally:
+            inv.close()
+
+    def test_unusable_path_degrades_to_no_cache_rather_than_raising(self, tmp_path):
+        # Parent exists but is a file, so creating the folder cannot succeed.
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a directory", encoding="utf-8")
+        inv = NameInverter(viaf_cache_path=str(blocker / "name_cache.db"), viaf_enabled=True)
+        try:
+            assert inv._conn is None
+            assert inv.invert("John Smith", prefer_authority=False).display_value == "Smith, John"
+        finally:
+            inv.close()
 
 
 class TestModuleHelpers:

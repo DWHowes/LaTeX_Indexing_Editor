@@ -4,7 +4,9 @@ from pathlib import Path
 from typing import Optional, Callable
 from concurrent.futures import ThreadPoolExecutor
 
-from PySide6.QtCore import QObject, Slot, QModelIndex, Qt, Signal, QTimer
+from PySide6.QtCore import (
+    QObject, Slot, QModelIndex, QPersistentModelIndex, Qt, Signal, QTimer
+)
 from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplication, QProgressDialog
 from shiboken6 import isValid
 
@@ -27,7 +29,7 @@ from models.latex_command_registry_model import LatexCommandRegistryModel
 from models.theme_config_model import ThemeConfigModel
 from models.entry_modifier_model import EntryModifierModel
 from models.index_edit_staging_model import IndexEditStagingModel
-from models.name_inverter import NameInverter
+from models.name_inverter import NameInverter, NameInversionResult
 
 from controllers.index_tree_controller import IndexTreeController
 from controllers.context_menu_subsystem import FileTreeContextMenuManager, IndexTreeContextMenuManager, EditEntryContextMenuManager
@@ -55,7 +57,12 @@ from views.head_note_dialog import HeadNoteDialog
 
 class AppPipelineController(QObject):
     name_inversion_completed = Signal(QModelIndex, str)
-    
+    # Carries a finished lookup back from the worker thread: the persistent
+    # index of the row it was requested for, the name asked about, and the
+    # NameInversionResult. Delivered queued, so the dialog is built on the UI
+    # thread even though the lookup finished on a worker.
+    name_lookup_finished = Signal(object, str, object)
+
     def __init__(self, window, prefs_model, backup_manager, doc_controller,  
                  lifecycle_controller, scope_controller, session_logger,
                  name_inverter = None, worker=None): 
@@ -74,6 +81,9 @@ class AppPipelineController(QObject):
         self._executor = ThreadPoolExecutor(max_workers=2)
 
         self.name_inversion_completed.connect(self._apply_inverted_name, Qt.ConnectionType.QueuedConnection)
+        self.name_lookup_finished.connect(
+            self._present_name_inversion_dialog, Qt.ConnectionType.QueuedConnection)
+        self._name_lookup_in_flight = False
 
         self._tree_modified = False
         self._load_thread = None
@@ -363,7 +373,37 @@ class AppPipelineController(QObject):
         if not source_name:
             return
 
-        inversion_result = self.name_inverter.invert(source_name, locale=None, prefer_authority=True)
+        if self._name_lookup_in_flight:
+            self.window.status_bar.showMessage("A name lookup is already running.", 3000)
+            return
+
+        # The lookup can make several sequential network calls, so it runs off
+        # the UI thread. A persistent index survives the wait: the user is free
+        # to sort or edit the table while the lookup is out, which would leave
+        # a plain QModelIndex pointing at the wrong row.
+        persistent_index = QPersistentModelIndex(target_index)
+        self._name_lookup_in_flight = True
+        self.window.status_bar.showMessage(f"Looking up '{source_name}'...")
+
+        def _on_lookup_done(inversion_result):
+            # Still on a worker thread here -- emit rather than touch widgets.
+            self.name_lookup_finished.emit(persistent_index, source_name, inversion_result)
+
+        self.invert_name_async(
+            source_name, _on_lookup_done, locale=None, prefer_authority=True)
+
+    @Slot(object, str, object)
+    def _present_name_inversion_dialog(self, persistent_index, source_name: str,
+                                       inversion_result) -> None:
+        """Offers the finished lookup for review. Runs on the UI thread."""
+        self._name_lookup_in_flight = False
+        self.window.status_bar.clearMessage()
+
+        target_index = QModelIndex(persistent_index)
+        if not target_index.isValid():
+            self.window.status_bar.showMessage(
+                "That entry is no longer available; name inversion cancelled.", 4000)
+            return
 
         dialog = NameInversionDialog(
             original_name=source_name,
@@ -379,7 +419,7 @@ class AppPipelineController(QObject):
 
             # Cache if the user changed the auto-resolved value
             original_auto = inversion_result.authority_term or inversion_result.rule_suggestion or ""
-            if final_value.strip() != original_auto.strip():
+            if self.name_inverter and final_value.strip() != original_auto.strip():
                 self.name_inverter.cache_resolved_heading(source_name, final_value, reason=reason, user_edited=True)
 
             self._apply_inverted_name(target_index, final_value)
@@ -2205,30 +2245,60 @@ class AppPipelineController(QObject):
             print(f"SHUTDOWN CRITICAL FAILURE: {shutdown_err}. Executing hard exit bypass.")
             self._force_application_exit()
 
-    def invert_name(self, name: str, locale: Optional[str] = None, prefer_authority: bool = True) -> str:
-        """Synchronous wrapper — safe for non-UI background work or unit tests."""
+    def invert_name(self, name: str, locale: Optional[str] = None,
+                    prefer_authority: bool = True) -> NameInversionResult:
+        """Synchronous inversion -- safe for background work or unit tests.
+
+        Returns the whole NameInversionResult rather than a string: callers
+        need the authority heading and the rule-based suggestion separately in
+        order to offer both.
+        """
         if self.name_inverter:
             return self.name_inverter.invert(name, locale=locale, prefer_authority=prefer_authority)
-        # conservative fallback (no VIAF)
-        from models.name_inverter import NameInverter as _NI
-        return _NI(viaf_enabled=False).invert(name, locale=locale, prefer_authority=False)
 
-    def invert_name_async(self, name: str, callback: Callable[[str], None],
+        # No inverter configured: still give a rule-based answer, but never
+        # reach for the network.
+        fallback = NameInverter(viaf_enabled=False)
+        try:
+            return fallback.invert(name, locale=locale, prefer_authority=False)
+        finally:
+            fallback.close()
+
+    def _rule_only_inversion(self, name: str, locale: Optional[str] = None) -> NameInversionResult:
+        """Offline last resort. Never raises, never touches the network."""
+        try:
+            return self.invert_name(name, locale=locale, prefer_authority=False)
+        except Exception:
+            return NameInversionResult(
+                display_value=name, authority_term=None,
+                rule_suggestion=name, used_authority=False)
+
+    def invert_name_async(self, name: str, callback: Callable[[NameInversionResult], None],
                           locale: Optional[str] = None, prefer_authority: bool = True) -> None:
-        """
-        Run inversion (including VIAF) off the UI thread.
-        `callback` will be invoked with the inverted string; ensure it updates UI on the main thread.
+        """Run inversion, including the network lookup, off the UI thread.
+
+        `callback` runs on a worker thread and always receives a
+        NameInversionResult -- on failure it gets the rule-based inversion
+        rather than a bare string, so callers have one shape to handle. Marshal
+        to the UI thread before touching any widget.
         """
         if not self.name_inverter:
-            callback(self.invert_name(name, locale=locale, prefer_authority=False))
+            callback(self._rule_only_inversion(name, locale))
             return
 
         future = self._executor.submit(self.name_inverter.invert, name, locale, prefer_authority)
+
         def _done(fut):
             try:
-                callback(fut.result())
-            except Exception:
-                callback(name)
+                result = fut.result()
+            except Exception as exc:
+                print(f"[NAME INVERSION] Lookup failed for {name!r}: {exc}")
+                result = self._rule_only_inversion(name, locale)
+            try:
+                callback(result)
+            except Exception as exc:
+                print(f"[NAME INVERSION] Callback failed for {name!r}: {exc}")
+
         future.add_done_callback(_done)
 
     def safely_terminate_application_lifecycle(self) -> None:
@@ -2261,16 +2331,20 @@ class AppPipelineController(QObject):
         except Exception:
             pass
 
+        # Stop the pool before the cache connection goes away. Closing first
+        # left an in-flight lookup writing to a closed database. wait=False so
+        # a hung network call cannot stall the exit; a late write lands on a
+        # closed connection and is swallowed by NameInverter's own guards.
+        try:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+
         try:
             if self.name_inverter:
                 self.name_inverter.close()
         except Exception:
             pass
-
-        try:
-            self._executor.shutdown(wait=False)
-        except Exception:
-            pass 
 
         self.window.close()
         QApplication.quit()  # ensures the event loop actually exits

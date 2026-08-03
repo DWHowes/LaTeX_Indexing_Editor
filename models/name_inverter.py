@@ -58,12 +58,47 @@ class NameInversionResult:
     used_authority: bool = False
 
 class NameInverter:
+    # Columns added to `cache` after the first release. CREATE TABLE IF NOT
+    # EXISTS leaves an existing table exactly as it found it, so a cache
+    # written by an earlier version keeps its original shape and every write
+    # naming a newer column fails -- silently, because cache_resolved_heading
+    # swallows the error, so corrections are simply lost. Mirrors
+    # FileTreePersistence._ensure_column.
+    #
+    # created_at is added without its DEFAULT: SQLite rejects a non-constant
+    # default on ALTER TABLE ADD COLUMN. The write sites name created_at
+    # explicitly instead, so migrated and freshly created caches behave alike.
+    _CACHE_COLUMNS = (
+        ("reason", "TEXT"),
+        ("locale", "TEXT"),
+        ("user_edited", "INTEGER DEFAULT 0"),
+        ("created_at", "TEXT"),
+    )
+
     def __init__(self, viaf_cache_path: Optional[str] = None, viaf_enabled: bool = True):
         self.viaf_enabled = viaf_enabled
-        self._shelf = None
+        # Defined unconditionally: close(), __del__ and invert()'s cache probe
+        # all read _conn, and they run whether or not a cache was configured.
+        # Assigning it only inside the branch below left it missing entirely
+        # when the cache was disabled or no path was given.
+        self._conn = None
+        # Per-instance memo for AutoSuggest replies. Previously an @lru_cache
+        # on the method, which keys on self and so pinned every inverter ever
+        # constructed for the life of the process, keeping __del__ from ever
+        # running.
+        self._autosuggest_memo: Dict[str, Optional[Dict]] = {}
         if viaf_enabled and viaf_cache_path:
-            os.makedirs(os.path.dirname(viaf_cache_path), exist_ok=True)
             try:
+                # Inside the try, and guarded: every other way of failing to
+                # open the cache degrades to a cacheless inverter, so creating
+                # its folder should too rather than taking the constructor
+                # down. The guard is for a bare relative filename, whose
+                # dirname is "" -- makedirs("") raises instead of being the
+                # no-op the call site assumes.
+                parent_directory = os.path.dirname(viaf_cache_path)
+                if parent_directory:
+                    os.makedirs(parent_directory, exist_ok=True)
+
                 self._conn = sqlite3.connect(viaf_cache_path, check_same_thread=False)
                 self._conn.execute(
                     "CREATE TABLE IF NOT EXISTS cache "
@@ -72,12 +107,23 @@ class NameInverter:
                     "user_edited INTEGER DEFAULT 0, " \
                     "created_at  TEXT DEFAULT (datetime('now')))"
                 )
+                self._ensure_cache_columns()
                 self._conn.commit()
             except Exception as exc:
                 print(f"VIAF cache DB init failed: {exc}")
                 self._conn = None
 
+    def _ensure_cache_columns(self) -> None:
+        """Additively bring an older `cache` table up to the current shape."""
+        existing = {row[1] for row in self._conn.execute("PRAGMA table_info(cache)")}
+        for column, ddl_type in self._CACHE_COLUMNS:
+            if column not in existing:
+                # Names are string literals from this file, never user input.
+                self._conn.execute(f"ALTER TABLE cache ADD COLUMN {column} {ddl_type}")
+                print(f"[NameInverter] Migrated name cache: added column {column!r}.")
+
     def close(self):
+        self._autosuggest_memo.clear()
         if self._conn:
             try:
                 self._conn.close()
@@ -88,8 +134,25 @@ class NameInverter:
     def __del__(self):
         self.close()
 
-    @lru_cache(maxsize=1024)
+    _AUTOSUGGEST_MEMO_LIMIT = 1024
+
     def _viaf_autosuggest(self, name: str) -> Optional[Dict]:
+        """Memoised AutoSuggest lookup, bounded and scoped to this instance."""
+        if not self.viaf_enabled:
+            return None
+
+        if name in self._autosuggest_memo:
+            return self._autosuggest_memo[name]
+
+        result = self._viaf_autosuggest_uncached(name)
+
+        if len(self._autosuggest_memo) >= self._AUTOSUGGEST_MEMO_LIMIT:
+            # Dicts keep insertion order, so this drops the oldest entry.
+            self._autosuggest_memo.pop(next(iter(self._autosuggest_memo)), None)
+        self._autosuggest_memo[name] = result
+        return result
+
+    def _viaf_autosuggest_uncached(self, name: str) -> Optional[Dict]:
         if not self.viaf_enabled:
             return None
 
@@ -733,8 +796,11 @@ class NameInverter:
                 print(f"Caching resolved heading: {authority_term!r}")
                 if self._conn is not None:
                     try:
+                        # created_at named explicitly rather than left to the
+                        # column DEFAULT, which a migrated cache does not have.
                         self._conn.execute(
-                            "INSERT OR REPLACE INTO cache (key, value) VALUES (?, ?)",
+                            "INSERT OR REPLACE INTO cache (key, value, created_at) "
+                            "VALUES (?, ?, datetime('now'))",
                             (cache_key, authority_term or "")
                         )
                         self._conn.commit()
@@ -770,8 +836,8 @@ class NameInverter:
         try:
             self._conn.execute(
                 "INSERT OR REPLACE INTO cache "
-                "(key, value, reason, locale, user_edited) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "(key, value, reason, locale, user_edited, created_at) "
+                "VALUES (?, ?, ?, ?, ?, datetime('now'))",
                 (
                     f"resolved:{name.strip()}",
                     heading.strip(),
@@ -781,6 +847,10 @@ class NameInverter:
                 )
             )
             self._conn.commit()
-            print(f"User correction cached: {name!r} → {heading!r} (reason={reason!r})")
+            # Plain ASCII: this goes to stdout, which SessionLogger may be
+            # writing on a cp1252 stream. A UnicodeEncodeError here would be
+            # caught below and misreported as a failed write, even though the
+            # commit above already succeeded.
+            print(f"User correction cached: {name!r} -> {heading!r} (reason={reason!r})")
         except Exception as exc:
             print(f"Failed to cache user correction for {name!r}: {exc}")
