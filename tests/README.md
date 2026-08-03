@@ -47,10 +47,15 @@ Pure logic with no PySide6 dependency, covering every module identified for
 it. One subsection per module; the two `\index`-grammar modules come first
 because they carry most of this layer's weight and most of its history.
 
-Each subsection is named for the module under test, whose tests live in the
-correspondingly named `tests/unit/models/test_<module>.py` — that mapping is
-1:1 throughout this layer, so individual filenames are only cited below when
-a specific test is being pointed at.
+Each subsection is named for the module under test, whose tests usually live
+in the correspondingly named `tests/unit/models/test_<module>.py`, so
+individual filenames are only cited below when a specific test is being
+pointed at. Three files break that mapping deliberately, because they cover
+one behaviour rather than a whole module, and each is named for the behaviour:
+`test_heading_id_allocation.py`, `test_session_logger_folder.py` and
+`test_encap_style_values.py` (whose subject lives in `views/`, not `models/`,
+but is pure logic and belongs to this layer). Their subsections name them
+explicitly.
 
 ### `index_tag_grammar.py`
 
@@ -101,6 +106,11 @@ describe the text. `test_index_command_stack.py` pins it from both
 directions, including the range-pair case where a closer merged into its
 opener's command must come back off first.
 
+`TestConfigurableLimit` covers a later change: the undo depth became a user
+preference (Preferences → General), so the bound has to be changeable on a
+**live** stack rather than only at construction, and lowering it has to trim
+the oldest commands immediately rather than waiting for the next push.
+
 ### `latex_index_parser.py`
 
 The deepest coverage of any layer-1 module: highest historical defect density
@@ -113,15 +123,75 @@ coordinates — and delegates everything between the braces.
 
 ### `name_inverter.py`
 
-The offline rule-based logic (`_fast_invert` and friends); the VIAF/LC
-network-calling methods are out of scope. Two real, pre-existing bugs were
-found here and confirmed empirically while writing this coverage, not just
-inferred from reading: an `UnboundLocalError` on any name where "del" is the
-Spanish connector, and dead code — a regex guard that could never match —
-silently breaking the documented two-token "Mac Donald" form. Both are now
-fixed, with `test_two_token_mac_space_form_combines` and
+The offline rule-based logic (`_fast_invert` and friends). The methods that
+actually make requests — `_viaf_autosuggest_uncached`,
+`_fetch_viaf_authority_heading`, `_fetch_lc_authority_heading` — remain out of
+scope, but the *resolution* logic wrapped around them is now covered, because
+an AutoSuggest entry carrying neither an LC id nor a VIAF id falls straight
+through to its own `term`/`name` field without touching the network.
+`TestFetchAuthorityFromAutosuggestEntry` uses that route.
+
+Two real, pre-existing bugs were found here and confirmed empirically while
+writing the original coverage, not just inferred from reading: an
+`UnboundLocalError` on any name where "del" is the Spanish connector, and dead
+code — a regex guard that could never match — silently breaking the documented
+two-token "Mac Donald" form. Both are now fixed, with
+`test_two_token_mac_space_form_combines` and
 `test_del_connector_does_not_crash` in `test_name_inverter.py` as permanent
 regression coverage (no longer `xfail`).
+
+Three later additions each pin a fix of their own:
+
+- **`TestFetchAuthorityFromAutosuggestEntry`** — the trailing life-date
+  qualifier (`Marshall, John, 1755-1835`) used to be stripped on only *one* of
+  the four paths that can return a heading, the Library of Congress one. A
+  heading taken from VIAF's own record kept its dates, and VIAF main headings
+  carry them as a matter of course, so the same person resolved two different
+  ways depending on which id AutoSuggest happened to carry. Stripping now
+  happens once at the method's single exit point. Indexers strike these dates,
+  so the pre-fix behaviour produced a spurious "user correction" on every such
+  name.
+- **`TestConstructionWithoutACache`** — `self._conn` was assigned only inside
+  the branch that opens the database, so constructing with `viaf_enabled=False`
+  or no path left the attribute missing entirely and every later read of it
+  raised `AttributeError`, including from `close()` and `__del__`.
+- **`TestCachePathHandling`** — `os.makedirs(os.path.dirname(path))` sat
+  outside the `try`, so a bare relative filename (whose dirname is `""`) took
+  the constructor down, while every other way of failing to open the cache
+  degraded quietly. The call is now inside the `try` *and* guarded for the
+  empty-dirname case, so a bare filename genuinely works rather than merely
+  failing silently.
+
+The invariant all three protect: opening the cache either works or leaves a
+usable cacheless inverter. It must never raise out of the constructor.
+
+### `session_logger.py`
+
+`test_session_logger_folder.py` covers the log folder specifically — its name
+became a user preference (Preferences → General), and the default changed from
+the hidden `.session_logs` to a visible `session_logs`, on the grounds that a
+folder whose whole purpose is for the user to open and read it should not be
+hidden. `TestRealignToProjectRoot` covers the folder following the open
+project.
+
+Every test here stops the intercept in teardown. `SessionLogger` reassigns
+`sys.stdout`/`sys.stderr` on construction, and leaving that in place swallows
+pytest's own output for the rest of the run — see also
+[the theme broker gotcha](#the-theme-broker-is-a-process-wide-singleton) for
+the other process-wide state this suite has to put back.
+
+### `entry_modifier_list.py` encap style values
+
+`test_encap_style_values.py` is the one file in this layer whose name is not
+its module's: it covers a single free function,
+`views.entry_modifier_list.set_encap_style_values`, rather than a whole
+module. The bold/italic encap name lists behind the Entry Table's Page column
+became a user preference (Preferences → General) because a project styling its
+page numbers with its own macro silently got a plain, mis-styled cell for it.
+
+The lists are module-level state read while building every table row, so each
+test restores the defaults afterwards; a leaked value changes how an unrelated
+test renders.
 
 ### `rtf_export_model.py`
 
@@ -384,6 +454,20 @@ either strings or already-typed values on the way in, but a real bug in this
 method's own contract nonetheless. Fixed by comparing against the actual type
 objects (`t is bool`/`t is int`).
 
+`TestGeneralPreferences` covers the Preferences → General tab added later —
+undo depth, auto-save enablement and interval, log folder name, and the
+bold/italic encap lists. These are application-scoped, so unlike the LaTeX
+settings they live in QSettings only and never reach `project_metadata`.
+Coercion matters more here than it looks: QSettings hands values back as
+strings from an `.ini` and as native types from the Windows registry, and each
+of these feeds something that would fail far from the cause if it arrived as
+the wrong type — a `QTimer` interval, a stack bound, a frozenset membership
+test. The consumers of three of them have their own coverage; see
+[`index_command_stack.py`](#index_command_stackpy) for the undo bound,
+[`session_logger.py`](#session_loggerpy) for the folder name,
+[`entry_modifier_list.py` encap style values](#entry_modifier_listpy-encap-style-values)
+for the encap lists, and [Auto-save](#auto-save) for the timer.
+
 ### RTF export orchestration
 
 `test_rtf_export_controller.py` covers `IndexExportController`,
@@ -441,6 +525,19 @@ range-pair macro insertion, page-style/`encap` variants, custom command
 names, byte-offset math, and the abort paths for an empty main field, an
 unsaved/Untitled document, and no active editor tab. See
 `test_latex_index_controller_insert.py`.
+
+### Help and About
+
+`test_about_dialog.py` covers three things that only make sense together: the
+`models/app_version.py` constants, the `AboutDialog` that renders them, and
+the Help-menu-to-`HelpController` wiring that opens it.
+
+The dialog is driven directly rather than through a real click, and that is
+deliberate. `AboutDialog` is modal, so anything reaching `.exec()` would hang
+the run headlessly; `show_about()` calls `.show()`, which does not block, and
+that is what these tests drive. See
+[Monkeypatch modal dialogs on failure paths](#monkeypatch-modal-dialogs-on-failure-paths)
+for the general form of this problem.
 
 ### Others
 
@@ -536,6 +633,80 @@ tabs widget exists at all, even with nothing to save, so the save workflow's
 "No uncommitted modifications detected." message is unreachable in practice —
 it always reports "Workspace saved successfully." instead.
 
+That file's `TestUnwrittenIndexChangesOnProjectClose` covers the *second* gate
+on File → Close Project. `close_all_tabs()` only ever asks about editor-tab
+buffers, so once index writes became deferred to Save, an edit touching a file
+with no open tab had no modified tab to prompt about and the close dropped it
+silently — while its `.tex` rewrite had already reached disk. The tests drive
+the real close workflow with `QMessageBox.question` monkeypatched per button,
+and each reopens the project afterwards because `booted_app` is module-scoped.
+That prompt is also the worked example in
+[Monkeypatch modal dialogs on failure paths](#monkeypatch-modal-dialogs-on-failure-paths),
+which explains why it must use the static `QMessageBox.question` rather than a
+constructed box.
+
+### Auto-save
+
+`test_autosave.py` covers the `QTimer` on `AppPipelineController` that
+periodically runs `execute_project_save_workflow`, added because deferring
+index writes to save left hundreds of changes sitting in memory between saves.
+
+Ticks are driven by calling `_on_autosave_tick()` directly rather than by
+waiting on the real timer: the shortest configurable interval is a minute, and
+what is under test is the decision the tick makes, not `QTimer` itself. The
+timer's own start/stop lifecycle is covered separately through `isActive()`.
+
+The safety property worth knowing: **nothing here may raise a modal.**
+Auto-save is silent by design, on success and on failure alike. A test in this
+file that hangs is therefore a real regression rather than a slow suite — the
+same trap described under
+[Monkeypatch modal dialogs on failure paths](#monkeypatch-modal-dialogs-on-failure-paths),
+except that here the correct behaviour is for no dialog to exist at all.
+
+### Name inversion runs off the UI thread
+
+`test_name_inversion_async.py` pins the arrangement that replaced a
+synchronous authority lookup in the context-menu slot. That lookup makes
+several sequential network calls — AutoSuggest, then per candidate id a
+cluster fetch, a justlinks fetch with up to three LC fetches, four legacy XML
+endpoints and an HTML parse — so on a connection that black-holes rather than
+refuses, the window could freeze for minutes.
+
+`NameInverter.invert` is replaced with a stub that blocks on an event the test
+controls. That is what makes "did the slot return before the lookup finished?"
+observable at all; without it, a synchronous and an asynchronous
+implementation are indistinguishable from the outside. The tests assert the
+slot returns while the lookup is still blocked, that the lookup ran on a
+non-UI thread, that a second request is refused while one is in flight, that a
+failed lookup still offers the rule-based form, and that a row deleted during
+the wait cancels cleanly instead of writing to whatever now occupies that
+index.
+
+That last case is why the request carries a `QPersistentModelIndex` rather
+than a `QModelIndex`: a responsive window means the user can re-sort or edit
+the table while a lookup is out.
+
+### Dark-mode dialog contrast
+
+`test_dark_dialog_contrast.py` measures rendered pixels rather than reading
+stylesheet text, because the failure it guards against is invisible in the
+source. See
+[Styling a widget takes its sub-controls away from the native style](#styling-a-widget-takes-its-sub-controls-away-from-the-native-style)
+for the bug family itself.
+
+It covers tab selection being discernible in both tabbed dialogs (Preferences
+and Theme Configuration), spin-box arrows clearing a contrast floor, a
+structural assertion that the shared sheet does not claim
+`QSpinBox`/`QComboBox`, and light mode still returning `""`.
+
+Two things to know before editing it. **Thresholds are deliberately loose** —
+2:1 for tabs, 3:1 for arrows. They exist to catch an affordance collapsing to
+invisibility (contrast near 1:1), not to police exact shades, so a cosmetic
+retint should not break them. And **sample an enabled control**: a spin box
+sitting at its minimum has a legitimately greyed-out down arrow, which will
+fail an arrow-contrast assertion for a reason that is not a bug. The test sets
+the value mid-range first.
+
 ### Checksum re-stamping on save
 
 `test_file_sync_checksums_on_save.py` — the regression a user reported
@@ -615,7 +786,7 @@ over](#stale-lambdas-outliving-the-object-they-close-over).
 
 ## Recurring bug families
 
-Three bug shapes have each appeared in more than one place in this codebase.
+Several bug shapes have each appeared in more than one place in this codebase.
 They are recorded together here so a new instance is recognizable as an
 instance, rather than looking novel.
 
@@ -682,6 +853,43 @@ times:
 3. Saves never re-stamped `project_file_sync_state`, so the app reported the
    user's own edits as external ones; see
    [Checksum re-stamping on save](#checksum-re-stamping-on-save).
+
+### Styling a widget takes its sub-controls away from the native style
+
+`AppStyleConfiguration.get_dialog_stylesheet` returns `""` for light mode and
+a real sheet for dark, so this family is dark-mode-only. Setting *any* box
+property on a widget in that sheet moves its whole rendering to the stylesheet
+engine, and every affordance the sheet does not then redraw disappears. Three
+instances so far, each found only by looking at the dialog:
+
+1. **The focus ring.** Styling `QLineEdit` removed the native focus
+   indicator, so keyboard focus became invisible. Restored with an explicit
+   `:focus` border rule.
+2. **The default button's accent.** Styling `QPushButton` removed the marker
+   showing which button confirms the dialog. Restored with `:default`.
+3. **Spin and combo arrows.** Styling `QSpinBox`/`QComboBox` left their arrows
+   drawn in the frame colour — `#444444` on `#353535`, a contrast of 1.26:1,
+   against 6.39:1 for the same dialog with no sheet at all. Fixed by *removing*
+   those two widgets from the sheet rather than reconstructing the arrows,
+   since Qt exposes no colour property for an arrow, only an image.
+
+A fourth, related instance is not a takeover but the same class of invisible
+outcome: `QTabBar::tab` and `QTabBar::tab:selected` were styled with
+`colours.base` and `colours.button`, which are **both `#353535`** in the
+shipped dark theme, so the selected tab was pixel-identical to the others.
+Selection now uses `highlight`/`highlightedText`, matching what a selected
+list or tree row already does.
+
+Two lessons that generalise. **A contrast measurement is not a rendering
+check**: an attempt to draw the arrows as CSS triangles (zero-size box, one
+solid border edge) measured 12.27:1 and rendered as solid white rectangles,
+because Qt fills the box instead of collapsing it. And **the native rendering
+is often already correct** — the palette is themed, so handing a widget back
+to the native style is a legitimate fix, not a retreat.
+
+`test_dark_dialog_contrast.py` guards all four, including a structural
+assertion that the sheet has not re-claimed `QSpinBox`/`QComboBox`. See
+[Dark-mode dialog contrast](#dark-mode-dialog-contrast).
 
 ---
 
