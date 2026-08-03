@@ -7,6 +7,9 @@ from models.app_version import APP_NAME
 class MainMenuBar(QMenuBar):
     # Explicit PySide6 Event Interface Contracts
     open_project_requested = Signal()
+    recent_menu_about_to_show = Signal()
+    recent_project_selected = Signal(str)
+    clear_recent_projects_requested = Signal()
     save_project_requested = Signal()
     close_project_requested = Signal()
     find_action_triggered = Signal()
@@ -45,10 +48,22 @@ class MainMenuBar(QMenuBar):
         """Assembles purely structural, view-only presentation pathways."""
         
         # --- File Menu Dropdowns ---
-        file_menu = self.addMenu("&File")
+        # Kept as an attribute so callers can reach the menu without going
+        # through self.actions()[0].menu(): in PySide6 that accessor takes
+        # ownership of the returned QMenu and destroys the C++ object, taking
+        # the whole File menu and its submenus with it.
+        self.file_menu = file_menu = self.addMenu("&File")
         open_action = file_menu.addAction("&Open Project", QKeySequence("Ctrl+O"))
         open_action.triggered.connect(lambda: self.open_project_requested.emit())
-        
+
+        # Populated on demand rather than held as state here: the view owns no
+        # list of its own, and the controller repopulates from preferences
+        # each time the submenu is about to open. Same pattern as
+        # edit_menu_about_to_show / tools_menu_about_to_show below.
+        self.recent_menu = file_menu.addMenu("Open &Recent")
+        self.recent_menu.aboutToShow.connect(lambda: self.recent_menu_about_to_show.emit())
+        self.recent_menu_action = self.recent_menu.menuAction()
+
         save_action = file_menu.addAction("&Save Project", QKeySequence("Ctrl+S"))
         save_action.triggered.connect(lambda: self.save_project_requested.emit())
         
@@ -257,3 +272,52 @@ class MainMenuBar(QMenuBar):
     def set_inject_cross_refs_enabled(self, enabled: bool) -> None:
         """Public contract for the controller to reflect base-file-chosen state (Tools menu)."""
         self.inject_cross_refs_action.setEnabled(enabled)
+
+    def set_recent_menu_visible(self, visible: bool) -> None:
+        """Show or hide the whole Open Recent submenu.
+
+        Hidden rather than disabled when the feature is switched off: a
+        greyed-out menu still advertises that a list of recently opened work
+        exists, which is the thing someone turning this off is trying to
+        avoid. Clearing the stored list stays reachable from
+        Preferences -> General, which is where the switch itself lives.
+        """
+        self.recent_menu_action.setVisible(visible)
+
+    def populate_recent_projects(self, entries: list) -> None:
+        """Rebuild the Open Recent submenu from `entries`.
+
+        Each entry is a dict with 'path' and 'name'. The full path is always
+        shown as the status tip, because two books can easily share a folder
+        name and the name alone would not tell them apart.
+
+        Nothing here checks whether a folder still exists. That check happens
+        when an entry is chosen, for two reasons: an entry that cannot be
+        clicked cannot be removed either, and stat-ing every path each time
+        the File menu opens is not free when a project lives on a network
+        share.
+        """
+        self.recent_menu.clear()
+
+        if not entries:
+            empty_action = self.recent_menu.addAction("No recent projects")
+            empty_action.setEnabled(False)
+            return
+
+        for position, entry in enumerate(entries, start=1):
+            path = str(entry.get("path", ""))
+            label = str(entry.get("name") or "").strip() or path
+            # &1..&9 give the first nine entries a keyboard accelerator; the
+            # && escapes any literal ampersand in a project name so it is not
+            # eaten as one.
+            prefix = f"&{position} " if position < 10 else ""
+            action = self.recent_menu.addAction(f"{prefix}{label.replace('&', '&&')}")
+            action.setStatusTip(path)
+            action.setToolTip(path)
+            action.triggered.connect(
+                lambda _checked=False, target=path: self.recent_project_selected.emit(target)
+            )
+
+        self.recent_menu.addSeparator()
+        clear_action = self.recent_menu.addAction("&Clear Recent Projects")
+        clear_action.triggered.connect(lambda: self.clear_recent_projects_requested.emit())

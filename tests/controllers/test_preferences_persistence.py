@@ -15,6 +15,8 @@ the bare QSettings() location AND the explicit legacy
 QSettings("DH Indexing", "LatexEditor") location land under the same
 redirected tmp_path, so migration between them is still test-isolated.
 """
+import json
+
 import pytest
 from PySide6.QtCore import QSettings, QByteArray
 
@@ -311,3 +313,164 @@ class TestGeneralPreferences:
         prefs.settings.setValue("autosave_enabled", "false")
 
         assert prefs.load_application_preferences()["autosave_enabled"] is False
+
+
+class TestRecentProjectsSettings:
+    """The two Preferences -> General settings that govern the list. The list
+    itself is covered by TestRecentProjectsList."""
+
+    def test_defaults(self, qtbot):
+        data = PreferencesPersistence().load_application_preferences()
+
+        assert data["recent_projects_enabled"] is True
+        assert data["recent_projects_max"] == 10
+
+    def test_enabled_accepts_a_string_boolean(self, qtbot):
+        prefs = PreferencesPersistence()
+        prefs.settings.setValue("recent_projects_enabled", "false")
+
+        assert prefs.load_application_preferences()["recent_projects_enabled"] is False
+
+    def test_count_round_trips_through_update_general_preferences(self, qtbot):
+        prefs = PreferencesPersistence()
+
+        prefs.update_general_preferences(
+            {"recent_projects_enabled": False, "recent_projects_max": 3}
+        )
+
+        data = PreferencesPersistence().load_application_preferences()
+        assert data["recent_projects_max"] == 3
+        assert data["recent_projects_enabled"] is False
+
+    def test_count_is_clamped_to_the_spin_box_range_on_write(self, qtbot):
+        prefs = PreferencesPersistence()
+
+        prefs.update_general_preferences({"recent_projects_max": 999})
+        assert prefs.load_application_preferences()["recent_projects_max"] == 25
+
+        prefs.update_general_preferences({"recent_projects_max": 0})
+        assert prefs.load_application_preferences()["recent_projects_max"] == 1
+
+    def test_a_hand_edited_out_of_range_count_is_clamped_on_read(self, qtbot):
+        # A value that never went through the dialog -- a stale registry key
+        # or a hand-edited .ini.
+        prefs = PreferencesPersistence()
+        prefs.settings.setValue("recent_projects_max", 500)
+
+        assert prefs.load_application_preferences()["recent_projects_max"] == 25
+
+    def test_the_raw_list_does_not_leak_into_the_preferences_dict(self, qtbot):
+        prefs = PreferencesPersistence()
+        prefs.record_recent_project(r"D:\Books\Smith", "Smith")
+
+        data = prefs.load_application_preferences()
+
+        assert "recent_projects" not in data, (
+            "the JSON blob has its own accessor and must not appear as a raw "
+            "string beside the typed preferences")
+
+
+class TestRecentProjectsList:
+    """
+    Stored as JSON rather than the comma-joined form the other list
+    preferences use, because a comma is legal in a filesystem path.
+    """
+
+    def test_empty_by_default(self, qtbot):
+        assert PreferencesPersistence().get_recent_projects() == []
+
+    def test_most_recently_opened_comes_first(self, qtbot):
+        prefs = PreferencesPersistence()
+
+        prefs.record_recent_project(r"D:\Books\First", "First")
+        prefs.record_recent_project(r"D:\Books\Second", "Second")
+
+        assert [e["name"] for e in prefs.get_recent_projects()] == ["Second", "First"]
+
+    def test_reopening_moves_an_entry_up_rather_than_duplicating_it(self, qtbot):
+        prefs = PreferencesPersistence()
+
+        prefs.record_recent_project(r"D:\Books\First", "First")
+        prefs.record_recent_project(r"D:\Books\Second", "Second")
+        prefs.record_recent_project(r"D:\Books\First", "First")
+
+        entries = prefs.get_recent_projects()
+        assert [e["name"] for e in entries] == ["First", "Second"]
+        assert len(entries) == 2
+
+    def test_paths_differing_only_in_case_are_the_same_project(self, qtbot):
+        # Windows paths are case-insensitive, so these are one project.
+        prefs = PreferencesPersistence()
+
+        prefs.record_recent_project(r"D:\Books\Smith", "Smith")
+        prefs.record_recent_project(r"d:\books\smith", "Smith")
+
+        assert len(prefs.get_recent_projects()) == 1
+
+    def test_a_path_containing_a_comma_survives(self, qtbot):
+        # The reason this list is JSON and not comma-joined like the others.
+        prefs = PreferencesPersistence()
+        path = r"D:\Books\Smith, John - Torts"
+
+        prefs.record_recent_project(path, "Torts")
+
+        assert prefs.get_recent_projects()[0]["path"] == path
+
+    def test_storage_is_capped(self, qtbot):
+        prefs = PreferencesPersistence()
+
+        for i in range(40):
+            prefs.record_recent_project(rf"D:\Books\P{i}", f"P{i}")
+
+        entries = prefs.get_recent_projects()
+        assert len(entries) == 25
+        assert entries[0]["name"] == "P39", "the newest must survive the cap"
+
+    def test_forget_removes_one_entry_only(self, qtbot):
+        prefs = PreferencesPersistence()
+        prefs.record_recent_project(r"D:\Books\First", "First")
+        prefs.record_recent_project(r"D:\Books\Second", "Second")
+
+        prefs.forget_recent_project(r"D:\Books\First")
+
+        assert [e["name"] for e in prefs.get_recent_projects()] == ["Second"]
+
+    def test_forget_matches_case_insensitively(self, qtbot):
+        prefs = PreferencesPersistence()
+        prefs.record_recent_project(r"D:\Books\Smith", "Smith")
+
+        prefs.forget_recent_project(r"d:\books\SMITH")
+
+        assert prefs.get_recent_projects() == []
+
+    def test_clear_empties_the_list(self, qtbot):
+        prefs = PreferencesPersistence()
+        prefs.record_recent_project(r"D:\Books\First", "First")
+
+        prefs.clear_recent_projects()
+
+        assert prefs.get_recent_projects() == []
+
+    def test_a_corrupt_stored_value_is_survived(self, qtbot):
+        prefs = PreferencesPersistence()
+        prefs.settings.setValue("recent_projects", "{not json")
+
+        assert prefs.get_recent_projects() == []
+        # And the next open repairs it rather than raising.
+        prefs.record_recent_project(r"D:\Books\First", "First")
+        assert [e["name"] for e in prefs.get_recent_projects()] == ["First"]
+
+    def test_an_entry_without_a_path_is_dropped(self, qtbot):
+        prefs = PreferencesPersistence()
+        prefs.settings.setValue("recent_projects", json.dumps([
+            {"path": "", "name": "ghost"},
+            {"path": r"D:\Books\Real", "name": "Real"},
+        ]))
+
+        assert [e["name"] for e in prefs.get_recent_projects()] == ["Real"]
+
+    def test_a_non_list_stored_value_is_survived(self, qtbot):
+        prefs = PreferencesPersistence()
+        prefs.settings.setValue("recent_projects", json.dumps({"path": "D:/x"}))
+
+        assert prefs.get_recent_projects() == []

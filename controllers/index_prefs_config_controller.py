@@ -82,6 +82,7 @@ class IndexPrefsConfigController:
 
         dialog.sig_general_accepted.connect(self._handle_general_update)
         dialog.sig_config_accepted.connect(self._handle_model_update)
+        dialog.sig_clear_recent_projects.connect(self._handle_clear_recent_projects)
 
         dialog.exec()
 
@@ -106,3 +107,11 @@ class IndexPrefsConfigController:
         self._prefs.update_general_preferences(payload)
         if self._on_general_changed is not None:
             self._on_general_changed(payload)
+
+    def _handle_clear_recent_projects(self) -> None:
+        """
+        Erases the recent-projects list straight away, without waiting for
+        the dialog to be accepted -- see the signal's own comment for why it
+        does not travel with the rest of the General payload.
+        """
+        self._prefs.clear_recent_projects()

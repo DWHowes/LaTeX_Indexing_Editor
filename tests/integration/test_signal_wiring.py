@@ -172,6 +172,8 @@ def test_walk_finds_the_known_live_wired_signals_as_a_sanity_check(booted_app):
         ("controllers.project_scope_controller.ProjectScopeController", "scope_mutated"),
         ("controllers.project_scope_controller.ProjectScopeController", "file_pruned"),
         ("views.main_menu_bar.MainMenuBar", "manage_pruned_files_requested"),
+        ("views.main_menu_bar.MainMenuBar", "recent_project_selected"),
+        ("views.main_menu_bar.MainMenuBar", "recent_menu_about_to_show"),
         ("views.file_tree_view.FileTreeView", "file_prune_requested"),
         ("controllers.index_edit_controller.IndexEditController", "heading_renamed"),
         ("models.index_edit_staging_model.IndexEditStagingModel", "entry_staged"),

@@ -4,6 +4,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal
 
+from models.preferences_persistence import (
+    RECENT_PROJECTS_MAX_SHOWN,
+    RECENT_PROJECTS_MIN_SHOWN,
+)
 from models.theme_config_model import DarkThemeColours, LightThemeColours
 
 from controllers.app_style_configuration import AppStyleConfiguration
@@ -16,6 +20,11 @@ class IndexPrefsConfigDialog(QDialog):
     # project_metadata, which is the wrong home for a setting that has
     # nothing to do with which book is open.
     sig_general_accepted = Signal(dict)
+    # Clearing the recent-projects list acts immediately rather than on OK.
+    # It is a destructive one-off, not a setting being edited, so leaving it
+    # pending until the dialog is accepted would make Cancel look like it
+    # undoes it when it cannot.
+    sig_clear_recent_projects = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -244,6 +253,43 @@ class IndexPrefsConfigDialog(QDialog):
         form_editing.addRow("Undo stack size:", self.spn_undo_stack_size)
         vgeneral_layout.addWidget(grp_editing)
 
+        grp_recent = QGroupBox("Recent Projects")
+        form_recent = QFormLayout(grp_recent)
+
+        self.chk_recent_projects_enabled = QCheckBox(
+            "Show recently opened projects on the File menu"
+        )
+        form_recent.addRow(self.chk_recent_projects_enabled)
+
+        self.spn_recent_projects_max = QSpinBox()
+        self.spn_recent_projects_max.setRange(
+            RECENT_PROJECTS_MIN_SHOWN, RECENT_PROJECTS_MAX_SHOWN
+        )
+        self.spn_recent_projects_max.setMaximumWidth(120)
+        self.spn_recent_projects_max.setToolTip(
+            "How many projects the File > Open Recent list shows.\n"
+            "Lowering this hides the oldest entries rather than deleting "
+            "them, so raising it again brings them back."
+        )
+        form_recent.addRow("Projects to list:", self.spn_recent_projects_max)
+
+        # Clearing lives here, not only on the submenu: switching the feature
+        # off hides that submenu, and the button to erase the list would go
+        # with it exactly when someone most wants it.
+        self.btn_clear_recent_projects = QPushButton("Clear List Now")
+        self.btn_clear_recent_projects.setMaximumWidth(160)
+        self.btn_clear_recent_projects.setToolTip(
+            "Forget every remembered project. This cannot be undone."
+        )
+        self.btn_clear_recent_projects.clicked.connect(self._on_clear_recent_clicked)
+        form_recent.addRow("", self.btn_clear_recent_projects)
+
+        self.lbl_recent_cleared = QLabel("")
+        self.lbl_recent_cleared.setWordWrap(True)
+        form_recent.addRow(self.lbl_recent_cleared)
+
+        vgeneral_layout.addWidget(grp_recent)
+
         grp_autosave = QGroupBox("Auto-Save")
         form_autosave = QFormLayout(grp_autosave)
 
@@ -316,6 +362,8 @@ class IndexPrefsConfigDialog(QDialog):
 
         # Wire Up Presentation Reactivity Toggles
         self.chk_autosave_enabled.toggled.connect(self.spn_autosave_interval.setEnabled)
+        self.chk_recent_projects_enabled.toggled.connect(
+            self.spn_recent_projects_max.setEnabled)
         self.chk_imakeidx.toggled.connect(self._toggle_imakeidx_widgets)
         self.chk_idxlayout.toggled.connect(self._toggle_idxlayout_widgets)
         self.chk_hyperref.toggled.connect(self._toggle_hyperref_widgets)
@@ -432,6 +480,23 @@ class IndexPrefsConfigDialog(QDialog):
         self.txt_encap_bold.setText(self._join_encap(data.get("encap_bold_values")))
         self.txt_encap_italic.setText(self._join_encap(data.get("encap_italic_values")))
 
+        recent_on = bool(data.get("recent_projects_enabled", True))
+        self.chk_recent_projects_enabled.setChecked(recent_on)
+        self.spn_recent_projects_max.setValue(int(data.get("recent_projects_max", 10)))
+        self.spn_recent_projects_max.setEnabled(recent_on)
+        self.lbl_recent_cleared.clear()
+
+    def _on_clear_recent_clicked(self) -> None:
+        """Clears immediately and confirms in place.
+
+        No modal confirmation: the list is a convenience, not data, and the
+        worst case is having to reopen a project the long way once. An
+        in-place acknowledgement is used instead of a status bar because this
+        dialog is modal and has no status bar of its own.
+        """
+        self.sig_clear_recent_projects.emit()
+        self.lbl_recent_cleared.setText("Recent projects list cleared.")
+
     @staticmethod
     def _join_encap(value) -> str:
         if isinstance(value, (list, tuple)):
@@ -508,6 +573,8 @@ class IndexPrefsConfigDialog(QDialog):
             "log_directory_name": self.txt_log_directory_name.text().strip(),
             "encap_bold_values": self._split_encap(self.txt_encap_bold.text()),
             "encap_italic_values": self._split_encap(self.txt_encap_italic.text()),
+            "recent_projects_enabled": self.chk_recent_projects_enabled.isChecked(),
+            "recent_projects_max": self.spn_recent_projects_max.value(),
         }
 
         dark_colours, light_colours = self.current_theme_colours()

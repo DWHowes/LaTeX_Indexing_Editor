@@ -96,6 +96,10 @@ class AppPipelineController(QObject):
         # the preferences dialog calls again on accept.
         self._autosave_enabled = True
         self._autosave_interval_minutes = 5
+        # Overwritten by apply_general_preferences at startup; defaults here
+        # so the Open Recent menu behaves sensibly if it is opened first.
+        self._recent_projects_enabled = True
+        self._recent_projects_max = 10
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(False)
         self._autosave_timer.timeout.connect(self._on_autosave_tick)
@@ -276,6 +280,9 @@ class AppPipelineController(QObject):
 
         # --- Menu Navigation Actions ---
         self.window.menu_bar.open_project_requested.connect(self.select_project_folder_workflow)
+        self.window.menu_bar.recent_menu_about_to_show.connect(self._refresh_recent_projects_menu)
+        self.window.menu_bar.recent_project_selected.connect(self._handle_recent_project_selected)
+        self.window.menu_bar.clear_recent_projects_requested.connect(self._handle_clear_recent_projects)
         self.window.menu_bar.save_project_requested.connect(self.execute_project_save_workflow)
         self.window.menu_bar.close_project_requested.connect(self._execute_project_close_workflow)        
         self.window.menu_bar.find_action_triggered.connect(self.lc_ctrl.route_find_to_active_tab)
@@ -901,9 +908,14 @@ class AppPipelineController(QObject):
     @Slot()
     def select_project_folder_workflow(self) -> None:
         """
-        Launches directory selection, checks for a pre-existing project name via 
-        the scope controller, and conditionally prompts for names only when missing.
-        Strict MVC Compliance: Free of type reflections or redundant string math.
+        Launches directory selection, then hands the chosen folder to
+        open_project_at_path.
+
+        Choosing the folder is the only part of opening a project that is
+        specific to this entry point -- the Recent Projects menu supplies a
+        folder it already knows. Everything downstream of the selection lives
+        in open_project_at_path so both routes share one implementation, and
+        in particular so both go through the same unsaved-changes gate.
         """
         initial_dir = self.prefs.get_last_project_path()
         selected_dir = QFileDialog.getExistingDirectory(
@@ -912,7 +924,63 @@ class AppPipelineController(QObject):
         if not selected_dir:
             self.window.status_bar.showMessage("Project loading canceled.", 2000)
             return
-        
+
+        self.open_project_at_path(selected_dir)
+
+    @Slot()
+    def _refresh_recent_projects_menu(self) -> None:
+        """Rebuilds the Open Recent submenu from preferences as it opens.
+
+        Read fresh each time rather than cached: the list changes whenever a
+        project is opened, and the count and on/off switch can change in the
+        Preferences dialog between one look at the File menu and the next.
+        """
+        max_shown = int(getattr(self, "_recent_projects_max", 10))
+        self.window.menu_bar.populate_recent_projects(
+            self.prefs.get_recent_projects()[:max_shown]
+        )
+
+    @Slot(str)
+    def _handle_recent_project_selected(self, folder_path: str) -> None:
+        """Opens a project chosen from the Open Recent submenu.
+
+        The folder is only checked here, at the point of use -- a project can
+        be moved, renamed or archived between one launch and the next, and
+        the alternative is stat-ing every remembered path each time the File
+        menu opens.
+        """
+        if not folder_path:
+            return
+
+        if not os.path.isdir(folder_path):
+            answer = QMessageBox.question(
+                self.window,
+                "Project Not Found",
+                f"This project's folder no longer exists:\n\n{folder_path}\n\n"
+                "Remove it from the recent projects list?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                self.prefs.forget_recent_project(folder_path)
+                self.window.status_bar.showMessage("Removed from recent projects.", 3000)
+            return
+
+        self.open_project_at_path(folder_path)
+
+    @Slot()
+    def _handle_clear_recent_projects(self) -> None:
+        self.prefs.clear_recent_projects()
+        self.window.status_bar.showMessage("Recent projects list cleared.", 3000)
+
+    def open_project_at_path(self, selected_dir: str) -> None:
+        """
+        Opens the project rooted at selected_dir: closes whatever is open,
+        resolves or creates the project name and database, and starts the
+        background load.
+
+        Called both by select_project_folder_workflow (after its dialog) and
+        by the Recent Projects menu.
+        """
         # Close the active project before loading a new one.
         # Abort the incoming load if the user cancels the unsaved-tabs prompt.
         if self.scope_ctrl.active_project_name != "Untitled Project":
@@ -1083,6 +1151,15 @@ class AppPipelineController(QObject):
         # Synchronize presentation title text and status bars
         project_name = os.path.basename(project_root_dir)
         self.prefs.update_project_context(project_root_dir, project_name)
+        # Recorded here rather than at the point the folder was chosen: this
+        # is the first place a load is known to have succeeded, so a
+        # cancelled or failed open leaves nothing behind. Prefer the name the
+        # project's own database carries over the folder name, which is only
+        # a fallback -- the two can differ.
+        if getattr(self, "_recent_projects_enabled", True):
+            persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+            stored_name = persistence.get_metadata_value("project_name") if persistence else None
+            self.prefs.record_recent_project(project_root_dir, stored_name or project_name)
         self.window.synchronize_window_title(project_name)
         self._index_prefs_ctrl.set_active_project(project_name=project_name, 
                                                   file_persistence=self.scope_ctrl.get_persistence_model()
@@ -1442,11 +1519,19 @@ class AppPipelineController(QObject):
 
     def apply_general_preferences(self, prefs: dict) -> None:
         """
-        Pushes the General preferences tab's four settings out to the
-        things that actually consume them. Called at startup from main.py
-        and again whenever the preferences dialog is accepted, so every
-        one of them takes effect without a restart.
+        Pushes the General preferences tab's settings out to the things that
+        actually consume them. Called at startup from main.py and again
+        whenever the preferences dialog is accepted, so every one of them
+        takes effect without a restart.
         """
+        self._recent_projects_enabled = bool(prefs.get("recent_projects_enabled", True))
+        try:
+            self._recent_projects_max = max(1, int(prefs.get("recent_projects_max", 10)))
+        except (TypeError, ValueError):
+            self._recent_projects_max = 10
+        if self.window and getattr(self.window, "menu_bar", None):
+            self.window.menu_bar.set_recent_menu_visible(self._recent_projects_enabled)
+
         self._autosave_enabled = bool(prefs.get("autosave_enabled", True))
         try:
             self._autosave_interval_minutes = max(1, int(prefs.get("autosave_interval_minutes", 5)))

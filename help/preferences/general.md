@@ -20,6 +20,20 @@ Auto-save exists because most of your index editing lives in memory until you sa
 - **It waits rather than interrupting.** A tick is skipped while a project is loading, an RTF export is compiling, a dialog is open, or you're part-way through editing a cell in the entry table — the next tick picks it up.
 - **It never interrupts you with a dialog**, on success or on failure. Success is a brief status-bar note; a failed save leaves your changes pending exactly as they were, and the next tick tries again.
 
+## Recent projects
+
+Controls the **File → Open Recent** list, which reopens a project without going back through the folder chooser.
+
+**Show recently opened projects on the File menu** turns the feature on and off. It is on by default. When it is off the submenu disappears entirely — not greyed out, but gone — and no new projects are added to the list. Existing entries are kept, so switching it back on restores the list as it was.
+
+**Projects to list** sets how many appear, from **1** to **25**. The default is **10**.
+
+Lowering this number hides the oldest entries rather than deleting them, so raising it again brings them back. (This is deliberately unlike the undo stack above, where a lower number really does discard.)
+
+**Clear List Now** forgets every remembered project immediately — it does not wait for you to accept the dialog, and **Cancel** will not bring the list back. There is also a **Clear Recent Projects** command at the bottom of the submenu itself; the button here exists so that clearing is still reachable when the submenu is switched off.
+
+A project is added to the list only once it has opened successfully, so a cancelled or failed open leaves no trace. Choosing a project whose folder has since been moved or deleted tells you so and offers to drop it from the list.
+
 ## Session log folder
 
 The name of the folder the editor writes its session log into. The default is **session_logs**, created inside the open project's own folder.

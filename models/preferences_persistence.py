@@ -1,3 +1,4 @@
+import json
 import os
 from PySide6.QtCore import QObject, QSettings, QDir, QByteArray
 
@@ -8,9 +9,21 @@ from views.entry_modifier_list import (
 
 # Preferences -> General. Kept beside the loader that coerces them so a key
 # added to one is obvious in the other.
-_GENERAL_INT_KEYS = frozenset({"undo_stack_size", "autosave_interval_minutes"})
-_GENERAL_BOOL_KEYS = frozenset({"autosave_enabled"})
+_GENERAL_INT_KEYS = frozenset({"undo_stack_size", "autosave_interval_minutes",
+                               "recent_projects_max"})
+_GENERAL_BOOL_KEYS = frozenset({"autosave_enabled", "recent_projects_enabled"})
 _GENERAL_LIST_KEYS = ("encap_bold_values", "encap_italic_values")
+
+# Recent projects. The user-visible count is capped at RECENT_PROJECTS_MAX_SHOWN,
+# but the stored list runs to RECENT_PROJECTS_HARD_CAP: lowering the preference
+# should change how many are *displayed*, not throw history away, so raising it
+# again brings the older entries back. (Deliberately unlike the undo stack,
+# where lowering the bound really does discard.)
+RECENT_PROJECTS_KEY = "recent_projects"
+RECENT_PROJECTS_HARD_CAP = 25
+RECENT_PROJECTS_MAX_SHOWN = 25
+RECENT_PROJECTS_MIN_SHOWN = 1
+RECENT_PROJECTS_DEFAULT_SHOWN = 10
 
 
 class PreferencesPersistence(QObject):
@@ -121,10 +134,17 @@ class PreferencesPersistence(QObject):
             "log_directory_name": "session_logs",
             "encap_bold_values": list(DEFAULT_BOLD_ENCAP_VALUES),
             "encap_italic_values": list(DEFAULT_ITALIC_ENCAP_VALUES),
+            "recent_projects_enabled": True,
+            "recent_projects_max": RECENT_PROJECTS_DEFAULT_SHOWN,
         }
 
         # Load every key present in the registry and coerce where sensible.
         for raw_key in self.settings.allKeys():
+            # The recent-projects list is a JSON blob with its own accessors
+            # (get_recent_projects); letting it through here would put a raw
+            # JSON string into the preferences dict beside the typed values.
+            if raw_key == RECENT_PROJECTS_KEY:
+                continue
             try:
                 raw_val = self.settings.value(raw_key)
             except Exception:
@@ -186,6 +206,10 @@ class PreferencesPersistence(QObject):
         defaults["autosave_interval_minutes"] = max(1, int(defaults["autosave_interval_minutes"]))
         if not str(defaults["log_directory_name"]).strip():
             defaults["log_directory_name"] = "session_logs"
+        defaults["recent_projects_max"] = min(
+            RECENT_PROJECTS_MAX_SHOWN,
+            max(RECENT_PROJECTS_MIN_SHOWN, int(defaults["recent_projects_max"])),
+        )
 
         return defaults
 
@@ -222,16 +246,25 @@ class PreferencesPersistence(QObject):
         property of the installation, not of one book.
 
         Lists are written comma-joined so they read back identically
-        whether the backend is an .ini file or the Windows registry.
+        whether the backend is an .ini file or the Windows registry. The
+        recent-projects list is the exception and is not written here at all
+        -- it is a JSON blob maintained by record_recent_project as projects
+        are opened, not a field on this tab. Only its two settings travel
+        here.
         """
         for key in ("undo_stack_size", "autosave_interval_minutes"):
             if key in payload:
                 self.settings.setValue(key, int(payload[key]))
 
-        if "autosave_enabled" in payload:
-            self.settings.setValue(
-                "autosave_enabled", "true" if payload["autosave_enabled"] else "false"
-            )
+        if "recent_projects_max" in payload:
+            self.settings.setValue("recent_projects_max", min(
+                RECENT_PROJECTS_MAX_SHOWN,
+                max(RECENT_PROJECTS_MIN_SHOWN, int(payload["recent_projects_max"])),
+            ))
+
+        for key in ("autosave_enabled", "recent_projects_enabled"):
+            if key in payload:
+                self.settings.setValue(key, "true" if payload[key] else "false")
 
         if "log_directory_name" in payload:
             self.settings.setValue("log_directory_name", str(payload["log_directory_name"]).strip())
@@ -264,6 +297,89 @@ class PreferencesPersistence(QObject):
         self.settings.setValue("font_family", font_family)
         self.settings.setValue("font_size", font_size)
         self.settings.setValue("dark_mode", "true" if dark_mode else "false")
+
+    # --- Recent projects ------------------------------------------------
+    #
+    # Stored as one JSON string rather than the comma-joined form the other
+    # list preferences use: these entries are filesystem paths, and a comma
+    # is a legal character in a Windows or POSIX path, so a comma-joined
+    # list cannot be split back apart safely.
+
+    @staticmethod
+    def _normalise_project_key(path: str) -> str:
+        """The identity two entries are considered the same by.
+
+        Case-folded because Windows paths are case-insensitive, so opening
+        `D:\\Books\\Smith` and `d:\\books\\smith` must not leave two entries
+        for one project.
+        """
+        return os.path.normcase(os.path.normpath(str(path)))
+
+    def get_recent_projects(self) -> list[dict]:
+        """Most-recently-opened first. Each entry is {'path', 'name'}.
+
+        Returns everything stored, not just the displayed count -- trimming
+        to the user's preference is the caller's job, so lowering that
+        preference does not destroy history.
+        """
+        raw = self.settings.value(RECENT_PROJECTS_KEY, "")
+        if not raw:
+            return []
+        try:
+            entries = json.loads(str(raw))
+        except (ValueError, TypeError):
+            print("[PREFS] Recent projects list was unreadable; starting a new one.")
+            return []
+        if not isinstance(entries, list):
+            return []
+
+        cleaned = []
+        seen = set()
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            path = str(entry.get("path", "")).strip()
+            if not path:
+                continue
+            key = self._normalise_project_key(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append({"path": path, "name": str(entry.get("name", "")).strip()})
+        return cleaned[:RECENT_PROJECTS_HARD_CAP]
+
+    def record_recent_project(self, path: str, name: str) -> None:
+        """Move a project to the front of the list, or add it there.
+
+        Called only after a load has actually succeeded, so a cancelled or
+        failed open leaves no trace.
+        """
+        if not path:
+            return
+        path = os.path.normpath(str(path))
+        key = self._normalise_project_key(path)
+
+        entries = [e for e in self.get_recent_projects()
+                   if self._normalise_project_key(e["path"]) != key]
+        entries.insert(0, {"path": path, "name": str(name or "").strip()})
+
+        self.settings.setValue(
+            RECENT_PROJECTS_KEY,
+            json.dumps(entries[:RECENT_PROJECTS_HARD_CAP], ensure_ascii=False),
+        )
+        self.settings.sync()
+
+    def forget_recent_project(self, path: str) -> None:
+        """Drop one entry — used when its folder has gone missing."""
+        key = self._normalise_project_key(path)
+        entries = [e for e in self.get_recent_projects()
+                   if self._normalise_project_key(e["path"]) != key]
+        self.settings.setValue(RECENT_PROJECTS_KEY, json.dumps(entries, ensure_ascii=False))
+        self.settings.sync()
+
+    def clear_recent_projects(self) -> None:
+        self.settings.setValue(RECENT_PROJECTS_KEY, json.dumps([]))
+        self.settings.sync()
 
     def update_fallback_directory(self, folder_path: str):
         self.settings.setValue("last_project_path", os.path.normpath(folder_path))

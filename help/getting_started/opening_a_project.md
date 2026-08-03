@@ -10,6 +10,16 @@ A **project** is a folder on disk containing your LaTeX source files, plus one s
 
 If another project is currently open, you'll be prompted to save or discard any unsaved changes before the new one loads.
 
+## Reopening a recent project
+
+**File → Open Recent** lists the projects you've opened before, most recent first, so you can return to one without navigating to its folder again. The first nine can also be chosen by number once the submenu is open.
+
+Each entry shows the project's name; hover over one to see the full path, which is what tells two projects apart when they share a name. Choosing one behaves exactly like opening it the long way, including the prompt about unsaved changes in whatever is currently open.
+
+A project appears here only after it has opened successfully. If you choose one whose folder has since been moved or deleted, the editor says so and offers to remove it from the list.
+
+The number of projects listed, and whether the submenu appears at all, are set in [Preferences → General](../preferences/general.md#recent-projects) — which is also where you can clear the list.
+
 ## Creating a new project
 
 If you select a folder that doesn't already have a project database, the editor treats this as a new project:

@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Reopening a recent project
+
+**File → Open Recent** lists the projects you've opened before, most recent first,
+so returning to one no longer means navigating to its folder again. The first nine
+can be picked by number. Hovering an entry shows its full path, which is what tells
+apart two books whose folders share a name.
+
+A project is added only once it has opened successfully, so a cancelled or failed
+open leaves nothing behind, and reopening one moves it up the list rather than
+adding a second copy. Choosing a project whose folder has since been moved or
+deleted says so and offers to forget it.
+
+**Preferences → General** gains a *Recent Projects* group: a switch to turn the
+submenu off entirely, a count from 1 to 25 (default 10), and a **Clear List Now**
+button. Lowering the count hides the oldest entries rather than deleting them, so
+raising it again brings them back — deliberately unlike the undo depth above it,
+where a lower number really does discard. Turning the feature off hides the
+submenu and stops anything new being recorded, but keeps what is already stored;
+the clear button lives in Preferences precisely so it stays reachable once the
+submenu is gone.
+
 ## 0.2.0-alpha — 31 July 2026
 
 The headline change is **how and when your work is saved**. Please read the first

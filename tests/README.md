@@ -645,6 +645,33 @@ That prompt is also the worked example in
 which explains why it must use the static `QMessageBox.question` rather than a
 constructed box.
 
+### Recent projects
+
+`test_recent_projects.py` covers File → Open Recent: the list is written only
+when a load has actually succeeded, so these drive the real open workflow
+through `opened_project` rather than calling the persistence layer directly —
+that ordering is the property under test, not incidental setup.
+
+Two things worth knowing before editing it.
+
+**The list survives across tests in this file.** `booted_app` is
+module-scoped, so its QSettings backing store is shared; a `clean_recent_list`
+fixture empties the list either side of every test. Without it, one test's
+entries are visible to the next and the count assertions drift.
+
+**The selection path deliberately asserts a negative.**
+`test_choosing_one_opens_it_without_the_folder_chooser` monkeypatches
+`QFileDialog.getExistingDirectory` to raise. Opening a recent project shares
+`open_project_at_path` with the Open Project dialog, and the thing that could
+silently regress is the dialog creeping back onto the shared path — which a
+positive assertion about the project opening would not catch.
+
+The storage layer itself is covered separately, in
+`test_preferences_persistence.py`'s `TestRecentProjectsList` — ordering,
+case-insensitive path dedup, the hard cap, and the JSON round-trip. That list
+is JSON rather than the comma-joined form the other list preferences use,
+because a comma is legal in a filesystem path.
+
 ### Auto-save
 
 `test_autosave.py` covers the `QTimer` on `AppPipelineController` that
