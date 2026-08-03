@@ -131,13 +131,28 @@ class AppStyleConfiguration:
                 border: 1px solid {colours.tab_pane_border};
                 background: {colours.tab_pane_bg};
             }}
+            /* base and button are the same colour in the shipped dark theme
+               (#353535), so styling the selected tab with one and the rest
+               with the other produced no visible difference at all -- which
+               tab was in front could only be told from the pane beside it.
+               Selection is marked with the highlight colour instead, the way
+               a selected list or tree row already is, and the unselected tabs
+               drop back to the pane's own background so the strip recedes.
+               Any user-edited theme keeps working, because both ends of the
+               contrast come from the theme rather than from a fixed tint. */
             QTabBar::tab {{
-                background: {colours.base};
+                background: {colours.tab_pane_bg};
                 color: {colours.window_text};
+                border: 1px solid {colours.tab_pane_border};
                 padding: 6px 10px;
             }}
+            QTabBar::tab:hover:!selected {{
+                background: {colours.window};
+            }}
             QTabBar::tab:selected {{
-                background: {colours.button};
+                background: {colours.highlight};
+                color: {colours.highlight_text};
+                border: 1px solid {colours.highlight};
             }}
             QGroupBox {{
                 color: {colours.window_text};
@@ -148,7 +163,18 @@ class AppStyleConfiguration:
                 subcontrol-origin: margin;
                 left: 8px;
             }}
-            QLineEdit, QSpinBox, QComboBox {{
+            /* QSpinBox and QComboBox are deliberately NOT styled here.
+               Setting any box property on them hands their sub-controls to
+               the stylesheet engine as well, and the arrow it then falls back
+               to is drawn in the frame colour -- #444444 on #353535, a
+               contrast of 1.26:1, which is what made the spin buttons look
+               empty. Qt offers no colour property for an arrow, only an
+               image, and a CSS zero-size-plus-border triangle does not work
+               (Qt fills the box instead of collapsing it), so restoring them
+               through the sheet would mean shipping image assets. Left to the
+               native style they are drawn from the palette, which this theme
+               already sets, and come out at 6.39:1. */
+            QLineEdit {{
                 background-color: {colours.base};
                 color: {colours.text};
                 border: 1px solid {colours.tab_pane_border};
@@ -159,8 +185,7 @@ class AppStyleConfiguration:
                true of every dialog using the shared sheet before the find
                bar joined them; it just became noticeable there because a
                find bar's input is focused the moment it opens. */
-            QLineEdit:focus, QSpinBox:focus, QComboBox:focus,
-            QTextEdit:focus, QPlainTextEdit:focus {{
+            QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {{
                 border: 1px solid {colours.highlight};
             }}
             QListWidget {{

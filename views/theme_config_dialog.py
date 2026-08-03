@@ -8,6 +8,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import QColorDialog
 
+from controllers.app_style_configuration import AppStyleConfiguration
 from models.theme_config_model import (
     DarkThemeColours, LightThemeColours,
     THEME_FIELD_LABELS, THEME_FIELD_GROUPS,
@@ -279,6 +280,12 @@ class ThemeConfigDialog(QDialog):
         buttons.accepted.connect(self._on_accepted)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+        # Chrome only. _PreviewPanel styles itself explicitly and so stays
+        # immune to the live palette, which is what keeps the colour previews
+        # honest while the surrounding dialog follows the app's theme.
+        is_dark = bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode"))
+        self.setStyleSheet(AppStyleConfiguration.get_dialog_stylesheet_for(is_dark))
 
     def _reset_all(self) -> None:
         self._dark_tab._restore_defaults()
