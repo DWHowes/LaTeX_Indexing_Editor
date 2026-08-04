@@ -23,6 +23,49 @@ submenu and stops anything new being recorded, but keeps what is already stored;
 the clear button lives in Preferences precisely so it stays reachable once the
 submenu is gone.
 
+### Name inversion no longer freezes the window
+
+The authority lookup can take several network calls, and the window used to sit
+frozen for all of them. It now runs in the background: the status bar says which
+name is being looked up, the rest of the application stays usable, and the
+suggestion dialog appears when the answer arrives. Only one lookup runs at a
+time. If the entry it was requested for is gone by then — the table re-sorted or
+the row deleted — it is cancelled with a message rather than applied to whatever
+row has taken its place.
+
+**Life dates are now stripped from the suggestion.** An authority heading is
+typically *Churchill, Winston, 1874-1965*; an index files under *Churchill,
+Winston*. Previously the dates came back or not depending on which record the
+lookup happened to resolve through, so the same person could arrive either way.
+
+**Your corrections stick again.** A name cache created by an earlier version was
+missing the columns a correction is written to, and every write against it failed
+silently — so an overruled suggestion was offered again unchanged on the next
+encounter. Existing caches are upgraded when they are opened; nothing is lost.
+
+### Cross-references in the index tree
+
+Only the **See** / **See also** label is italicised now. The target beside it is a
+real index term and renders the way its own entry specifies — a case name written
+in italics stays italic, while an ordinary heading is shown upright instead of
+being italicised on its behalf.
+
+This also fixes a cross-reference whose target carries a sort key, such as
+`Linke@\textit{Die Linke}`: it used to lose the *See* label altogether and show
+only the target.
+
+### Dark mode
+
+- **The selected tab is visible again.** The colour it used and the colour of the
+  unselected tabs are the same in the shipped dark theme, so the tab strip gave no
+  clue which pane you were on. Selection is now marked with the highlight colour,
+  the way a selected row in a list already is.
+- **Spin box and combo box arrows are no longer invisible** — they were being drawn
+  at a contrast of 1.26:1 against their own background.
+- The standalone theme editor follows the application theme. The colour previews
+  inside it deliberately do not, since their whole job is to show the colours you
+  are choosing.
+
 ## 0.2.0-alpha — 31 July 2026
 
 The headline change is **how and when your work is saved**. Please read the first
