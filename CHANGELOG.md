@@ -7,7 +7,7 @@
 **File → Open Recent** lists the projects you've opened before, most recent first,
 so returning to one no longer means navigating to its folder again. The first nine
 can be picked by number. Hovering an entry shows its full path, which is what tells
-apart two books whose folders share a name.
+apart two projects that share a name.
 
 A project is added only once it has opened successfully, so a cancelled or failed
 open leaves nothing behind, and reopening one moves it up the list rather than
@@ -47,7 +47,7 @@ encounter. Existing caches are upgraded when they are opened; nothing is lost.
 
 Only the **See** / **See also** label is italicised now. The target beside it is a
 real index term and renders the way its own entry specifies — a case name written
-in italics stays italic, while an ordinary heading is shown upright instead of
+in italics stays italic, while an ordinary heading is shown in roman instead of
 being italicised on its behalf.
 
 This also fixes a cross-reference whose target carries a sort key, such as
