@@ -435,9 +435,15 @@ class IndexTreeView(QTreeView):
         branch_item.setData(current_token, Qt.ItemDataRole.ToolTipRole)
 
         if is_xref:
-            font = branch_item.font()
-            font.setItalic(True)
-            branch_item.setFont(font)
+            # Italicise the "See"/"See also" label only. Italicising the
+            # whole item would override the target's own formatting, which
+            # has to stay as the target's \index entry writes it -- a
+            # target that is roman in the index must be roman here too.
+            parsed = self.engine.split_cross_reference(current_token)
+            label = parsed[0] if parsed else ""
+            branch_item.setData(
+                len(label), IndexTextFormatterDelegate.ITALIC_PREFIX_LENGTH_ROLE
+            )
 
         ref_item = QStandardItem("")
         parent_item.appendRow([branch_item, ref_item])
@@ -499,7 +505,7 @@ class IndexTreeView(QTreeView):
         These are display-only by construction rather than by a special
         case: each is inserted as a "see{Target}" token, which
         IndexTreeModelEngine.evaluate_node_type already recognizes -- it
-        renders as an italic "See Target" and _populate_row_metadata
+        renders as "See Target" with the label in italic, and _populate_row_metadata
         deliberately attaches no reference records to it. With no records
         there is no "[12]" bracket text for IndexLinkDelegate to paint and
         therefore nothing to click, which is exactly right: a managed

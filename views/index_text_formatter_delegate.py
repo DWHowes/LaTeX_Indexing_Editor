@@ -4,12 +4,19 @@ from PySide6.QtCore import Qt, QSize
 
 class IndexTextFormatterDelegate(QStyledItemDelegate):
     """
-    Layers on top of Column 0 to render LaTeX formatting (bold/italics) 
+    Layers on top of Column 0 to render LaTeX formatting (bold/italics)
     while preserving tree hierarchy indentation positions.
     """
+
+    #: Number of leading characters of the display string to italicise
+    #: regardless of macros. Set by IndexTreeView on cross-reference
+    #: nodes so the "See"/"See also" label is italic while the target
+    #: keeps whatever formatting its own \index entry specifies.
+    ITALIC_PREFIX_LENGTH_ROLE = Qt.ItemDataRole.UserRole + 31
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._segment_cache: dict[str, list[tuple[str, bool, bool]]] = {}
+        self._segment_cache: dict[tuple[str, bool], list[tuple[str, bool, bool]]] = {}
 
     def clear_cache(self):
         self._segment_cache.clear()
@@ -38,7 +45,7 @@ class IndexTextFormatterDelegate(QStyledItemDelegate):
                 painter.setPen(custom_option.palette.text().color())
 
             # 3. Process string elements through your explicit style stack tokenizer
-            text_segments = self._parse_latex_formatting_segments(str(raw_text))
+            text_segments = self._segments_for_index(index, str(raw_text))
 
             # SYSTEM INTEGRITY ANCHOR: Resolve native style layout engine guidelines
             style_engine = custom_option.widget.style() if custom_option.widget else QApplication.style()
@@ -99,7 +106,7 @@ class IndexTextFormatterDelegate(QStyledItemDelegate):
             custom_option = QStyleOptionViewItem(option)
             self.initStyleOption(custom_option, index)
             
-            text_segments = self._parse_latex_formatting_segments(str(raw_text))
+            text_segments = self._segments_for_index(index, str(raw_text))
             base_font = QFont(custom_option.font)
             
             total_width = 0
@@ -120,7 +127,34 @@ class IndexTextFormatterDelegate(QStyledItemDelegate):
             
         return super().sizeHint(option, index)
 
-    def _parse_latex_formatting_segments(self, text: str) -> list[tuple[str, bool, bool]]:
+    def _segments_for_index(self, index, raw_text: str) -> list[tuple[str, bool, bool]]:
+        """
+        The styled chunks for one cell, honouring ITALIC_PREFIX_LENGTH_ROLE.
+
+        Without the role this is plain macro parsing. With it, the leading
+        run of characters is emitted as its own italic chunk and only the
+        remainder is parsed for macros, so a cross-reference's label is
+        italic while its target renders exactly as its \\index entry
+        specifies.
+        """
+        try:
+            prefix_length = int(index.data(self.ITALIC_PREFIX_LENGTH_ROLE) or 0)
+        except (TypeError, ValueError):
+            prefix_length = 0
+
+        if prefix_length <= 0:
+            return self._parse_latex_formatting_segments(raw_text)
+
+        segments = [(raw_text[:prefix_length], True, False)]
+        # The remainder is already display text -- whoever set the role
+        # resolved the sort key when it built the label -- so stripping at
+        # '@' a second time could only eat a literal '@' in the target.
+        segments.extend(
+            self._parse_latex_formatting_segments(raw_text[prefix_length:], strip_sort_key=False)
+        )
+        return segments
+
+    def _parse_latex_formatting_segments(self, text: str, strip_sort_key: bool = True) -> list[tuple[str, bool, bool]]:
         """
         Tokenizes text blocks into styled chunks using an explicit style stack to handle nested macros.
         
@@ -132,13 +166,13 @@ class IndexTextFormatterDelegate(QStyledItemDelegate):
         """
         if not text:
             return []
-        if text in self._segment_cache:
-            return self._segment_cache[text]
-        
+        cache_key = (text, strip_sort_key)
+        if cache_key in self._segment_cache:
+            return self._segment_cache[cache_key]
 
         # Canonical makeindex sort key stripping location.
         # Isolates the right-hand display string from optional sort prefix (e.g. "sort@display").
-        if '@' in text:
+        if strip_sort_key and '@' in text:
             parts = text.split('@', 1)
             text = parts[1] if len(parts) > 1 else parts[0]
 
@@ -217,5 +251,5 @@ class IndexTextFormatterDelegate(QStyledItemDelegate):
         if not segments and text:
             segments.append((text, False, False))
 
-        self._segment_cache[text] = segments
+        self._segment_cache[cache_key] = segments
         return segments

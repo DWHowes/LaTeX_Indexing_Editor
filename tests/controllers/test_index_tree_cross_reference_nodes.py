@@ -11,8 +11,9 @@ read.
 
 They render as display-only leaves by construction rather than by a
 special case -- inserted as a "see{Target}" token, which
-IndexTreeModelEngine.evaluate_node_type already renders italic and to
-which _populate_row_metadata deliberately attaches no reference records.
+IndexTreeModelEngine.evaluate_node_type already recognizes (rendering the
+"See"/"See also" label in italic and leaving the target's own formatting
+alone) and to which _populate_row_metadata attaches no reference records.
 No records means no "[12]" bracket text for IndexLinkDelegate to paint,
 so there is nothing to click, which is correct: there is no location to
 navigate to.
@@ -21,6 +22,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QStandardItem
 
 from models.index_tree_model_engine import IndexTreeModelEngine
+from views.index_text_formatter_delegate import IndexTextFormatterDelegate
 from views.index_tree_view import IndexTreeView
 
 REF_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -140,12 +142,47 @@ class TestDisplayOnlyBehaviour:
         assert xref_col1.data(REF_ROLE) in (None, [])
         assert xref_col1.text() == ""
 
-    def test_the_node_is_rendered_in_italic(self, qtbot):
+    def test_only_the_label_is_marked_italic(self, qtbot):
+        """
+        The italic run covers "See" and stops there. Italicising the whole
+        item would override the target's own formatting, which belongs to
+        the target's \\index entry.
+        """
         tree = _tree(qtbot)
 
         tree.populate_hierarchy_tree([_heading("Widgets")], [], [_xref()])
 
-        assert _node_at(tree, "Widgets").child(0, 0).font().italic() is True
+        node = _node_at(tree, "Widgets").child(0, 0)
+        assert node.font().italic() is False
+        assert node.data(IndexTextFormatterDelegate.ITALIC_PREFIX_LENGTH_ROLE) == len("See")
+
+    def test_the_seealso_label_length_covers_both_words(self, qtbot):
+        tree = _tree(qtbot)
+
+        tree.populate_hierarchy_tree(
+            [_heading("Widgets")], [], [_xref(xref_type="seealso", target="Gizmos")]
+        )
+
+        node = _node_at(tree, "Widgets").child(0, 0)
+        assert node.data(IndexTextFormatterDelegate.ITALIC_PREFIX_LENGTH_ROLE) == len("See also")
+
+    def test_the_target_keeps_its_own_formatting_macros(self, qtbot):
+        r"""
+        A target written as \textit{Die Linke} must reach the delegate with
+        its macro intact, and its sort key must already be resolved -- the
+        delegate's '@' split runs on the whole cell and would otherwise
+        take the label with it.
+        """
+        tree = _tree(qtbot)
+
+        tree.populate_hierarchy_tree(
+            [_heading("Widgets")], [],
+            [_xref(target=r"Die Linke@\textit{Die Linke} (Germany)")],
+        )
+
+        assert _child_texts(_node_at(tree, "Widgets")) == [
+            r"See \textit{Die Linke} (Germany)"
+        ]
 
     def test_it_is_tagged_as_managed(self, qtbot):
         tree = _tree(qtbot)

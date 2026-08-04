@@ -50,27 +50,72 @@ class IndexTreeModelEngine:
             path_tail = []
         return (current_token, path_tail) if current_token else None
 
-    def evaluate_node_type(self, current_token: str) -> tuple[str, bool]:
-        """Runs regex patterns to detect see/seealso keywords."""
-        is_xref = False
-        display_text = current_token
+    #: The label a cross-reference node is shown with. This much of the
+    #: node -- and only this much -- is rendered in italic; see
+    #: split_cross_reference.
+    XREF_LABEL_SEE = "See"
+    XREF_LABEL_SEEALSO = "See also"
+
+    # Group 1 captures the opening brace when the token used the braced
+    # form, so exactly that brace can be dropped again and braces
+    # belonging to the target's own macros are left alone.
+    _SEEALSO_PATTERN = re.compile(r'^(?:\\|\|)?seealso:?(\{)?', re.IGNORECASE)
+    _SEE_PATTERN = re.compile(r'^(?:\\|\|)?see:?(\{)?', re.IGNORECASE)
+
+    def split_cross_reference(self, current_token: str) -> tuple[str, str] | None:
+        r"""
+        Splits a see/seealso token into its ``(label, target)`` pair, or
+        returns None when the token is not a cross-reference at all.
+
+        The target comes back as *display* text: any sort key is resolved
+        away level by level, so "Die Linke@\textit{Die Linke}" arrives as
+        "\textit{Die Linke}". That has to happen here rather than being
+        left to the delegate's '@' split, which runs on the whole cell
+        string and would swallow the label along with the sort key.
+
+        Formatting macros in the target are deliberately kept: they are
+        what the target's own \index entry asks for, and the delegate
+        renders them. Only the label is styled by this application.
+        """
         if not current_token:
-            return display_text, is_xref
+            return None
 
         token_clean = current_token.strip()
-        seealso_pattern = re.compile(r'^(?:\\|\|)?seealso:?\{?', re.IGNORECASE)
-        see_pattern = re.compile(r'^(?:\\|\|)?see:?\{?', re.IGNORECASE)
+        # seealso must be tested first: the see pattern also matches the
+        # leading "see" of "seealso".
+        for pattern, label in (
+            (self._SEEALSO_PATTERN, self.XREF_LABEL_SEEALSO),
+            (self._SEE_PATTERN, self.XREF_LABEL_SEE),
+        ):
+            match = pattern.match(token_clean)
+            if not match:
+                continue
+            raw_target = token_clean[match.end():].strip()
+            if match.group(1) and raw_target.endswith("}"):
+                raw_target = raw_target[:-1].strip()
+            return label, self._cross_reference_target_display(raw_target)
 
-        if seealso_pattern.search(token_clean):
-            is_xref = True
-            clean = seealso_pattern.sub("", token_clean).rstrip("}")
-            display_text = f"See also {clean.strip()}"
-        elif see_pattern.search(token_clean):
-            is_xref = True
-            clean = see_pattern.sub("", token_clean).rstrip("}")
-            display_text = f"See {clean.strip()}"
+        return None
 
-        return display_text, is_xref
+    @staticmethod
+    def _cross_reference_target_display(raw_target: str) -> str:
+        """The target's display text, sort keys resolved on every level."""
+        levels = grammar.split_levels_clean(raw_target)
+        if not levels:
+            return raw_target.strip()
+        return grammar.join_levels(grammar.display_of(level) for level in levels)
+
+    def evaluate_node_type(self, current_token: str) -> tuple[str, bool]:
+        """Runs regex patterns to detect see/seealso keywords."""
+        if not current_token:
+            return current_token, False
+
+        parsed = self.split_cross_reference(current_token)
+        if parsed is None:
+            return current_token, False
+
+        label, target = parsed
+        return f"{label} {target}".strip(), True
 
     def compile_and_retain_project_paths(self, file_paths: list[str]) -> tuple[list[dict], list[dict]]:
         """Invokes your scraper method, retains results in memory, and returns them."""
