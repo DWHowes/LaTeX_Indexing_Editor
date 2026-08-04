@@ -6,6 +6,8 @@ The entry table (in the "Edit Entries" pane) lists every `\index` reference in t
 
 Each heading level has two columns: **Main Display** / **Main Sort**, **Sub1 Display** / **Sub1 Sort**, **Sub2 Display** / **Sub2 Sort**. The "Display" column is the text that appears in the printed index; the "Sort" column is only used to decide where it's alphabetized, for cases where the two need to differ — for example, filing "St. Louis" under "Saint Louis" for sorting purposes while still displaying it as "St. Louis". Leave Sort empty and the Display text is used for both. There's also a **Page** column (the page-style override, if any) and a read-only **ID** column.
 
+The **Sort as** fields in the [Index Entry window](../getting_started/create_an_index_entry.md) are the same thing at the point of creation, and follow the same rule — so this is where you correct the sort key of an entry that already exists, including one created before those fields were there.
+
 You can hide columns you don't need: right-click the table's header row to toggle any column on or off.
 
 The **Page** column shows its cell in bold or italic when the entry carries a page style, so you can see at a glance how a page number will print. It recognises the standard LaTeX names out of the box; if your project styles page numbers with a command of its own, add it under [Preferences → General](../preferences/general.md) so those cells are styled too.

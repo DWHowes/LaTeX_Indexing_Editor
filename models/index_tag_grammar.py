@@ -145,6 +145,50 @@ def strip_string_macro(text: str) -> str:
     return text.replace(r"\string", "")
 
 
+#: One ``\macro{...}`` wrapper. Used only to read *through* formatting to
+#: the words underneath -- never to rewrite text that will be written back
+#: to a file.
+_FORMATTING_MACRO = re.compile(r"\\[a-zA-Z]+\{([^{}]*)\}")
+
+
+def strip_formatting_macros(text: str) -> str:
+    r"""
+    The words a display string would read as with its formatting removed:
+    ``RMS \textit{Titanic}`` -> ``RMS Titanic``.
+
+    Applied repeatedly so nested wrappers (``\textbf{\textit{x}}``) come
+    out whole, and paired with :func:`strip_string_macro` because
+    ``\string`` is never part of the words either. Runs of whitespace left
+    behind by a removed macro are collapsed.
+
+    This is deliberately lenient about *which* macro it unwraps: anything
+    of the form ``\name{...}`` is treated as formatting. A sort key is a
+    reading aid for the indexing engine, not something written back to the
+    source, so guessing wrong costs a sort order and not a file.
+    """
+    previous = None
+    current = strip_string_macro(text)
+    while previous != current:
+        previous = current
+        current = _FORMATTING_MACRO.sub(r"\1", current)
+    return " ".join(current.split())
+
+
+def suggested_sort_key(display: str) -> str:
+    r"""
+    What a level would file under if nobody said otherwise -- its display
+    text with the formatting read through.
+
+    This is a *suggestion*, offered to the indexer to accept or replace,
+    and never written into a tag on its own. It cannot know that
+    ``\textit{The Quality of Mercy}`` files under Q rather than T, or that
+    ``RMS \textit{Titanic}`` files under T rather than R; only the indexer
+    knows that. Generating it silently was exactly the bug this function
+    exists to stop repeating.
+    """
+    return strip_formatting_macros(display).strip()
+
+
 # --------------------------------------------------------------------------
 # Encap
 # --------------------------------------------------------------------------

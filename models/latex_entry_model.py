@@ -3,7 +3,6 @@ class ReferenceCarrier:
     def __init__(self, value=None):
         self.value = value
 
-import re
 from dataclasses import dataclass
 from typing import Optional, List
 
@@ -11,36 +10,70 @@ from models import index_tag_grammar as grammar
 
 @dataclass
 class IndexEntryModel:
+    r"""
+    One entry being composed in the Index Entry window.
+
+    Each level carries its display text and, separately, the sort key the
+    indexer chose for it. Nothing here invents a sort key: this class used
+    to derive one from any level containing \textbf/\textit by stripping
+    the macros, which files "\textit{The Quality of Mercy}" under T and
+    "RMS \textit{Titanic}" under R -- both wrong, and both invisible,
+    since the generated key never appeared anywhere the indexer could see
+    it. The window offers grammar.suggested_sort_key as a starting point
+    in a field that can be edited or emptied, and only what is in that
+    field is written.
+    """
     main: str
     sub1: Optional[str] = None
     sub2: Optional[str] = None
     page_style: Optional[str] = None
     command_name: str = "index"
+    main_sort: Optional[str] = None
+    sub1_sort: Optional[str] = None
+    sub2_sort: Optional[str] = None
 
     @staticmethod
-    def process_field(value: str) -> Optional[str]:
-        val = value.strip()
-        if not val:
+    def process_field(value: str, sort_key: Optional[str] = None) -> Optional[str]:
+        r"""
+        One level as it will appear in the tag: ``sort@display``, or just
+        the display text.
+
+        The sort key is written only when it is non-empty and says
+        something the display text does not -- the same rule the entry
+        table applies in EntryModifierController._assemble_canonical_heading,
+        so both ways of creating an entry produce identical tags.
+
+        A display value that already contains an unbraced "@" is passed
+        through untouched, which is what someone typing raw makeindex
+        syntax into the field means by it; an explicit sort key wins over
+        that reading.
+        """
+        display = (value or "").strip()
+        if not display:
             return None
-        if grammar.SORT_KEY_SEPARATOR in val:
-            return val
-        if r"\textit" in val or r"\textbf" in val:
-            clean_key = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', val)
-            clean_key = grammar.strip_string_macro(clean_key).strip()
-            return grammar.build_level(clean_key, val)
-        return val
+
+        key = (sort_key or "").strip()
+        if not key:
+            return display
+        if key.lower() == display.lower():
+            return display
+        if grammar.split_sort_key(display)[0]:
+            # Display already carries its own key. Honour the explicit
+            # field rather than producing a level with two "@" halves.
+            display = grammar.split_sort_key(display)[1]
+
+        return grammar.build_level(key, display)
 
     def normalized_parts(self) -> List[str]:
         parts = []
-        main = self.process_field(self.main)
-        if main:
-            parts.append(main)
-        sub1 = self.process_field(self.sub1 or "")
-        if sub1:
-            parts.append(sub1)
-        sub2 = self.process_field(self.sub2 or "")
-        if sub2:
-            parts.append(sub2)
+        for value, sort_key in (
+            (self.main, self.main_sort),
+            (self.sub1, self.sub1_sort),
+            (self.sub2, self.sub2_sort),
+        ):
+            level = self.process_field(value or "", sort_key)
+            if level:
+                parts.append(level)
         return parts
 
     def chain(self) -> str:

@@ -112,6 +112,124 @@ def _select(editor, start, end):
     editor.setTextCursor(cursor)
 
 
+class TestSortKeys:
+    r"""
+    End-to-end proof that what the Sort field holds is what reaches the
+    .tex file -- and that nothing reaches it otherwise. Field-level
+    behaviour (when the field appears, what it suggests) lives in
+    test_index_entry_window_sort_keys.py.
+    """
+
+    def test_a_partially_italic_name_files_where_the_indexer_says(self, tmp_path, qtbot):
+        """"RMS Titanic" belongs under T, not R."""
+        controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")
+        _place_cursor(editor, 5)
+        _fill_entry(view, main=r"RMS \textit{Titanic}", sub1="sinking of")
+        view.sort_entries[0].setText("Titanic")
+        view.sort_entries[0].is_user_owned = True
+
+        controller.handle_insert()
+
+        assert editor.toPlainText() == (
+            "Hello" + r"\index{Titanic@RMS \textit{Titanic}!sinking of}" + " world"
+        )
+
+    def test_a_wholly_italic_title_files_where_the_indexer_says(self, tmp_path, qtbot):
+        """"The Quality of Mercy" belongs under Q, not T."""
+        controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")
+        _place_cursor(editor, 5)
+        _fill_entry(view, main=r"\textit{The Quality of Mercy}")
+        view.sort_entries[0].setText("Quality of Mercy")
+        view.sort_entries[0].is_user_owned = True
+
+        controller.handle_insert()
+
+        assert editor.toPlainText() == (
+            "Hello" + r"\index{Quality of Mercy@\textit{The Quality of Mercy}}" + " world"
+        )
+
+    def test_formatting_alone_no_longer_invents_a_key(self, tmp_path, qtbot):
+        """
+        The regression this whole change exists for: this used to come out
+        as "Die Linke@\\textit{Die Linke}" with nobody having asked.
+        """
+        controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")
+        _place_cursor(editor, 5)
+        _fill_entry(view, main=r"\textit{Die Linke}")
+        view.sort_entries[0].clear()
+        view.sort_entries[0].is_user_owned = True
+
+        controller.handle_insert()
+
+        assert editor.toPlainText() == "Hello" + r"\index{\textit{Die Linke}}" + " world"
+
+    def test_a_plain_entry_never_gains_a_sort_key(self, tmp_path, qtbot):
+        controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")
+        _place_cursor(editor, 5)
+        _fill_entry(view, main="negligence", sub1="duty of care")
+
+        controller.handle_insert()
+
+        assert editor.toPlainText() == r"Hello\index{negligence!duty of care} world"
+
+    def test_each_level_keeps_its_own_key(self, tmp_path, qtbot):
+        controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")
+        _place_cursor(editor, 5)
+        view.show_sort_keys.setChecked(True)
+        _fill_entry(view, main=r"\textit{Mercy}", sub1="St. John")
+        view.reveal_sub1()
+        for index, key in ((0, "Mercy"), (1, "Saint John")):
+            view.sort_entries[index].setText(key)
+            view.sort_entries[index].is_user_owned = True
+
+        controller.handle_insert()
+
+        assert editor.toPlainText() == (
+            "Hello" + r"\index{Mercy@\textit{Mercy}!Saint John@St. John}" + " world"
+        )
+        view.show_sort_keys.setChecked(False)
+
+    def test_a_range_carries_the_key_into_both_macros(self, tmp_path, qtbot):
+        controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")
+        _select(editor, 0, 5)
+        _fill_entry(view, main=r"RMS \textit{Titanic}")
+        view.sort_entries[0].setText("Titanic")
+        view.sort_entries[0].is_user_owned = True
+
+        controller.handle_insert()
+
+        body = r"Titanic@RMS \textit{Titanic}"
+        assert editor.toPlainText() == (
+            "\\index{" + body + "|(}Hello\\index{" + body + "|)} world"
+        )
+
+    def test_a_missing_key_on_formatted_text_is_reported_not_blocked(self, tmp_path, qtbot):
+        controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")
+        _place_cursor(editor, 5)
+        messages = []
+        view.statusMessageRequested.connect(lambda text, timeout: messages.append(text))
+        _fill_entry(view, main=r"\textit{Die Linke}")
+        view.sort_entries[0].clear()
+        view.sort_entries[0].is_user_owned = True
+
+        controller.handle_insert()
+
+        assert editor.toPlainText() == "Hello" + r"\index{\textit{Die Linke}}" + " world"
+        assert len(messages) == 1
+        assert "Main" in messages[0]
+
+    def test_nothing_is_reported_for_an_ordinary_entry(self, tmp_path, qtbot):
+        controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")
+        _place_cursor(editor, 5)
+        messages = []
+        view.statusMessageRequested.connect(lambda text, timeout: messages.append(text))
+        _fill_entry(view, main="negligence")
+
+        controller.handle_insert()
+
+        assert messages == []
+
+
 class TestStandardInsert:
     def test_inserts_the_macro_at_the_cursor(self, tmp_path, qtbot):
         controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")

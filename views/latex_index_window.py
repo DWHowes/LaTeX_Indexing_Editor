@@ -1,4 +1,6 @@
 import re
+from functools import partial
+
 from PySide6.QtWidgets import (
     QDockWidget,
     QWidget,
@@ -11,8 +13,9 @@ from PySide6.QtWidgets import (
     QComboBox,
     QButtonGroup,
     QGridLayout,
+    QCheckBox,
 )
-from PySide6.QtCore import QEvent, Qt, Signal, QSize, Slot
+from PySide6.QtCore import QEvent, Qt, Signal, QSize, Slot, QSettings
 
 from controllers.app_style_configuration import AppStyleConfiguration
 from models import index_tag_grammar as grammar
@@ -78,6 +81,11 @@ class EntryWindowTitleBar(QWidget):
 
 class CustomLineEdit(QLineEdit):
     """A custom line edit that detects backspace when empty."""
+
+    #: Emitted when backspace in the empty field collapses this level, so
+    #: the window can take its sort field down with it.
+    collapsed = Signal()
+
     def __init__(self, previous_field, place_holder_text=None, parent=None, associated_label=None):
         super().__init__(parent, placeholderText=place_holder_text)
         self.previous_field = previous_field
@@ -89,6 +97,7 @@ class CustomLineEdit(QLineEdit):
             self.setVisible(False)
             if self.associated_label:
                 self.associated_label.hide()
+            self.collapsed.emit()
             
             # Force the layout engine to immediately recalculate the window size
             if self.parentWidget() and self.parentWidget().layout():
@@ -104,6 +113,49 @@ class CustomLineEdit(QLineEdit):
             
         super().keyPressEvent(event)
         
+#: Whether the sort fields are shown on every level regardless of
+#: formatting. A per-user working preference rather than a project
+#: setting -- an indexer who files by sort key does so in every book --
+#: so it goes to bare QSettings, same convention as the entry table's
+#: column visibility.
+_SHOW_SORT_KEYS_SETTINGS_KEY = "IndexEntryWindow/ShowSortKeys"
+
+
+class SortKeyLineEdit(QLineEdit):
+    r"""
+    A level's sort field.
+
+    While untouched it mirrors :func:`grammar.suggested_sort_key` of its
+    display field, so the common case -- read the formatting out and file
+    under the words -- needs no typing. The first keystroke in it hands
+    ownership to the indexer: from then on nothing rewrites it, including
+    clearing it to nothing, because an empty sort field is a decision
+    ("file this under its display text, formatting and all") and not an
+    absence of one.
+    """
+
+    def __init__(self, parent=None, placeholder="Sort key"):
+        super().__init__(parent, placeholderText=placeholder)
+        self.is_user_owned = False
+        self.textEdited.connect(self._claim)
+
+    @Slot()
+    def _claim(self) -> None:
+        self.is_user_owned = True
+
+    def follow(self, display_text: str) -> None:
+        """Re-derives the suggestion, unless the indexer has taken over."""
+        if self.is_user_owned:
+            return
+        suggestion = grammar.suggested_sort_key(display_text)
+        if suggestion != self.text():
+            self.setText(suggestion)
+
+    def reset(self) -> None:
+        self.clear()
+        self.is_user_owned = False
+
+
 class LatexIndexWindow(QDockWidget):
     insertRequested = Signal()
     formatRequested = Signal(str)
@@ -111,6 +163,9 @@ class LatexIndexWindow(QDockWidget):
     saveRequested = Signal(object, object)
     syncRequested = Signal(object, object)
     nextIdRequested = Signal(object)
+    #: Text and timeout for the main window's status bar. The window has no
+    #: reference to it; AppPipelineController connects this to showMessage.
+    statusMessageRequested = Signal(str, int)
 
     def __init__(self, title="LaTeX Index Entry", parent=None, tab_widget=None):
         super().__init__(title, parent)
@@ -176,6 +231,8 @@ class LatexIndexWindow(QDockWidget):
         self.input_layout.addWidget(self.sub1_entry, 1, 1)
         self.input_layout.addWidget(self.sub2_label, 2, 0)
         self.input_layout.addWidget(self.sub2_entry, 2, 1)
+
+        self._build_sort_fields()
 
         self.layout.addLayout(self.input_layout)
 
@@ -255,11 +312,176 @@ class LatexIndexWindow(QDockWidget):
         self.bar_layout.addWidget(self.none_ref)
         self.bar_layout.addWidget(self.bold_ref)
         self.bar_layout.addWidget(self.italic_ref)
+        self.bar_layout.addSpacing(20)
+        self.bar_layout.addWidget(self.show_sort_keys)
         self.bar_layout.addStretch()
         self.bar_layout.addWidget(self.insert_btn)
 
         self.layout.addLayout(self.bar_layout)
         self.setWidget(self.container)
+
+        # Only once the container has a window: setTabOrder refuses to
+        # relate two widgets that are not yet in one, and says so loudly.
+        for display_field, sort_field in zip(self._display_fields(), self.sort_entries):
+            self.setTabOrder(display_field, sort_field)
+
+        self._refresh_sort_field_visibility()
+
+    # ------------------------------------------------------------------
+    # Sort keys
+    # ------------------------------------------------------------------
+
+    def _build_sort_fields(self) -> None:
+        r"""
+        Adds a "Sort as" field beside each level, and the switch that shows
+        them all.
+
+        A level's field appears on its own as soon as that level's text
+        carries formatting, because that is the case where filing under the
+        display text is not merely a choice but unreadable to the indexing
+        engine -- makeindex would sort ``\textit{The Quality of Mercy}``
+        under the backslash. The switch covers everything else: "St. John"
+        filed under Saint, "1984" filed under Nineteen.
+        """
+        self.sort_labels = []
+        self.sort_entries = []
+
+        for row, display_field in enumerate(
+            (self.main_entry, self.sub1_entry, self.sub2_entry)
+        ):
+            label = QLabel("Sort as:")
+            field = SortKeyLineEdit(self.container)
+            field.setMaximumWidth(190)
+            field.setToolTip(
+                "How this level files in the index. Offered as soon as the "
+                "text carries bold or italic; edit it freely, or empty it to "
+                "file under the display text exactly as written."
+            )
+            self.input_layout.addWidget(label, row, 2)
+            self.input_layout.addWidget(field, row, 3)
+            label.hide()
+            field.hide()
+
+            self.sort_labels.append(label)
+            self.sort_entries.append(field)
+
+            display_field.textChanged.connect(self._sync_sort_fields)
+            display_field.editingFinished.connect(self._split_typed_sort_key)
+            if isinstance(display_field, CustomLineEdit):
+                display_field.collapsed.connect(partial(self._on_level_collapsed, row))
+
+            # The formatting buttons act on the display text only -- a sort
+            # key is read by the indexing engine, never printed, so bolding
+            # one is meaningless. Watching the field is how the buttons know
+            # to grey out while it has focus.
+            field.installEventFilter(self)
+
+        self.show_sort_keys = QCheckBox("Show sort keys")
+        self.show_sort_keys.setToolTip(
+            "Show the sort field on every level, so a heading with no "
+            "formatting can still be filed under something other than its "
+            "own text."
+        )
+        self.show_sort_keys.setChecked(
+            QSettings().value(_SHOW_SORT_KEYS_SETTINGS_KEY, False, type=bool)
+        )
+        self.show_sort_keys.toggled.connect(self._on_show_sort_keys_toggled)
+
+    @Slot(bool)
+    def _on_show_sort_keys_toggled(self, checked: bool) -> None:
+        QSettings().setValue(_SHOW_SORT_KEYS_SETTINGS_KEY, bool(checked))
+        self._refresh_sort_field_visibility()
+
+    @Slot()
+    def _sync_sort_fields(self) -> None:
+        """Keeps each untouched suggestion in step with its display text."""
+        for display_field, sort_field in zip(self._display_fields(), self.sort_entries):
+            sort_field.follow(display_field.text())
+        self._refresh_sort_field_visibility()
+
+    def _refresh_sort_field_visibility(self) -> None:
+        show_all = self.show_sort_keys.isChecked()
+        for display_field, label, sort_field in zip(
+            self._display_fields(), self.sort_labels, self.sort_entries
+        ):
+            # Never shown for a level that is itself hidden: a sort field
+            # for a subhead that does not exist yet is noise.
+            visible = self._level_is_shown(display_field) and (
+                show_all or self.level_is_formatted(display_field.text())
+            )
+            label.setVisible(visible)
+            sort_field.setVisible(visible)
+
+    @staticmethod
+    def level_is_formatted(text: str) -> bool:
+        r"""True when a level's text carries a ``\macro{...}`` wrapper."""
+        return grammar.suggested_sort_key(text) != (text or "").strip()
+
+    @Slot()
+    def _split_typed_sort_key(self) -> None:
+        r"""
+        Moves a raw ``sort@display`` string out of a display field and into
+        the two fields it means.
+
+        Reached two ways: someone typing makeindex syntax straight into the
+        field, and accepting an autocomplete suggestion -- the completion
+        lists are built from raw heading levels, so they carry any sort key
+        those headings were written with. Splitting on focus-out rather
+        than on every keystroke means the "@" is not torn out from under
+        someone mid-word.
+        """
+        for display_field, sort_field in zip(self._display_fields(), self.sort_entries):
+            key, display = grammar.split_sort_key(display_field.text())
+            if not key or not display:
+                continue
+
+            display_field.blockSignals(True)
+            display_field.setText(display)
+            display_field.blockSignals(False)
+
+            sort_field.setText(key)
+            sort_field.is_user_owned = True
+
+        self._refresh_sort_field_visibility()
+
+    def _display_fields(self) -> list:
+        return [self.main_entry, self.sub1_entry, self.sub2_entry]
+
+    def _level_is_shown(self, widget) -> bool:
+        """
+        Whether a field counts as on screen, asked in a way that survives
+        the whole panel being closed. isVisible() is False for every child
+        of a hidden dock, which would silently read every sort key as empty
+        the moment the panel was toggled shut -- isVisibleTo answers the
+        question actually being asked: would this be showing if the panel
+        were open?
+        """
+        return widget.isVisibleTo(self.container)
+
+    def get_sort_keys(self) -> list[str]:
+        """The three sort fields, as text; empty where none was given."""
+        return [
+            field.text().strip() if self._level_is_shown(field) else ""
+            for field in self.sort_entries
+        ]
+
+    def formatted_levels_without_sort_keys(self) -> list[str]:
+        """
+        Names of the levels carrying formatting but no sort key -- the
+        entries makeindex will file under a backslash. The controller
+        reports these once, on insert; nothing is blocked or rewritten.
+        """
+        names = ["Main", "Subhead 1", "Subhead 2"]
+        return [
+            name
+            for name, display_field, sort_field in zip(
+                names, self._display_fields(), self.sort_entries
+            )
+            if self._level_is_shown(display_field)
+            and display_field.text().strip()
+            and self.level_is_formatted(display_field.text())
+            and not sort_field.text().strip()
+        ]
 
     def setup_autocompletion(self, heading_data: list[dict]) -> None:
         """
@@ -314,12 +536,20 @@ class LatexIndexWindow(QDockWidget):
             self.sub1_label.show()
             self.sub1_entry.show()
             self.sub1_entry.setFocus()
+            self._refresh_sort_field_visibility()
 
     def reveal_sub2(self):
         if self.sub1_entry.text().strip():
             self.sub2_label.show()
             self.sub2_entry.show()
             self.sub2_entry.setFocus()
+            self._refresh_sort_field_visibility()
+
+    @Slot(int)
+    def _on_level_collapsed(self, row: int) -> None:
+        """A backspace-collapsed level takes its sort field down with it."""
+        self.sort_entries[row].reset()
+        self._refresh_sort_field_visibility()
 
     def format_selected_text(self, command):
         field = self.last_focused_field
@@ -339,12 +569,16 @@ class LatexIndexWindow(QDockWidget):
         field.setFocus()
 
     def get_entry_data(self):
+        main_sort, sub1_sort, sub2_sort = self.get_sort_keys()
         return {
             "main": self.main_entry.text(),
             "sub1": self.sub1_entry.text(),
             "sub2": self.sub2_entry.text(),
             "page_style": "bold" if self.bold_ref.isChecked() else "italic" if self.italic_ref.isChecked() else None,
             "command_name": self.command_selector.currentText(),
+            "main_sort": main_sort,
+            "sub1_sort": sub1_sort,
+            "sub2_sort": sub2_sort,
         }
 
     def set_available_commands(self, commands: list[dict]) -> None:
@@ -381,6 +615,14 @@ class LatexIndexWindow(QDockWidget):
         for w in [self.sub1_label, self.sub1_entry, self.sub2_label, self.sub2_entry]:
             w.hide()
 
+        # The sort fields clear and go back to following their display
+        # text. "Show sort keys" deliberately survives: it is the working
+        # habit of whoever is indexing, not part of one entry.
+        for sort_field in self.sort_entries:
+            sort_field.reset()
+        self._refresh_sort_field_visibility()
+        self._set_format_buttons_enabled(True)
+
         self.none_ref.setChecked(True)
         if self.format_group.checkedButton():
             self.format_group.setExclusive(False)
@@ -394,9 +636,20 @@ class LatexIndexWindow(QDockWidget):
         self.setVisible(new_visibility_state)
         return new_visibility_state
 
+    def _set_format_buttons_enabled(self, enabled: bool) -> None:
+        self.bold_entry.setEnabled(enabled)
+        self.ital_entry.setEnabled(enabled)
+
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.FocusIn and isinstance(obj, QLineEdit):
-            self.last_focused_field = obj
+            if isinstance(obj, SortKeyLineEdit):
+                # last_focused_field is what B/I formats, so a sort field
+                # must never become it -- otherwise clicking B here would
+                # write \textbf{...} into the key makeindex sorts on.
+                self._set_format_buttons_enabled(False)
+            else:
+                self.last_focused_field = obj
+                self._set_format_buttons_enabled(True)
 
         return super().eventFilter(obj, event)
 

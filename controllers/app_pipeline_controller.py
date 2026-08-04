@@ -273,6 +273,11 @@ class AppPipelineController(QObject):
         # Connect the direct tree view update to the indexInserted signal
         self.window.latex_index_window.indexInserted.connect(self._handle_manual_index_insertion)
 
+        # The entry window has no reference to the status bar; this is how
+        # it reports something worth seeing but not worth a dialog.
+        self.window.latex_index_window.statusMessageRequested.connect(
+            self.window.status_bar.showMessage)
+
         # Route file-saving requests to your workspace synchronization engine
         self.window.latex_index_window.saveRequested.connect(self._handle_view_save_request)
         self.window.latex_index_window.syncRequested.connect(self._handle_workspace_sync_request)

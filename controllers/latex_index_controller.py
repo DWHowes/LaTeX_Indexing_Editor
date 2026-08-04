@@ -25,6 +25,28 @@ class LatexIndexController(QObject):
         """Binds the DocumentIOController after construction."""
         self.doc_io = doc_io
 
+    def _report_missing_sort_keys(self) -> None:
+        r"""
+        Notes, without blocking anything, that a formatted level is going in
+        with no sort key.
+
+        makeindex sorts such a level on the raw string, backslash and all,
+        so it lands among the symbols rather than under its own words. That
+        is occasionally what someone wants and is never what someone wants
+        by accident, so this says so once, in the status bar, and inserts
+        the entry regardless.
+        """
+        levels = self.view.formatted_levels_without_sort_keys()
+        if not levels:
+            return
+
+        which = ", ".join(levels)
+        self.view.statusMessageRequested.emit(
+            f"Inserted with no sort key on {which} — formatted text will file "
+            f"under its LaTeX markup.",
+            6000,
+        )
+
     @contextmanager
     def _pipeline_edit(self, path: str):
         """
@@ -48,9 +70,11 @@ class LatexIndexController(QObject):
         entry_data = self.view.get_entry_data()
         entry = IndexEntryModel(**entry_data)
 
-        if not IndexEntryModel.process_field(entry.main):
+        if not IndexEntryModel.process_field(entry.main, entry.main_sort):
             print("Error: Main entry field cannot be empty.")
             return
+
+        self._report_missing_sort_keys()
 
         path_carrier = ReferenceCarrier("Untitled")
         self.view.syncRequested.emit(editor, path_carrier)

@@ -210,6 +210,47 @@ class TestSortKeys:
             assert grammar.build_level(key, display) == level
 
 
+class TestSuggestedSortKey:
+    r"""
+    The starting point offered in the Index Entry window's Sort field. It
+    reads formatting out of a display string and nothing more -- it cannot
+    know that "The Quality of Mercy" files under Q, which is why what it
+    returns is offered rather than applied.
+    """
+
+    def test_plain_text_is_its_own_suggestion(self):
+        assert grammar.suggested_sort_key("negligence") == "negligence"
+
+    def test_a_wrapped_term_reads_through_the_macro(self):
+        assert grammar.suggested_sort_key(r"\textit{Die Linke}") == "Die Linke"
+
+    def test_partial_formatting_keeps_the_unformatted_words(self):
+        assert grammar.suggested_sort_key(r"RMS \textit{Titanic}") == "RMS Titanic"
+
+    def test_nested_wrappers_are_read_through(self):
+        assert grammar.suggested_sort_key(r"\textbf{\textit{Both}}") == "Both"
+
+    def test_string_is_not_part_of_the_words(self):
+        assert grammar.suggested_sort_key(r"\string\textit{Foo}") == "Foo"
+
+    def test_whitespace_left_by_a_removed_macro_is_collapsed(self):
+        assert grammar.suggested_sort_key(r"a \textit{b}  c") == "a b c"
+
+    def test_empty_input_is_empty(self):
+        assert grammar.suggested_sort_key("") == ""
+
+    def test_it_does_not_pretend_to_know_about_articles(self):
+        """
+        Documenting the limit deliberately: the suggestion for a title is
+        the title, and dropping "The" is the indexer's call, made in the
+        field this value lands in.
+        """
+        assert (
+            grammar.suggested_sort_key(r"\textit{The Quality of Mercy}")
+            == "The Quality of Mercy"
+        )
+
+
 class TestCrossReferences:
     def test_parses_see(self):
         assert grammar.parse_encap_xref("see{Widgets}") == XRefSpec("see", "Widgets")

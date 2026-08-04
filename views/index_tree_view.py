@@ -1,5 +1,4 @@
 import os
-import re
 from PySide6.QtWidgets import QTreeView, QAbstractItemView, QApplication
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QCursor, QFontMetrics
 from PySide6.QtCore import Qt, Signal, Slot, QModelIndex, QSortFilterProxyModel, QItemSelectionModel, QElapsedTimer
@@ -11,7 +10,6 @@ from views.index_link_delegate import IndexLinkDelegate
 
 class CaseInsensitiveItem(QStandardItem):
     """Custom item helper providing case-insensitive text evaluation with cross-reference prioritization."""
-    _MACRO_PATTERN = re.compile(r'\\[a-zA-Z]+\{([^}]+)\}')
 
     def __init__(self, text="", is_see_also=False):
         # Initialize instance variables BEFORE calling super().__init__
@@ -38,8 +36,7 @@ class CaseInsensitiveItem(QStandardItem):
         else:
             key_part = text
 
-        clean_key = self._MACRO_PATTERN.sub(r'\1', key_part)
-        return clean_key.replace(r'\string', '').strip().lower()
+        return grammar.strip_formatting_macros(key_part).lower()
 
     def __lt__(self, other):
         if not isinstance(other, QStandardItem):
@@ -58,8 +55,7 @@ class CaseInsensitiveItem(QStandardItem):
                 other_key = "\x00" + other_text.strip().lower()
             else:
                 other_part = other_text.split('@')[0].strip() if '@' in other_text else other_text
-                other_clean = self._MACRO_PATTERN.sub(r'\1', other_part)
-                other_key = other_clean.replace(r'\string', '').strip().lower()
+                other_key = grammar.strip_formatting_macros(other_part).lower()
 
         return self_key < other_key
 
