@@ -47,12 +47,35 @@ always written. Entries already in your files are unaffected — `bold`, `bf`, `
 and the rest are still read as page styles, and **Preferences → General** still
 decides which names count.
 
-**A page range cannot carry a page style for the moment.** Selecting text and
-choosing Bold or Italic used to write `|bold|(`, which is not a range at all as far
-as `makeindex` is concerned, and which this editor read back as a heading with a
-`|` in it. The style is now dropped, the range goes in plain, and the status bar
-says so. Supporting `|(textbf` properly means teaching the whole application that an
-encap can carry a range marker *and* a command, which is a change of its own.
+### Page ranges can be bold or italic
+
+Selecting text and choosing Bold or Italic used to write `|bold|(`, which is not a
+range at all as far as `makeindex` is concerned, and which this editor read back as
+a heading with a `|` in it. A styled range is written `|(textbf` — marker first,
+command after — and that is now what goes in, on both ends of the range, so the
+whole span comes out as **12–15** in the printed index.
+
+The **Page** column of the entry table edits a range's style too. Range rows were
+read-only there, which meant a range's style could not be set anywhere at all; the
+marker is now kept aside while you choose from the same Standard/Bold/Italic list
+as any other row. Only the opening half of a range is ever listed — the closing half
+follows whatever you set, so the two ends never disagree.
+
+**Ranges already styled by hand in your source are now recognised.** A
+`\index{term|(textbf}` written before this editor touched the project used to be
+read as two unrelated single-page entries whose page style was the nonsense command
+`(textbf`; they never paired up, and never reached **Check Range Consistency**. They
+are read as one styled range from now on, with no conversion step and nothing to
+approve.
+
+### Renaming a heading no longer discards its page style
+
+Renaming a heading in the index tree rewrote every entry beneath it from the
+editor's cached copy of the heading — which does not include the `|` suffix. So
+`\index{Main|textbf}` came back as `\index{Renamed}`, losing the styling, and
+`\index{Main|(}` came back as `\index{Renamed}`, destroying the page range
+altogether. The suffix is now read from the file being rewritten and put back:
+page styles, range markers and `see` pointers all survive a rename.
 
 ### Reopening a recent project
 

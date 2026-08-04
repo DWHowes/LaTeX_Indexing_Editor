@@ -12,6 +12,8 @@ You can hide columns you don't need: right-click the table's header row to toggl
 
 The **Page** column shows its cell in bold or italic when the entry carries a page style, so you can see at a glance how a page number will print. It recognises the standard LaTeX names out of the box; if your project styles page numbers with a command of its own, add it under [Preferences → General](../preferences/general.md) so those cells are styled too.
 
+A [range reference](../index_tree/range_references.md) is styled from this column like any other row. Only the opening half of a range appears in the table; the closing half is updated to match whatever you choose, so the two ends of a range never end up disagreeing about how the page numbers should print.
+
 ## Editing a cell
 
 Click into a cell and type to change it. An edit here rewrites the corresponding `\index` macro in the source file — the same way a rename in the index tree does — so there's no separate "apply" step beyond finishing the edit.

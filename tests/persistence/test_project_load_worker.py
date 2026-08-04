@@ -94,6 +94,52 @@ class TestScanTexFilesForIndexData:
         assert closer["range_partner_id"] == opener["unique_id_number"]
         assert opener["range_partner_id"] == closer["unique_id_number"]
 
+    def test_pairs_a_styled_range_written_by_hand(self, sample_project_dir):
+        r"""
+        "|(textbf" ... "|)textbf" is a perfectly valid makeindex range
+        whose page numbers come out bold, and hand-written source in an
+        imported project is where it turns up. Pairing used to compare
+        the encap to exactly "(", so both halves fell through as ordinary
+        point references whose page style was the nonsense command
+        "(textbf" -- never paired, never reaching the range consistency
+        checker, and shown as "(textbf" in the entry table's Page column.
+        """
+        (sample_project_dir / "sprockets.tex").write_text(
+            "Start.\\index{Sprockets|(textbf}\nMiddle.\n"
+            "End.\\index{Sprockets|)textbf}\n",
+            encoding="utf-8",
+        )
+        worker = _worker(sample_project_dir)
+        worker.scan_file_tree()
+
+        _, references = worker.scan_tex_files_for_index_data()
+        refs = [r for r in references if r["heading_raw_text"] == "Sprockets"]
+
+        assert len(refs) == 2
+        opener = next(r for r in refs if r["encap"] == "(textbf")
+        closer = next(r for r in refs if r["encap"] == ")textbf")
+        assert opener["is_range_closer"] is False
+        assert closer["is_range_closer"] is True
+        assert closer["range_partner_id"] == opener["unique_id_number"]
+        assert opener["range_partner_id"] == closer["unique_id_number"]
+
+    def test_a_styled_range_keeps_its_style_in_the_encap(self, sample_project_dir):
+        """
+        The marker is recognised without being swallowed -- the command
+        half still has to reach the Page column and the .ind file.
+        """
+        (sample_project_dir / "sprockets.tex").write_text(
+            "A\\index{Sprockets|(textit}B\\index{Sprockets|)textit}\n",
+            encoding="utf-8",
+        )
+        worker = _worker(sample_project_dir)
+        worker.scan_file_tree()
+
+        _, references = worker.scan_tex_files_for_index_data()
+        encaps = {r["encap"] for r in references if r["heading_raw_text"] == "Sprockets"}
+
+        assert encaps == {"(textit", ")textit"}
+
     def test_parses_see_cross_reference(self, sample_project_dir):
         worker = _worker(sample_project_dir)
         worker.scan_file_tree()

@@ -6,6 +6,14 @@ A **range reference** indexes a whole span of text under one heading — "see pa
 
 Select the text the range should cover before you insert the entry (see [Inserting Entries](../index_tree/inserting_entries.md)) — a range is created automatically whenever there's an active text selection and the entry isn't a cross-reference. With nothing selected, you get a single point reference instead.
 
+## Styling a range
+
+A range can be bold or italic like any other entry. Choose **Bold Page** or **Italic Page** under Page Ref before inserting, and the style is written onto both ends of the range, so the whole span prints as **42–47** rather than just one of its page numbers.
+
+You can also change it afterwards from the **Page** column of the [entry table](../entry_table/editing.md). Only the opening half of a range is listed there; the closing half is updated to match, so the two ends stay in step.
+
+In the source this is written `|(textbf` on the opener and `|)textbf` on the closer — the range marker first, the style after it. Ranges written that way by hand, before this editor ever saw the project, are read correctly too.
+
 ## How it's tracked
 
 Even though a range is two separate `\index` macros, the index tree shows it as **one** entry (the opener) — see [Viewing and Navigating](../index_tree/navigating.md). The closing macro is still there in the source and still fully tracked (renaming or deleting the entry affects both halves together), it's just not displayed as its own row.

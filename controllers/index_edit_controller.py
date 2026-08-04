@@ -400,7 +400,21 @@ class IndexEditController(QObject):
 
         old_macro = self._doc_io.read_macro_span(file_path, abs_pos, abs_end) or ""
 
-        new_macro = f"\\{command_name}{{{new_heading}}}"
+        # heading_raw_text never carries the "|encap" suffix on any load
+        # path -- the parser splits it off before storing -- so rebuilding
+        # the macro from it alone silently DELETED that suffix from the
+        # .tex file: renaming a heading turned "\index{Main|textbf}" into
+        # "\index{Renamed}", and "\index{Main|(}" into "\index{Renamed}",
+        # destroying the range along with it. The suffix is read back off
+        # the macro actually on disk (the same source _sync_range_partner
+        # trusts, and for the same reason) and re-attached here.
+        #
+        # Only the written macro carries it. record["heading_raw_text"]
+        # below deliberately stays encap-free, since heading resolution
+        # and tree reconciliation both key on the bare heading chain.
+        new_macro_body = self._reattach_encap(old_macro, new_heading, command_name)
+
+        new_macro = f"\\{command_name}{{{new_macro_body}}}"
         delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro, expected_macro_name=command_name)
         if delta is None:
             # Write did not happen — revert the staged value so it doesn't
@@ -430,8 +444,10 @@ class IndexEditController(QObject):
 
         # Keep this entry's range partner (if any) in sync -- see
         # _sync_range_partner's docstring for why this wasn't happening at
-        # all beforehand.
-        self._sync_range_partner(uid, self._strip_encap_suffix(new_heading))
+        # all beforehand. The full body goes over, encap included: the
+        # partner takes its heading chain and its page style from here,
+        # and keeps only its own range marker.
+        self._sync_range_partner(uid, new_macro_body)
 
         return True
 
@@ -480,11 +496,37 @@ class IndexEditController(QObject):
         """
         return grammar.strip_encap(heading_text, strip=False)
 
+    @staticmethod
+    def _reattach_encap(old_macro: str, new_heading: str, command_name: str) -> str:
+        r"""
+        Puts back the "|encap" suffix that ``old_macro`` carried on disk,
+        for a ``new_heading`` rebuilt from encap-free cached text.
+
+        A heading that already carries a suffix keeps its own -- that is
+        the table-edit path, where the user's Page-column choice is
+        authoritative and the on-disk value is precisely what is being
+        replaced. Only the rename path, whose input is heading_raw_text,
+        arrives here with nothing to keep.
+
+        An unreadable or unparseable ``old_macro`` yields the heading
+        unchanged rather than a guess: losing a suffix that could not be
+        read is no worse than the behaviour being fixed, whereas
+        inventing one would corrupt a macro that was fine.
+        """
+        if grammar.split_encap(new_heading, strip=False)[1]:
+            return new_heading
+
+        tag = grammar.parse_macro(old_macro, grammar.build_macro_pattern([command_name]))
+        if tag is None or not tag.encap:
+            return new_heading
+
+        return f"{new_heading}{grammar.ENCAP_SEPARATOR}{tag.encap}"
+
     # ------------------------------------------------------------------
     # Range-partner syncing
     # ------------------------------------------------------------------
 
-    def _sync_range_partner(self, entry_id: int, new_heading_no_encap: str) -> bool:
+    def _sync_range_partner(self, entry_id: int, new_heading: str) -> bool:
         r"""
         If entry_id is one half of a \index range pair (range_partner_id
         set on its cached record), rewrites the partner's macro so both
@@ -506,15 +548,35 @@ class IndexEditController(QObject):
         closers from every node's ref list. This method is the one place
         that now closes that gap for both call sites.
 
-        The partner's own "|encap" suffix (its page style and/or its own
-        "(" / ")" marker — necessarily the opposite one from entry_id's)
-        is preserved exactly as it currently stands on disk: neither
-        heading_raw_text (which never includes encap, across every
-        loading path in this codebase) nor the cached "encap" field
-        (whose meaning differs between the regex-fallback scan and the
-        live-insert path — see read_macro_span's docstring) can be
-        trusted as the source of truth for it, so it's read directly via
-        DocumentIOController.read_macro_span instead.
+        ``new_heading`` is the primary entry's full new tag body, encap
+        included — the partner needs both halves of it, for two different
+        reasons.
+
+        The partner's own "(" / ")" marker — necessarily the opposite one
+        from entry_id's — is preserved exactly as it currently stands on
+        disk: neither heading_raw_text (which never includes encap,
+        across every loading path in this codebase) nor the cached
+        "encap" field (whose meaning differs between the regex-fallback
+        scan and the live-insert path — see read_macro_span's docstring)
+        can be trusted as the source of truth for it, so it's read
+        directly via DocumentIOController.read_macro_span instead.
+
+        The partner's *page style*, on the other hand, is copied from the
+        primary rather than preserved, so that both ends of a range name
+        the same command ("|(textbf" ... "|)textbf"). Verified against
+        makeindex 2.17: the opening encapsulator is the one that wins,
+        and a closer carrying a *different* non-empty one draws "Range
+        closing operator has an inconsistent encapsulator" in the .ilg.
+        The range still forms either way — this is a warning, not an
+        error — but a file whose two halves disagree is a file whose
+        style silently depends on which half the user last touched.
+
+        Since the entry table only ever shows the opener (closers are
+        coordinate-only records, excluded from the table and the tree),
+        styling the opener is the only way a user can style a range at
+        all — so it has to carry to the half they cannot see. Only the
+        command half moves; if either side turns out not to be a range
+        encap after all, the partner's suffix is left alone.
 
         No-ops (returns True) if entry_id has no range partner. Returns
         False if a partner exists but syncing it failed — callers should
@@ -555,6 +617,9 @@ class IndexEditController(QObject):
             )
             return False
 
+        new_heading_no_encap = self._strip_encap_suffix(new_heading)
+        new_encap = grammar.split_encap(new_heading, strip=False)[1]
+
         partner_inner = current_partner_macro[len(partner_prefix):-1]
         partner_heading_only = self._strip_encap_suffix(partner_inner)
         partner_encap = (
@@ -562,6 +627,14 @@ class IndexEditController(QObject):
             if len(partner_inner) > len(partner_heading_only)
             else ""
         )
+
+        # Carry the primary's page style over to the partner, keeping the
+        # partner's own marker -- see this method's docstring for why the
+        # two halves are treated differently.
+        partner_role = grammar.range_role(partner_encap)
+        primary_role, primary_command = grammar.split_range_encap(new_encap)
+        if partner_role and primary_role:
+            partner_encap = grammar.build_range_encap(partner_role, primary_command)
 
         new_partner_heading = (
             f"{new_heading_no_encap}|{partner_encap}" if partner_encap else new_heading_no_encap
@@ -649,7 +722,9 @@ class IndexEditController(QObject):
         # actual fix for table edits only ever updating the range opener
         # and leaving the closer with its original heading text. Nothing
         # in this controller ever consulted range_partner_id before this.
-        self._sync_range_partner(entry_id, self._strip_encap_suffix(new_canonical_heading))
+        # The encap travels too -- the Page column is the one place a
+        # range's style can be set, and the closer is never shown there.
+        self._sync_range_partner(entry_id, new_canonical_heading)
 
         self._reconcile_heading_node(entry_id, old_heading, new_canonical_heading)
 

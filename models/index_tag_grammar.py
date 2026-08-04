@@ -10,8 +10,10 @@ whatever follows the *last top-level* "|", and each level may carry a
 sort key ahead of an unbraced "@" (``sortkey@display text``). The encap
 is one of:
 
-  * a page style   -- "bold", "italic", a user macro name, ...
-  * a range marker -- "(" opens a range, ")" closes it
+  * a page style   -- "textbf", "textit", a user macro name, ...
+  * a range marker -- "(" opens a range, ")" closes it -- optionally
+    followed by a page style that applies to the whole range, e.g.
+    "(textbf" ... ")textbf"
   * a cross-reference -- "see{Target}" / "seealso{Target}"
 
 Before this module existed the same grammar was picked apart by hand in
@@ -494,30 +496,72 @@ def extract_see_modifiers(text: str, encap: str = "") -> tuple[str, list[str], l
 # Ranges
 # --------------------------------------------------------------------------
 
+#: Range marker -> role, and back. The raw "(" / ")" are kept in the
+#: stored encap rather than being collapsed into a single "range" marker:
+#: that collapse lost which end of the range a reference was, and the
+#: ambiguous value then flowed back out through table edits as a literal
+#: "|range" suffix, silently corrupting the macro.
+_ROLE_BY_MARKER = {RANGE_OPEN: "open", RANGE_CLOSE: "close"}
+_MARKER_BY_ROLE = {role: marker for marker, role in _ROLE_BY_MARKER.items()}
+
+
+def split_range_encap(encap: Optional[str]) -> tuple[Optional[str], str]:
+    r"""
+    Splits an encap into (range_role, command).
+
+    makeindex reads "(" / ")" as a range marker only at the *start* of an
+    encap, and whatever follows it is an ordinary page-style command:
+    ``\index{foo|(textbf}`` ... ``\index{foo|)textbf}`` is a range whose
+    page numbers come out bold. So the marker and the command are two
+    independent halves of one string, and every consumer that used to
+    compare the whole encap to exactly "(" got a styled range wrong --
+    reading it as a plain entry whose page style was the nonsense
+    command "(textbf".
+
+    ``range_role`` is "open", "close", or None; ``command`` is the rest,
+    "" when there is none. A non-range encap comes back as (None, encap)
+    so that :func:`build_range_encap` round-trips any input, which is
+    what lets the Page column re-style a cell without having to know
+    whether its row is a range. Callers that care about cross-references
+    must ask :func:`parse_encap_xref` first -- a "see{X}" encap is
+    reported here as a command named "see{X}", since nothing in the
+    marker grammar distinguishes it.
+    """
+    text = (encap or "").strip()
+    if not text:
+        return None, ""
+
+    role = _ROLE_BY_MARKER.get(text[0])
+    if role is None:
+        return None, text
+    return role, text[1:].strip()
+
+
+def build_range_encap(role: Optional[str], command: str = "") -> str:
+    """
+    Inverse of :func:`split_range_encap`: re-attaches a range marker to a
+    page-style command. A None/unknown role yields the bare command, so
+    this is also the safe way to write an encap whose range-ness is
+    whatever it already was.
+    """
+    return f"{_MARKER_BY_ROLE.get(role or '', '')}{(command or '').strip()}"
+
+
 def range_role(encap: Optional[str]) -> Optional[str]:
     """
     Returns "open" for a range-opening encap, "close" for a closing one,
-    None for anything else.
-
-    The raw "(" / ")" are kept as the stored encap rather than being
-    collapsed into a single "range" marker: that collapse lost which end
-    of the range a reference was, and the ambiguous value then flowed
-    back out through table edits as a literal "|range" suffix, silently
-    corrupting the macro.
+    None for anything else. Matches on the leading marker, so a styled
+    range ("(textbf") is recognised as readily as a plain one.
     """
-    if encap == RANGE_OPEN:
-        return "open"
-    if encap == RANGE_CLOSE:
-        return "close"
-    return None
+    return split_range_encap(encap)[0]
 
 
 def is_range_opener(encap: Optional[str]) -> bool:
-    return encap == RANGE_OPEN
+    return range_role(encap) == "open"
 
 
 def is_range_closer(encap: Optional[str]) -> bool:
-    return encap == RANGE_CLOSE
+    return range_role(encap) == "close"
 
 
 # --------------------------------------------------------------------------

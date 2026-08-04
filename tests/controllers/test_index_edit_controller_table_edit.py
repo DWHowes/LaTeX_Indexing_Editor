@@ -126,6 +126,45 @@ def _build_stack(tmp_path, qtbot, tex_content, heading_raw_text="Main", filename
     return controller, tree, entry_model, staging_model, file_path, refs
 
 
+def _build_range_stack(tmp_path, qtbot, tex_content, heading_raw_text="Main"):
+    r"""
+    Two-entry stack for a range pair: the first \index in tex_content is
+    the opener, the second its partner. Only the opener is put in the
+    tree -- closers are coordinate-only records that never appear there,
+    which is exactly why anything set on the opener has to be propagated.
+
+    Returns (controller, entry_model, file_path, opener_ref, closer_ref).
+    """
+    file_path, uid_dicts = _parse_entries(tmp_path, tex_content)
+    opener_ref = _ref_from_uid_dict(uid_dicts[0], file_path, heading_raw_text)
+    closer_ref = _ref_from_uid_dict(
+        uid_dicts[1], file_path, heading_raw_text, is_range_closer=True
+    )
+    # The parser itself never links range partners (that's done at
+    # live-insertion time, or reconciled separately by
+    # RangeConsistencyController) -- wire the link directly here.
+    opener_ref["range_partner_id"] = closer_ref["unique_id_number"]
+    closer_ref["range_partner_id"] = opener_ref["unique_id_number"]
+
+    tree = IndexTreeView(model_engine=_fresh_engine())
+    qtbot.addWidget(tree)
+    _add_top_level_node(tree, heading_raw_text, [opener_ref])
+    _register_heading(tree, heading_raw_text, [opener_ref, closer_ref])
+
+    staging_model = IndexEditStagingModel()
+    entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
+    entry_model.load_records([opener_ref, closer_ref])
+
+    tabs = QTabWidget()
+    qtbot.addWidget(tabs)
+    doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), tabs, None)
+    controller = IndexEditController(
+        tree_view=tree, doc_io=doc_io, entry_modifier_model=entry_model, staging_model=staging_model,
+    )
+
+    return controller, entry_model, file_path, opener_ref, closer_ref
+
+
 class TestHandleEntryTableEdit:
     def test_rewrites_the_tex_file(self, tmp_path, qtbot):
         controller, _tree, entry_model, _staging, file_path, refs = _build_stack(
@@ -239,32 +278,8 @@ class TestHandleEntryTableEdit:
         was added -- regression coverage for that fix, table-edit side
         (the rename-side equivalent isn't covered elsewhere either).
         """
-        file_path, uid_dicts = _parse_entries(
-            tmp_path, r"\index{Main|(} some text here \index{Main|)}"
-        )
-        opener_dict, closer_dict = uid_dicts[0], uid_dicts[1]
-        opener_ref = _ref_from_uid_dict(opener_dict, file_path, "Main")
-        closer_ref = _ref_from_uid_dict(closer_dict, file_path, "Main", is_range_closer=True)
-        # The parser itself never links range partners (that's done at
-        # live-insertion time, or reconciled separately by
-        # RangeConsistencyController) -- wire the link directly here.
-        opener_ref["range_partner_id"] = closer_ref["unique_id_number"]
-        closer_ref["range_partner_id"] = opener_ref["unique_id_number"]
-
-        tree = IndexTreeView(model_engine=_fresh_engine())
-        qtbot.addWidget(tree)
-        _add_top_level_node(tree, "Main", [opener_ref])  # closers never appear in the tree
-        _register_heading(tree, "Main", [opener_ref, closer_ref])
-
-        staging_model = IndexEditStagingModel()
-        entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
-        entry_model.load_records([opener_ref, closer_ref])
-
-        tabs = QTabWidget()
-        qtbot.addWidget(tabs)
-        doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), tabs, None)
-        controller = IndexEditController(
-            tree_view=tree, doc_io=doc_io, entry_modifier_model=entry_model, staging_model=staging_model,
+        controller, entry_model, file_path, opener_ref, _closer_ref = _build_range_stack(
+            tmp_path, qtbot, r"\index{Main|(} some text here \index{Main|)}"
         )
 
         # The canonical heading a real table edit sends always carries its
@@ -277,3 +292,84 @@ class TestHandleEntryTableEdit:
         assert r"\index{Renamed|(}" in content
         assert r"\index{Renamed|)}" in content
         assert entry_model.has_dirty_records() is True
+
+
+class TestStyledRangePartnerSync:
+    r"""
+    The Page column is the only place a page range's style can be set,
+    and it only ever shows the opener -- closers are coordinate-only
+    records, excluded from both the table and the tree. So a style
+    applied to the opener has to carry to the half the user cannot see,
+    or the two ends of one range end up naming different commands.
+
+    Verified against makeindex 2.17: the opening encapsulator wins, and
+    a closer with a different non-empty one draws "Range closing
+    operator has an inconsistent encapsulator" in the .ilg. A warning
+    rather than an error -- but a source file whose halves disagree is
+    one whose style depends on which half was edited last.
+    """
+
+    def test_styling_the_opener_styles_the_closer(self, tmp_path, qtbot):
+        controller, _entry_model, file_path, opener_ref, _closer = _build_range_stack(
+            tmp_path, qtbot, r"\index{Main|(} some text here \index{Main|)}"
+        )
+
+        controller.handle_entry_table_edit(opener_ref["unique_id_number"], "Main|(textbf")
+
+        content = open(file_path, encoding="utf-8").read()
+        assert r"\index{Main|(textbf}" in content
+        assert r"\index{Main|)textbf}" in content
+
+    def test_clearing_the_style_clears_it_on_both_halves(self, tmp_path, qtbot):
+        controller, _entry_model, file_path, opener_ref, _closer = _build_range_stack(
+            tmp_path, qtbot, r"\index{Main|(textbf} some text \index{Main|)textbf}"
+        )
+
+        controller.handle_entry_table_edit(opener_ref["unique_id_number"], "Main|(")
+
+        content = open(file_path, encoding="utf-8").read()
+        assert r"\index{Main|(}" in content
+        assert r"\index{Main|)}" in content
+        assert "textbf" not in content
+
+    def test_the_closer_keeps_its_own_marker(self, tmp_path, qtbot):
+        """
+        Only the command half travels. Copying the opener's encap
+        wholesale would turn the closer into a second opener.
+        """
+        controller, _entry_model, file_path, opener_ref, _closer = _build_range_stack(
+            tmp_path, qtbot, r"\index{Main|(} some text here \index{Main|)}"
+        )
+
+        controller.handle_entry_table_edit(opener_ref["unique_id_number"], "Main|(textit")
+
+        content = open(file_path, encoding="utf-8").read()
+        assert content.count(r"|(textit") == 1
+        assert content.count(r"|)textit") == 1
+
+    def test_a_rename_and_a_restyle_at_once(self, tmp_path, qtbot):
+        controller, _entry_model, file_path, opener_ref, _closer = _build_range_stack(
+            tmp_path, qtbot, r"\index{Main|(} some text here \index{Main|)}"
+        )
+
+        controller.handle_entry_table_edit(opener_ref["unique_id_number"], "Renamed|(textbf")
+
+        content = open(file_path, encoding="utf-8").read()
+        assert r"\index{Renamed|(textbf}" in content
+        assert r"\index{Renamed|)textbf}" in content
+
+    def test_a_non_range_partner_encap_is_left_alone(self, tmp_path, qtbot):
+        """
+        Defensive: if the partner link points at something that is not a
+        range half (corrupt data, a half-applied consistency fix), its
+        suffix is preserved as-is rather than rewritten from the primary.
+        """
+        controller, _entry_model, file_path, opener_ref, _closer = _build_range_stack(
+            tmp_path, qtbot, r"\index{Main|(} some text here \index{Main|textbf}"
+        )
+
+        controller.handle_entry_table_edit(opener_ref["unique_id_number"], "Renamed|(textit")
+
+        content = open(file_path, encoding="utf-8").read()
+        assert r"\index{Renamed|(textit}" in content
+        assert r"\index{Renamed|textbf}" in content

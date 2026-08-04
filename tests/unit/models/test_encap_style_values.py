@@ -85,14 +85,33 @@ class TestSetEncapStyleValues:
 
         assert item.font().bold() is True
 
-    def test_a_default_range_marker_stays_non_editable(self):
+    def test_a_range_marker_is_editable(self):
         """
-        Range openers/closers are structural, not a page style. Nothing in
-        the preference touches that, and this pins it so a future change
-        to the encap lists can't quietly make one editable.
+        Range rows used to be forced read-only, because the combo could
+        only have clobbered a marker it had no way to represent -- which
+        also meant a range's page style could not be set anywhere in the
+        application. The marker now rides along outside the combo's
+        value, so the cell is an ordinary editable one.
         """
         from PySide6.QtCore import Qt
 
         item = eml._make_encap_item("(")
 
-        assert not (item.flags() & Qt.ItemFlag.ItemIsEditable)
+        assert item.flags() & Qt.ItemFlag.ItemIsEditable
+
+    def test_a_custom_bold_encap_renders_a_range_cell_bold_too(self):
+        """
+        The preference has to read through the marker: "(strong" is a
+        bold range, not a page style named "(strong". Comparing the whole
+        encap is what left every styled range rendered plain.
+        """
+        eml.set_encap_style_values(["strong"], None)
+
+        assert eml._make_encap_item("(strong").font().bold() is True
+        assert eml._make_encap_item(")strong").font().bold() is True
+
+    def test_a_bare_range_marker_carries_no_style(self):
+        item = eml._make_encap_item("(")
+
+        assert item.font().bold() is False
+        assert item.font().italic() is False

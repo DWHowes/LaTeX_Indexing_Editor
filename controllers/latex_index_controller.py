@@ -1,9 +1,9 @@
 from contextlib import contextmanager
-from dataclasses import replace
 
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QTextCursor
 
+from models import index_tag_grammar as grammar
 from models.latex_entry_model import IndexEntryModel
 from models.latex_entry_model import ReferenceCarrier
 from views.latex_index_window import LatexIndexWindow
@@ -118,32 +118,26 @@ class LatexIndexController(QObject):
                     assigned_id: int, close_id: int | None = None):
         cursor = editor.textCursor()
 
-        if close_id is not None and entry.page_style:
-            # A page style on a range would be written "|style|(", which is
-            # wrong twice: makeindex only reads "(" as a range marker at the
-            # *start* of an encap (the real form is "|(textbf"), and this
-            # application's own grammar splits at the last "|", so it reads
-            # the tag back as a heading literally containing "|textbf".
-            # Until an encap can carry both a range role and a command,
-            # dropping the style is the only outcome that is not silently
-            # corrupt -- and it is said out loud rather than done quietly.
-            self.view.statusMessageRequested.emit(
-                f"Page style dropped: a page range cannot carry one yet. "
-                f"Inserted as a plain range.",
-                6000,
-            )
-            entry = replace(entry, page_style=None)
-
         chain = entry.chain()
         doc = editor.document()
 
         if close_id is not None:
             # Range entry — two macros, two records, one logical entry in the views
             selected_text = cursor.selectedText()
-            start_format = f"|{entry.page_style}|(" if entry.page_style else "|("
-            end_format   = f"|{entry.page_style}|)" if entry.page_style else "|)"
-            start_tag = f"\\{entry.command_name}{{{chain}{start_format}}}"
-            end_tag   = f"\\{entry.command_name}{{{chain}{end_format}}}"
+
+            # "|(textbf" / "|)textbf" -- marker first, command after, which
+            # is the only form makeindex reads as a styled range. This used
+            # to be written "|textbf|(", wrong twice over: makeindex takes
+            # "(" as a marker only at the *start* of an encap, and this
+            # application's own grammar splits at the last "|", so it read
+            # its own output back as a heading literally containing
+            # "|textbf". An interim guard dropped the style and said so in
+            # the status bar; the grammar now carries both halves, so the
+            # style goes in.
+            open_encap  = grammar.build_range_encap("open", entry.page_style or "")
+            close_encap = grammar.build_range_encap("close", entry.page_style or "")
+            start_tag = grammar.build_macro(chain, open_encap, entry.command_name)
+            end_tag   = grammar.build_macro(chain, close_encap, entry.command_name)
 
             # Selection start/end, independent of drag direction. cursor.position()
             # returns the "moving" end of the selection (left-to-right drags land
@@ -183,6 +177,18 @@ class LatexIndexController(QObject):
             open_line = open_block.blockNumber() + 1
             open_col  = open_abs_start - open_block.position()
             open_dict = entry.metadata(assigned_id, path, open_line, open_col)
+            # IndexEntryModel.metadata knows only the page style -- it has
+            # no idea a range is being inserted -- so it reports the encap
+            # as "textbf"/"standard", missing the marker entirely. Every
+            # reader of the cached encap field (the entry table's Page
+            # column, the range consistency checker) then saw a freshly
+            # inserted range as two unrelated point references, and a
+            # table edit on the opener reassembled its heading without the
+            # "|(" and silently dissolved the range. Reloading the project
+            # healed it, because the parser reports the real encap; until
+            # then the two disagreed. Stated here, where the marker is
+            # known.
+            open_dict["encap"] = grammar.encap_or_standard(open_encap)
             open_dict["range_partner_id"] = close_id
             open_dict["is_range_closer"]  = False
             self._attach_span_coordinates(doc, open_dict, path, open_abs_start, open_abs_end)
@@ -193,6 +199,7 @@ class LatexIndexController(QObject):
             close_line = close_block.blockNumber() + 1
             close_col  = close_abs_start - close_block.position()
             close_dict = entry.metadata(close_id, path, close_line, close_col)
+            close_dict["encap"] = grammar.encap_or_standard(close_encap)
             close_dict["range_partner_id"] = assigned_id
             close_dict["is_range_closer"]  = True
             self._attach_span_coordinates(doc, close_dict, path, close_abs_start, close_abs_end)

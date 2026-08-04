@@ -349,11 +349,74 @@ class TestRangeRoles:
         assert grammar.range_role(")") == "close"
         assert grammar.is_range_closer(")") is True
 
-    @pytest.mark.parametrize("encap", ["bold", "", None, "standard", "see{X}", "(bold"])
+    @pytest.mark.parametrize("encap", ["bold", "", None, "standard", "see{X}"])
     def test_other_encaps_have_no_range_role(self, encap):
         assert grammar.range_role(encap) is None
         assert grammar.is_range_opener(encap) is False
         assert grammar.is_range_closer(encap) is False
+
+    @pytest.mark.parametrize("encap,role", [("(textbf", "open"), (")textbf", "close")])
+    def test_a_styled_range_is_still_a_range(self, encap, role):
+        """
+        The whole point of the marker-first form: "|(textbf" is a range
+        that happens to be bold, not a page style called "(textbf". This
+        used to be an exact == comparison against "(", so a hand-written
+        styled range in an imported project was read as two unrelated
+        point references.
+        """
+        assert grammar.range_role(encap) == role
+        assert grammar.is_range_opener(encap) is (role == "open")
+        assert grammar.is_range_closer(encap) is (role == "close")
+
+
+class TestSplitRangeEncap:
+    @pytest.mark.parametrize("encap,expected", [
+        ("(textbf", ("open", "textbf")),
+        (")textbf", ("close", "textbf")),
+        ("(", ("open", "")),
+        (")", ("close", "")),
+        ("textbf", (None, "textbf")),
+        ("", (None, "")),
+        (None, (None, "")),
+    ])
+    def test_splits(self, encap, expected):
+        assert grammar.split_range_encap(encap) == expected
+
+    def test_whitespace_between_marker_and_command_is_dropped(self):
+        assert grammar.split_range_encap("( textbf ") == ("open", "textbf")
+
+    @pytest.mark.parametrize("encap", ["(textbf", ")textbf", "(", ")", "textbf", ""])
+    def test_round_trips_through_build(self, encap):
+        assert grammar.build_range_encap(*grammar.split_range_encap(encap)) == encap
+
+    def test_a_cross_reference_is_reported_as_a_command(self):
+        """
+        Documented behaviour, not an oversight -- nothing in the marker
+        grammar distinguishes a see/seealso target, so callers that care
+        ask parse_encap_xref first.
+        """
+        assert grammar.split_range_encap("see{X}") == (None, "see{X}")
+
+
+class TestBuildRangeEncap:
+    @pytest.mark.parametrize("role,command,expected", [
+        ("open", "textbf", "(textbf"),
+        ("close", "textbf", ")textbf"),
+        ("open", "", "("),
+        ("close", "", ")"),
+        (None, "textbf", "textbf"),
+        (None, "", ""),
+    ])
+    def test_builds(self, role, command, expected):
+        assert grammar.build_range_encap(role, command) == expected
+
+    def test_command_defaults_to_none(self):
+        assert grammar.build_range_encap("open") == "("
+
+    def test_a_styled_range_serializes_into_a_whole_tag(self):
+        tag = grammar.IndexTag(("Main",), grammar.build_range_encap("open", "textbf"))
+        assert tag.to_macro() == r"\index{Main|(textbf}"
+        assert grammar.parse_macro(tag.to_macro()).range_role == "open"
 
 
 class TestMacroPattern:

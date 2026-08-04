@@ -99,6 +99,43 @@ def test_styled_point_inside_range_is_not_flagged():
     assert find_range_consistency_issues(records) == []
 
 
+def test_a_styled_range_is_recognised_as_a_range():
+    """
+    "(textbf"/")textbf" pairs like any other range. Before the encap
+    could carry a marker and a command at once, both halves landed in
+    the "points" bucket instead, so a styled range was reported as two
+    unrelated point references and never checked at all.
+    """
+    records = [
+        _entry(1, 10, "(textbf"),
+        _entry(2, 20, ")textbf"),
+    ]
+    assert find_range_consistency_issues(records) == []
+
+
+def test_a_styled_range_can_still_be_orphaned():
+    records = [_entry(1, 10, "(textbf")]
+    issues = find_range_consistency_issues(records)
+
+    assert len(issues) == 1
+    assert issues[0]["kind"] == "orphaned_opener"
+    assert issues[0]["entries"] == [1]
+
+
+def test_a_point_enclosed_by_a_styled_range_is_flagged():
+    """The style on the range does not change what it encloses."""
+    records = [
+        _entry(1, 10, "(textbf"),
+        _entry(2, 20, "standard"),
+        _entry(3, 30, ")textbf"),
+    ]
+    issues = find_range_consistency_issues(records)
+
+    assert len(issues) == 1
+    assert issues[0]["kind"] == "enclosed_point"
+    assert issues[0]["entries"] == [1, 3, 2]
+
+
 def test_cross_references_are_excluded_entirely():
     records = [
         _entry(1, 10, "see{Other}"),

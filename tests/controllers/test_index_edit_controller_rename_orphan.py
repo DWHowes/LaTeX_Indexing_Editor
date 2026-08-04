@@ -181,6 +181,83 @@ class TestProcessHeadingRename:
         assert headings_by_id[2] == "Renamed!Sub"
 
 
+class TestRenamePreservesTheEncap:
+    r"""
+    heading_raw_text never carries the "|encap" suffix on any load path
+    -- the parser splits it off before storing -- so rebuilding the macro
+    from it alone silently DELETED that suffix from the .tex file.
+    Renaming a heading turned "\index{Main|textbf}" into
+    "\index{Renamed}", losing the page style, and "\index{Main|(}" into
+    "\index{Renamed}", destroying the range along with it. Found while
+    teaching the encap to carry a range marker and a page style at once,
+    which the rename path would otherwise have thrown away on the next
+    edit.
+
+    The suffix is now read back off the macro actually on disk, the same
+    source _sync_range_partner trusts and for the same reason.
+    """
+
+    def test_a_page_style_survives(self, tmp_path, qtbot):
+        controller, item, _entry_model, _staging, file_path = _build_stack(
+            tmp_path, qtbot, r"Some text.\index{Main|textbf}", "Main"
+        )
+
+        controller._process_heading_rename(item, "Main", "Renamed")
+
+        assert r"\index{Renamed|textbf}" in open(file_path, encoding="utf-8").read()
+
+    def test_a_range_marker_survives(self, tmp_path, qtbot):
+        controller, item, _entry_model, _staging, file_path = _build_stack(
+            tmp_path, qtbot, r"Some text.\index{Main|(}", "Main"
+        )
+
+        controller._process_heading_rename(item, "Main", "Renamed")
+
+        assert r"\index{Renamed|(}" in open(file_path, encoding="utf-8").read()
+
+    def test_a_styled_range_marker_survives_whole(self, tmp_path, qtbot):
+        controller, item, _entry_model, _staging, file_path = _build_stack(
+            tmp_path, qtbot, r"Some text.\index{Main|(textbf}", "Main"
+        )
+
+        controller._process_heading_rename(item, "Main", "Renamed")
+
+        assert r"\index{Renamed|(textbf}" in open(file_path, encoding="utf-8").read()
+
+    def test_a_cross_reference_survives(self, tmp_path, qtbot):
+        controller, item, _entry_model, _staging, file_path = _build_stack(
+            tmp_path, qtbot, r"Some text.\index{Main|see{Other}}", "Main"
+        )
+
+        controller._process_heading_rename(item, "Main", "Renamed")
+
+        assert r"\index{Renamed|see{Other}}" in open(file_path, encoding="utf-8").read()
+
+    def test_an_entry_with_no_encap_gains_none(self, tmp_path, qtbot):
+        controller, item, _entry_model, _staging, file_path = _build_stack(
+            tmp_path, qtbot, r"Some text.\index{Main}", "Main"
+        )
+
+        controller._process_heading_rename(item, "Main", "Renamed")
+
+        assert open(file_path, encoding="utf-8").read() == r"Some text.\index{Renamed}"
+
+    def test_the_cached_heading_stays_encap_free(self, tmp_path, qtbot):
+        """
+        Only the written macro carries the suffix. heading_raw_text is
+        what heading resolution and tree reconciliation key on, and both
+        expect the bare heading chain.
+        """
+        controller, item, entry_model, _staging, _file_path = _build_stack(
+            tmp_path, qtbot, r"Some text.\index{Main|textbf}", "Main"
+        )
+        uid = list(entry_model._records.keys())[0]
+
+        controller._process_heading_rename(item, "Main", "Renamed")
+
+        assert entry_model.get_heading_text(uid) == "Renamed"
+
+
 class TestOrphanCleanupAfterDeletion:
     def _build_deletable_stack(self, tmp_path, qtbot):
         """

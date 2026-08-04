@@ -137,9 +137,32 @@ def set_encap_style_values(bold_values=None, italic_values=None) -> None:
         _ITALIC_ENCAP_VALUES = italic
 
 
+def _page_command(value: str) -> str:
+    r"""
+    The page-style command half of an encap, with any leading range
+    marker taken off: "textbf" for both "textbf" and "(textbf", "" for a
+    bare "(" or for no encap at all.
+
+    Everything in this column styles and edits *this* half. The marker is
+    structural -- it pairs the reference with its \index range partner --
+    and travels alongside untouched (see PageStyleDelegate.setModelData),
+    which is what lets one Standard/Bold/Italic combo serve range rows
+    and point rows alike.
+    """
+    return grammar.split_range_encap(grammar.encap_from_stored(value))[1]
+
+
 def _is_bold_encap(value: str) -> bool:
     """Return True if *value* denotes a bold page-number encap style."""
-    return value.strip().lower() in _BOLD_ENCAP_VALUES
+    return _page_command(value).lower() in _BOLD_ENCAP_VALUES
+
+
+def _apply_encap_font(item: QStandardItem, value: str) -> None:
+    """Renders the Page cell in bold/italic when its command half says so."""
+    font = item.font()
+    font.setBold(_is_bold_encap(value))
+    font.setItalic(_is_italic_encap(value))
+    item.setFont(font)
 
 
 def _make_encap_item(value: str) -> QStandardItem:
@@ -147,23 +170,18 @@ def _make_encap_item(value: str) -> QStandardItem:
     Build the Page/encap cell, rendering it in bold/italic when the encap
     calls for it.
 
-    Range markers ("(" / ")") are made non-editable here — see
-    _is_range_encap's docstring for why the Standard/Bold/Italic combo
-    can't be allowed to touch them.
+    Range rows used to be forced read-only here, because the combo could
+    neither represent nor preserve a "(" / ")" marker -- which also meant
+    a range's page style could not be set anywhere in the application.
+    The marker now rides along outside the combo's value, so the cell is
+    an ordinary editable one.
     """
     item = QStandardItem(value)
-    if _is_bold_encap(value):
-        font = item.font()
-        font.setBold(True)
-        item.setFont(font)
-    elif _is_italic_encap(value):
-        font = item.font()
-        font.setItalic(True)
-        item.setFont(font)
-    elif _is_range_encap(value):
-        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+    _apply_encap_font(item, value)
+    if _is_range_encap(value):
         item.setToolTip(
-            "Range opener/closer marker — structural, not an editable page style."
+            "Page style for this range. The range marker itself is "
+            "structural and is preserved whatever style you choose."
         )
     return item
 
@@ -173,28 +191,19 @@ _ITALIC_ENCAP_VALUES = frozenset(DEFAULT_ITALIC_ENCAP_VALUES)
 
 def _is_italic_encap(value: str) -> bool:
     """Return True if *value* denotes an italic page-number encap style."""
-    return value.strip().lower() in _ITALIC_ENCAP_VALUES
-
-
-_RANGE_ENCAP_VALUES = frozenset({"(", ")"})
+    return _page_command(value).lower() in _ITALIC_ENCAP_VALUES
 
 
 def _is_range_encap(value: str) -> bool:
     """
-    Return True if *value* is a range-opener/closer marker ("(" or ")")
-    rather than a page-style directive.
+    Return True if *value* opens or closes a page range -- i.e. starts
+    with a "(" or ")" marker, whether or not a page style follows it.
 
-    Range markers are not a Page/encap style choice — they're structural
-    (they pair this reference with its \\index range partner) and the
-    Standard/Bold/Italic combo has no way to represent or preserve them.
-    Cells holding one are kept read-only (see _make_encap_item and
-    _open_persistent_encap_editor) so a table edit — even one to a
-    completely different column on the same row, since the whole heading
-    is reassembled from the row's current values on every commit — can
-    never silently replace "|(" or "|)" with a Page-style value the combo
-    does understand.
+    Defers to the grammar rather than comparing against a local set of
+    literals, which is what made this view read "(textbf" as an ordinary
+    (and nonsensical) page-style command.
     """
-    return value.strip() in _RANGE_ENCAP_VALUES
+    return grammar.range_role(grammar.encap_from_stored(value)) is not None
 
 
 # (label, canonical value) — order defines combo box index order
@@ -237,6 +246,12 @@ class PageStyleDelegate(QStyledItemDelegate):
     text entry. Legacy on-disk aliases (e.g. "bf", "bold", "it") are
     recognised when populating the editor but always normalised to the
     canonical "textbf"/"textit" values on commit.
+
+    On a range row the combo reads and writes only the encap's *command*
+    half; the "(" / ")" marker is split off on the way in and re-attached
+    on the way out, so choosing Bold on a range opener produces "(textbf"
+    -- the form makeindex actually reads -- and choosing Standard puts it
+    back to a bare "(" rather than wiping the marker.
     """
 
     def createEditor(self, parent, option: QStyleOptionViewItem, index: QModelIndex) -> QComboBox:
@@ -257,6 +272,8 @@ class PageStyleDelegate(QStyledItemDelegate):
         elif _is_italic_encap(current):
             target_value = "textit"
         else:
+            # Covers a bare "(" / ")" as well as a plain entry: no command
+            # half means no page style, which is Standard either way.
             target_value = ""
 
         editor.blockSignals(True)
@@ -272,7 +289,14 @@ class PageStyleDelegate(QStyledItemDelegate):
 
     def setModelData(self, editor: QComboBox, model, index: QModelIndex) -> None:
         _label, value = _PAGE_STYLE_OPTIONS[editor.currentIndex()]
-        model.setData(index, value, Qt.ItemDataRole.EditRole)
+        # Re-attach whatever range marker this cell already carried. Read
+        # from the model rather than remembered from setEditorData: a
+        # persistent editor outlives any number of repopulations of the
+        # row beneath it, so the marker has to come from the cell's
+        # current value, not from whenever the editor was last loaded.
+        current = str(index.data(Qt.ItemDataRole.EditRole) or "")
+        role = grammar.range_role(grammar.encap_from_stored(current))
+        model.setData(index, grammar.build_range_encap(role, value), Qt.ItemDataRole.EditRole)
 
     def updateEditorGeometry(self, editor: QComboBox, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         editor.setGeometry(option.rect)
@@ -455,10 +479,7 @@ class EntryModifierList(QWidget):
             encap_item = self.base_model.item(row, COL_ENCAP)
             if encap_item is not None:
                 encap_item.setText(new_fields["encap"])
-                font = encap_item.font()
-                font.setBold(_is_bold_encap(new_fields["encap"]))
-                font.setItalic(_is_italic_encap(new_fields["encap"]))
-                encap_item.setFont(font)
+                _apply_encap_font(encap_item, new_fields["encap"])
         finally:
             self.base_model.dataChanged.connect(self._on_cell_data_changed)
 
@@ -560,18 +581,15 @@ class EntryModifierList(QWidget):
 
     def _open_persistent_encap_editor(self, source_row: int) -> None:
         """
-        Open a persistent PageStyleDelegate combo box for one row's Page/encap
-        cell — unless that cell holds a range opener/closer marker. Qt's
-        openPersistentEditor opens the editor unconditionally, ignoring item
-        edit flags, so _make_encap_item's non-editable flag alone can't stop
-        this; the check has to happen here too, or a range row would still
-        get a Standard/Bold/Italic combo overlaid on top of "(" / ")" that
-        the user could click and use to clobber it.
-        """
-        source_item = self.base_model.item(source_row, COL_ENCAP)
-        if source_item and _is_range_encap(source_item.text()):
-            return
+        Open a persistent PageStyleDelegate combo box for one row's
+        Page/encap cell.
 
+        Range rows used to be skipped here, because the combo could only
+        have clobbered the "(" / ")" marker it had no way to represent.
+        The delegate now splits the marker off and re-attaches it around
+        the style, so every row gets an editor and a range's page style
+        is settable like any other.
+        """
         proxy_index = self.proxy_model.mapFromSource(
             self.base_model.index(source_row, COL_ENCAP)
         )
@@ -854,10 +872,7 @@ class EntryModifierList(QWidget):
         # Keep bold/italic styling in sync with edits to the Page/encap cell.
         encap_item = row_items[COL_ENCAP]
         if col == COL_ENCAP and encap_item:
-            font = encap_item.font()
-            font.setBold(_is_bold_encap(encap_item.text()))
-            font.setItalic(_is_italic_encap(encap_item.text()))
-            encap_item.setFont(font)
+            _apply_encap_font(encap_item, encap_item.text())
 
         fields = _fields_from_row_items(row_items)
         error = self._validate_hierarchy(fields)
