@@ -50,12 +50,12 @@ because they carry most of this layer's weight and most of its history.
 Each subsection is named for the module under test, whose tests usually live
 in the correspondingly named `tests/unit/models/test_<module>.py`, so
 individual filenames are only cited below when a specific test is being
-pointed at. Three files break that mapping deliberately, because they cover
+pointed at. Four files break that mapping deliberately, because they cover
 one behaviour rather than a whole module, and each is named for the behaviour:
-`test_heading_id_allocation.py`, `test_session_logger_folder.py` and
-`test_encap_style_values.py` (whose subject lives in `views/`, not `models/`,
-but is pure logic and belongs to this layer). Their subsections name them
-explicitly.
+`test_heading_id_allocation.py`, `test_session_logger_folder.py`,
+`test_encap_style_values.py` and `test_page_style_delegate.py` (the last two
+have their subject in `views/`, not `models/`, but are pure logic and belong
+to this layer). Their subsections name them explicitly.
 
 ### `index_tag_grammar.py`
 
@@ -91,6 +91,27 @@ of `EntryModifierController._assemble_canonical_heading` and the likeliest
 pair to drift into another round-trip corruption; and
 `IndexEditController._substitute_token_in_heading` silently dropped a
 trailing `!` and used `.split("@")[0]`, which returns `"a{b"` for `a{b@c}d`.
+
+**A range marker and a page style in one encap.** `makeindex` writes a styled
+range marker-first — `|(textbf` … `|)textbf` — so the encap is two independent
+halves, not one value. `range_role` used to be `encap == "("`, an exact
+comparison, which read a styled range as a plain entry whose page style was the
+nonsense command `(textbf`. `TestSplitRangeEncap`/`TestBuildRangeEncap` cover
+the `split_range_encap`/`build_range_encap` pair that replaced it, including
+the round-trip property (`build(*split(x)) == x`) that lets a caller re-style
+an encap without knowing whether it is a range, and the documented case where
+a `see{X}` encap is reported as a command — nothing in the *marker* grammar
+distinguishes a cross-reference, so callers that care ask `parse_encap_xref`
+first. `TestRangeRoles` keeps the bare `(`/`)` cases and adds the styled ones.
+
+Because `ProjectLoadWorker` and `range_consistency_model` already asked the
+grammar rather than comparing encaps themselves, both started handling styled
+ranges the moment this changed — covered where they live, in
+`test_project_load_worker.py` (see [Layer 2](#layer-2-persistence)) and
+`test_range_consistency_model.py`, not duplicated here. The one site that had
+its *own* copy of the rule, `EntryModifierList._is_range_encap`, was folded
+into the grammar; see [`entry_modifier_list.py` page-style
+delegate](#entry_modifier_listpy-page-style-delegate).
 
 ### `index_command_stack.py`
 
@@ -182,8 +203,7 @@ the other process-wide state this suite has to put back.
 
 ### `entry_modifier_list.py` encap style values
 
-`test_encap_style_values.py` is the one file in this layer whose name is not
-its module's: it covers a single free function,
+`test_encap_style_values.py` covers a single free function,
 `views.entry_modifier_list.set_encap_style_values`, rather than a whole
 module. The bold/italic encap name lists behind the Entry Table's Page column
 became a user preference (Preferences → General) because a project styling its
@@ -192,6 +212,35 @@ page numbers with its own macro silently got a plain, mis-styled cell for it.
 The lists are module-level state read while building every table row, so each
 test restores the defaults afterwards; a leaked value changes how an unrelated
 test renders.
+
+The comparison has to read *through* a range marker: `(strong` is a bold range,
+not a page style named `(strong`, so a custom name has to be recognised on a
+range row too. Range cells were also forced non-editable here until the marker
+and the style could coexist; that assertion is now inverted, and the reason
+lives under [`entry_modifier_list.py` page-style
+delegate](#entry_modifier_listpy-page-style-delegate).
+
+### `entry_modifier_list.py` page-style delegate
+
+`test_page_style_delegate.py` covers `PageStyleDelegate`, the
+Standard/Bold/Italic combo behind the Page column, and specifically what it
+does on a **range row**.
+
+Range rows were read-only, because the combo could neither represent nor
+preserve a `(` / `)` marker — which also meant a page range's style could not
+be set anywhere in the application at all. The delegate now splits the marker
+off in `setEditorData` and re-attaches it in `setModelData`, so the combo edits
+only the command half. The case worth keeping pinned is **Standard**: it must
+leave a bare `(` behind rather than an empty encap, since an empty one would
+dissolve the range on the next commit (the row's whole heading is reassembled
+from its current values every time any cell is committed).
+
+The delegate is driven through a real `QStandardItemModel`, not a stubbed
+index, because `setModelData` recovers the marker by reading the cell's
+*current* value back out of the model — a persistent editor outlives any
+number of repopulations of the row beneath it, so remembering the marker from
+`setEditorData` would be wrong. A fake index that doesn't actually hold the
+previous value would test nothing.
 
 ### `rtf_export_model.py`
 
@@ -259,6 +308,16 @@ Split by concern rather than by class: `test_schema_and_setup.py`,
 `test_metadata_and_commands.py`, `test_index_manifest.py`,
 `test_statistics_and_queries.py`, `test_cross_references.py`,
 `test_sync_checksums.py`, and `test_project_load_worker.py`.
+
+`test_project_load_worker.py` also pins that a **styled** range written by
+hand — `\index{term|(textbf}` … `\index{term|)textbf}`, valid `makeindex` that
+turns up in imported source — pairs into one range with its style intact,
+rather than falling through as two unrelated point references. Those two tests
+write their own `.tex` file into the per-test copy of the fixture project
+instead of adding a styled range to the checked-in fixture, so nothing else
+that counts entries in [the fixture project](#fixture-project) shifts underneath
+it. The pairing itself needed no change here; see [`index_tag_grammar.py`](#index_tag_grammarpy)
+for why.
 
 ---
 
@@ -337,8 +396,24 @@ real files under `tmp_path` and real `EditorTab`/`QTabWidget` instances (same
 - **Rename and orphan cleanup** — `test_index_edit_controller_rename_orphan.py`,
   driving a real `IndexTreeView` + `EntryModifierModel` +
   `DocumentIOController` stack through a real `.tex` rewrite, not stubbed.
+  `TestRenamePreservesTheEncap` pins that a rename keeps the `|encap` suffix —
+  page style, range marker and `see` pointer alike — and that the *cached*
+  `heading_raw_text` stays encap-free while the written macro carries it. See
+  [A cached copy that doesn't hold everything the macro
+  does](#a-cached-copy-that-doesnt-hold-everything-the-macro-does).
 - **Table-originated edits** — `handle_entry_table_edit`/
-  `_reconcile_heading_node`, including range-partner heading sync; see
+  `_reconcile_heading_node`, including range-partner heading sync and
+  `TestStyledRangePartnerSync`, which covers the *style* half of that sync: the
+  entry table only ever lists a range's opener, so a page style set there has
+  to carry to the closer, while the closer keeps its own `)` marker. Verified
+  against real `makeindex` 2.17 first, and it corrected the assumption the code
+  was written on — a mismatched pair is a **warning, not an error**: the
+  *opening* encapsulator always wins, and only a closer carrying a *different
+  non-empty* command draws "Range closing operator has an inconsistent
+  encapsulator" in the `.ilg`. `(textbf` + `)` is accepted silently. The sync
+  is still right (a file whose halves disagree is one whose style depends on
+  which half was edited last), but the docstring claiming makeindex *requires*
+  a match was wrong and is fixed. See
   `test_index_edit_controller_table_edit.py`. This file needs the real
   `IndexTreeModelEngine` rather than a bare `_active_headings`-only fake,
   because `_reconcile_heading_node` re-attaches entries via
@@ -353,12 +428,14 @@ real files under `tmp_path` and real `EditorTab`/`QTabWidget` instances (same
 - **Session-discard rollback** — `discard_uncommitted_entry`,
   `discard_dirty_edits`; see `test_index_edit_controller_discard.py`.
 
-Two real, pre-existing bugs surfaced while writing this coverage.
+Three real, pre-existing bugs surfaced while writing this coverage.
 `IndexTreeView.__init__` never initialized `_suppress_transaction_compilation`
 (it was only ever assigned inside `populate_hierarchy_tree`), so any code path
 reaching `append_entry` before that method's first run crashed with
 `AttributeError`. The second is described under
-[Ancestor pruning that ignores a node's own references](#ancestor-pruning-that-ignores-a-nodes-own-references).
+[Ancestor pruning that ignores a node's own references](#ancestor-pruning-that-ignores-a-nodes-own-references),
+the third under [A cached copy that doesn't hold everything the macro
+does](#a-cached-copy-that-doesnt-hold-everything-the-macro-does).
 
 ### `EntryModifierController` and `EntryModifierModel`
 
@@ -525,6 +602,16 @@ range-pair macro insertion, page-style/`encap` variants, custom command
 names, byte-offset math, and the abort paths for an empty main field, an
 unsaved/Untitled document, and no active editor tab. See
 `test_latex_index_controller_insert.py`.
+
+`TestStyledRange` replaced a `TestStyledRangeIsRefused` that pinned an interim
+guard: a page style on a range used to be written `|textbf|(`, wrong twice
+over, so the style was dropped and the status bar said so. Both halves are now
+written marker-first (`|(textbf` / `|)textbf`) and nothing is reported. It also
+covers what the emitted **records** carry, which is where the second bug listed
+under [A cached copy that doesn't hold everything the macro
+does](#a-cached-copy-that-doesnt-hold-everything-the-macro-does) was hiding —
+easy to miss, because the written `.tex` was correct and only the cached
+`encap` was wrong.
 
 ### Help and About
 
@@ -855,6 +942,41 @@ will silently delete a parent that is still real. Found twice:
    unrelated `\index` reference) silently deleted that ancestor the instant
    its only child, the just-undone insertion, was removed. Fixed via a new
    `_node_has_own_refs` helper on `IndexTreeView`.
+
+### A cached copy that doesn't hold everything the macro does
+
+`heading_raw_text` caches an entry's heading chain, and the cached `encap`
+field caches its `|` suffix. Neither is the macro. Rebuilding a macro from one
+of them writes back only what that field happened to hold, and whatever the
+field never carried is silently deleted from the user's `.tex` file. This is
+the same shape as the "two sites disagreeing about one tag" family that
+[`index_tag_grammar.py`](#index_tag_grammarpy) exists to prevent, one level
+up — the disagreement is between a field and the source it was derived from.
+Found twice, both while teaching the encap to carry a range marker and a page
+style at once, and both fixed:
+
+1. **A tree rename deleted the whole `|encap` suffix.** `heading_raw_text`
+   never carries it on any load path — the parser splits it off before storing
+   — so `IndexEditController._rewrite_single_reference` rebuilt
+   `\index{Main|textbf}` as `\index{Renamed}`, and `\index{Main|(}` as
+   `\index{Renamed}`, destroying the range. Page styles, range markers and
+   `see` pointers all affected. Fixed by `_reattach_encap`, which reads the
+   suffix off the macro actually on disk — the same source `_sync_range_partner`
+   already trusted, and for the same reason. Note the asymmetry the fix
+   preserves: only the *written macro* carries the suffix, because heading
+   resolution and tree reconciliation key on the bare chain.
+2. **A freshly inserted range cached the wrong `encap`.**
+   `IndexEntryModel.metadata()` reports only the page style; it has no idea a
+   range is being inserted, so both halves of a new range came back
+   `"standard"`. Every reader of the cached field (the Page column, the range
+   consistency checker) saw two unrelated point references until the project
+   was reloaded and the parser reported the real encap. Fixed in
+   `insert_latex`, where the marker is known.
+
+The first was confirmed with a throwaway probe test against the real stack
+*before* being fixed, rather than reasoned about from the code — worth
+repeating for anything in this family, because both bugs are invisible from
+the outside until a second edit lands on the damaged macro.
 
 ### Cached coordinates going stale after a write
 
