@@ -112,6 +112,17 @@ class TestTheSuggestion:
         window.main_entry.setText(r"HMS \textit{Titanic}")
         assert window.sort_entries[MAIN].text() == "HMS Titanic"
 
+    def test_an_unformatted_level_suggests_nothing(self, window):
+        """
+        Echoing the display text back would look like a value that has to
+        be there, and means the same as leaving it empty anyway.
+        """
+        window.show_sort_keys.setChecked(True)
+        window.main_entry.setText("St. John")
+
+        assert window.sort_entries[MAIN].text() == ""
+        window.show_sort_keys.setChecked(False)
+
     def test_typing_in_it_takes_ownership(self, qtbot, window):
         window.main_entry.setText(r"RMS \textit{Titanic}")
 

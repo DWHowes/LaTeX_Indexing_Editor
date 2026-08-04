@@ -147,7 +147,15 @@ class SortKeyLineEdit(QLineEdit):
         """Re-derives the suggestion, unless the indexer has taken over."""
         if self.is_user_owned:
             return
+
         suggestion = grammar.suggested_sort_key(display_text)
+        # Nothing to read through means nothing to suggest: echoing the
+        # display text back into the field would only look like a value
+        # that has to be there. Left empty, the placeholder says what the
+        # field is for and an empty field already means "file under the
+        # display text".
+        if suggestion == (display_text or "").strip():
+            suggestion = ""
         if suggestion != self.text():
             self.setText(suggestion)
 
