@@ -34,6 +34,26 @@ This is the same split the entry table has always shown as its paired Display an
 Sort columns, and both now follow one rule — so the entry table is also where you
 correct an entry created back when the key was invented for you.
 
+### Bold and italic page numbers now compile
+
+The **Page Ref** buttons wrote `|bold` and `|italic` into your source. Neither is a
+LaTeX command: `makeindex` wraps the page number in whatever name follows the `|`,
+so a styled entry became `\bold{12}` in the compiled index and stopped the document
+with *Undefined control sequence*. It also cost you the styling in an RTF export,
+which only recognises the real commands.
+
+They now write **`|textbf`** and **`|textit`**, which is what the entry table has
+always written. Entries already in your files are unaffected — `bold`, `bf`, `it`
+and the rest are still read as page styles, and **Preferences → General** still
+decides which names count.
+
+**A page range cannot carry a page style for the moment.** Selecting text and
+choosing Bold or Italic used to write `|bold|(`, which is not a range at all as far
+as `makeindex` is concerned, and which this editor read back as a heading with a
+`|` in it. The style is now dropped, the range goes in plain, and the status bar
+says so. Supporting `|(textbf` properly means teaching the whole application that an
+encap can carry a range marker *and* a command, which is a change of its own.
+
 ### Reopening a recent project
 
 **File → Open Recent** lists the projects you've opened before, most recent first,

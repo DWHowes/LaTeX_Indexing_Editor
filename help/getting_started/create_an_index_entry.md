@@ -47,7 +47,9 @@ The buttons act on heading text only, never on a sort key: they grey out while a
 
 ## Page Ref
 
-**Plain** / **Bold Page** / **Italic Page** — how this entry's page number itself should be styled in the printed index (Plain is the default). This is the "page style" mentioned in [Range References](../index_tree/range_references.md) and [Inserting Entries](../index_tree/inserting_entries.md); it applies to the whole entry, not a fragment of text the way Text Style does.
+**Plain** / **Bold Page** / **Italic Page** — how this entry's page number itself should be styled in the printed index (Plain is the default). This is the "page style" mentioned in [Range References](../index_tree/range_references.md) and [Inserting Entries](../index_tree/inserting_entries.md); it applies to the whole entry, not a fragment of text the way Text Style does. Bold and Italic write `|textbf` and `|textit` — real LaTeX commands, so the compiled index has something to call.
+
+> **A page range cannot carry a page style yet.** If text is selected when you insert, the style is dropped and the range goes in plain, with a note in the status bar. `makeindex` writes a styled range as `|(textbf`, a form this editor does not yet read back correctly, so writing one would produce an entry it could not then edit.
 
 ## Insert Index Tag
 

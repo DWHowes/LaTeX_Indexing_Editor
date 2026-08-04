@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from dataclasses import replace
 
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QTextCursor
@@ -113,9 +114,26 @@ class LatexIndexController(QObject):
 
         self.insert_latex(editor, entry, path, assigned_idn, close_idn)
 
-    def insert_latex(self, editor, entry: IndexEntryModel, path: str, 
+    def insert_latex(self, editor, entry: IndexEntryModel, path: str,
                     assigned_id: int, close_id: int | None = None):
         cursor = editor.textCursor()
+
+        if close_id is not None and entry.page_style:
+            # A page style on a range would be written "|style|(", which is
+            # wrong twice: makeindex only reads "(" as a range marker at the
+            # *start* of an encap (the real form is "|(textbf"), and this
+            # application's own grammar splits at the last "|", so it reads
+            # the tag back as a heading literally containing "|textbf".
+            # Until an encap can carry both a range role and a command,
+            # dropping the style is the only outcome that is not silently
+            # corrupt -- and it is said out loud rather than done quietly.
+            self.view.statusMessageRequested.emit(
+                f"Page style dropped: a page range cannot carry one yet. "
+                f"Inserted as a plain range.",
+                6000,
+            )
+            entry = replace(entry, page_style=None)
+
         chain = entry.chain()
         doc = editor.document()
 

@@ -576,13 +576,28 @@ class LatexIndexWindow(QDockWidget):
         field.setText(new_text)
         field.setFocus()
 
+    #: What the Page Ref radios write as the encap. These are real LaTeX
+    #: commands: makeindex wraps the page number in whatever name follows
+    #: the "|", so an encap of "bold" makes the compiled index call an
+    #: undefined \bold and the document stops with a TeX error. "bold" and
+    #: "italic" remain *readable* -- they are among the aliases the entry
+    #: table and Preferences -> General recognise -- but nothing writes
+    #: them any more. PageStyleDelegate has always written these two.
+    PAGE_STYLE_BOLD = "textbf"
+    PAGE_STYLE_ITALIC = "textit"
+
     def get_entry_data(self):
         main_sort, sub1_sort, sub2_sort = self.get_sort_keys()
+        page_style = None
+        if self.bold_ref.isChecked():
+            page_style = self.PAGE_STYLE_BOLD
+        elif self.italic_ref.isChecked():
+            page_style = self.PAGE_STYLE_ITALIC
         return {
             "main": self.main_entry.text(),
             "sub1": self.sub1_entry.text(),
             "sub2": self.sub2_entry.text(),
-            "page_style": "bold" if self.bold_ref.isChecked() else "italic" if self.italic_ref.isChecked() else None,
+            "page_style": page_style,
             "command_name": self.command_selector.currentText(),
             "main_sort": main_sort,
             "sub1_sort": sub1_sort,

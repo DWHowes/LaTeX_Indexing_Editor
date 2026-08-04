@@ -163,9 +163,15 @@ class TestMetadata:
         }
 
     def test_page_style_becomes_the_encap_value(self):
-        entry = IndexEntryModel(main="Main", page_style="bold")
+        """
+        Passed straight through: the window chooses the command name (see
+        LatexIndexWindow.PAGE_STYLE_BOLD), and this model does not second-
+        guess it -- a project with its own page-style command is entitled
+        to name it.
+        """
+        entry = IndexEntryModel(main="Main", page_style="textbf")
         meta = entry.metadata(assigned_id=1, path="a.tex", line=1, col=0)
-        assert meta["encap"] == "bold"
+        assert meta["encap"] == "textbf"
 
     def test_custom_command_name_is_carried_through(self):
         entry = IndexEntryModel(main="Main", command_name="isidx")

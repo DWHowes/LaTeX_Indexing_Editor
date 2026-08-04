@@ -284,25 +284,31 @@ class TestStandardInsert:
         assert view.sub1_entry.text() == ""
         assert view.sub1_entry.isVisible() is False
 
-    def test_bold_page_style_produces_pipe_bold_suffix_and_encap(self, tmp_path, qtbot):
+    def test_bold_page_style_writes_a_real_latex_command(self, tmp_path, qtbot):
+        r"""
+        The encap is the command makeindex wraps the page number in, so it
+        has to exist: "|bold" compiles to \bold{12} and stops the document
+        with an undefined control sequence. The entry table has always
+        written textbf; this is the window agreeing with it.
+        """
         controller, view, editor, recorder = _build_stack(tmp_path, qtbot, "Hello world")
         _place_cursor(editor, 5)
         _fill_entry(view, main="Main", page_style="bold")
 
         controller.handle_insert()
 
-        assert editor.toPlainText() == r"Hello\index{Main|bold} world"
-        assert recorder.calls[0][1]["encap"] == "bold"
+        assert editor.toPlainText() == r"Hello\index{Main|textbf} world"
+        assert recorder.calls[0][1]["encap"] == "textbf"
 
-    def test_italic_page_style_produces_pipe_italic_suffix_and_encap(self, tmp_path, qtbot):
+    def test_italic_page_style_writes_a_real_latex_command(self, tmp_path, qtbot):
         controller, view, editor, recorder = _build_stack(tmp_path, qtbot, "Hello world")
         _place_cursor(editor, 5)
         _fill_entry(view, main="Main", page_style="italic")
 
         controller.handle_insert()
 
-        assert editor.toPlainText() == r"Hello\index{Main|italic} world"
-        assert recorder.calls[0][1]["encap"] == "italic"
+        assert editor.toPlainText() == r"Hello\index{Main|textit} world"
+        assert recorder.calls[0][1]["encap"] == "textit"
 
     def test_three_level_chain_uses_bang_separators(self, tmp_path, qtbot):
         controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")
@@ -322,6 +328,73 @@ class TestStandardInsert:
 
         assert editor.toPlainText() == r"Hello\isidx{Main} world"
         assert recorder.calls[0][1]["command_name"] == "isidx"
+
+
+class TestStyledRangeIsRefused:
+    r"""
+    A page style on a range used to be written as "|style|(", which is not
+    a range to makeindex (it reads "(" as a marker only at the *start* of
+    an encap -- the real form is "|(textbf") and not a heading to this
+    application either: grammar.split_encap cuts at the last "|", so the
+    tag came back as a heading literally containing "|textbf".
+
+    Until an encap can carry a range role and a command at once, the style
+    is dropped and the range goes in plain, with the status bar saying so.
+    """
+
+    def test_the_range_is_written_without_the_style(self, tmp_path, qtbot):
+        controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")
+        _select(editor, 6, 11)
+        _fill_entry(view, main="Main", page_style="bold")
+
+        controller.handle_insert()
+
+        assert editor.toPlainText() == r"Hello \index{Main|(}world\index{Main|)}"
+
+    def test_dropping_it_is_reported(self, tmp_path, qtbot):
+        controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")
+        _select(editor, 6, 11)
+        messages = []
+        view.statusMessageRequested.connect(lambda text, timeout: messages.append(text))
+        _fill_entry(view, main="Main", page_style="italic")
+
+        controller.handle_insert()
+
+        assert len(messages) == 1
+        assert "Page style dropped" in messages[0]
+
+    def test_the_records_carry_no_style_either(self, tmp_path, qtbot):
+        controller, view, editor, recorder = _build_stack(tmp_path, qtbot, "Hello world")
+        _select(editor, 6, 11)
+        _fill_entry(view, main="Main", page_style="bold")
+
+        controller.handle_insert()
+
+        assert [call[1]["encap"] for call in recorder.calls] == ["standard", "standard"]
+
+    def test_a_plain_range_is_not_reported(self, tmp_path, qtbot):
+        controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")
+        _select(editor, 6, 11)
+        messages = []
+        view.statusMessageRequested.connect(lambda text, timeout: messages.append(text))
+        _fill_entry(view, main="Main")
+
+        controller.handle_insert()
+
+        assert messages == []
+
+    def test_a_styled_point_reference_is_untouched(self, tmp_path, qtbot):
+        """The guard is about ranges only."""
+        controller, view, editor, _recorder = _build_stack(tmp_path, qtbot, "Hello world")
+        _place_cursor(editor, 5)
+        messages = []
+        view.statusMessageRequested.connect(lambda text, timeout: messages.append(text))
+        _fill_entry(view, main="Main", page_style="bold")
+
+        controller.handle_insert()
+
+        assert editor.toPlainText() == r"Hello\index{Main|textbf} world"
+        assert messages == []
 
 
 class TestRangeInsert:
