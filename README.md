@@ -124,3 +124,7 @@ You might also occasionally see `xfailed` in the summary line (for example: `362
 ### Learning more / adding your own tests
 
 If you're extending the app and want to understand how the test suite is organized, or add tests of your own for something new you've built, see [`tests/README.md`](tests/README.md) — it goes into the architecture, conventions, and reasoning in more depth than is needed just to run the suite.
+
+## Building a release
+
+See [`PACKAGING.md`](PACKAGING.md) — the full procedure from version bump to published GitHub release, including how to verify the installer before it goes anywhere.
