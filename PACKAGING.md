@@ -176,11 +176,19 @@ created or confirmed from the command line.
 4. Title: the same version.
 5. Body: paste that version's section from `CHANGELOG.md`.
 6. Attach `dist_installer\LatexIndexingEditor-Setup-<version>.exe`.
-7. Tick **Set as a pre-release**. Alpha builds are pre-releases — which is also why
-   `README.md` links to the specific tag and not to `/latest/`, since the
+7. Tick **Set as a pre-release**. Easy to miss — it was missed on 0.3.0-alpha and had
+   to be fixed afterwards. Alpha builds are pre-releases, which is also why
+   `README.md` links to the specific tag and not to `/latest/`: the
    `/releases/latest/` shortcut skips pre-releases entirely.
-8. Publish, then click the download link in `README.md` and confirm it downloads the
-   file rather than 404ing.
+8. Publish, then check both of these on the
+   [releases list](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases):
+   - the new release carries a **Pre-release** badge, not **Latest**;
+   - the download link in `README.md` downloads the file rather than 404ing.
+
+If the pre-release flag was missed, it can be fixed at any time: open the release,
+click the pencil icon, tick the box, **Update release**. Editing a release leaves the
+tag, the attached assets and their download URLs untouched, so nothing has to be
+re-uploaded and no link breaks.
 
 ---
 
