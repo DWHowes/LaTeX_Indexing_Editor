@@ -143,6 +143,16 @@ class Finding:
 def _separator_message(char: str, *, inside_braces: bool, role: str) -> str:
     what = _SEPARATORS[char]
 
+    # Phrased "prefix it with a quote mark" rather than shown as a quoted
+    # string, because the fix *is* a quote character: the obvious
+    # rendering comes out as ""@", three quote marks in a row, and reads
+    # as a typo rather than as an instruction.
+    def _prefix_advice(meaning: str) -> str:
+        return (
+            f"Prefix it with a quote mark ({QUOTE_CHAR}{char}) to mean "
+            f"{meaning}."
+        )
+
     if inside_braces:
         # The one place where this application and makeindex genuinely
         # disagree. The app's grammar is brace-aware -- a "|" inside {}
@@ -154,31 +164,28 @@ def _separator_message(char: str, *, inside_braces: bool, role: str) -> str:
         return (
             f'"{char}" inside braces still reads as the {what} separator to '
             f"makeindex, even though this application reads it as text -- the "
-            f'two disagree about this entry. Write "{QUOTE_CHAR}{char}" to '
-            f"mean the character itself."
+            f"two disagree about this entry. " + _prefix_advice("the character itself")
         )
 
     if char == "!":
         return (
             '"!" separates one heading level from the next, so this entry will '
-            f'come out as two levels. Write "{QUOTE_CHAR}!" to mean an '
-            "exclamation mark."
+            "come out as two levels. " + _prefix_advice("an exclamation mark")
         )
     if char == "|":
         return (
             '"|" introduces the page-style command, so everything after it will '
-            f'be taken as a style name rather than as text. Write "{QUOTE_CHAR}|" '
-            "to mean a vertical bar."
+            "be taken as a style name rather than as text. "
+            + _prefix_advice("a vertical bar")
         )
     if role == ROLE_SORT:
         return (
             '"@" separates a sort key from its display text, so this key will be '
-            f'split again. Write "{QUOTE_CHAR}@" to mean an at-sign.'
+            "split again. " + _prefix_advice("an at-sign")
         )
     return (
         '"@" separates a sort key from its display text: everything before it '
-        "becomes the sort key and is not printed. Write "
-        f'"{QUOTE_CHAR}@" to mean an at-sign.'
+        "becomes the sort key and is not printed. " + _prefix_advice("an at-sign")
     )
 
 
@@ -294,7 +301,7 @@ def check(text: str, *, role: str = ROLE_DISPLAY) -> list[Finding]:
                 'A bare \'"\' is makeindex\'s escape character. It eats the '
                 "character after it, and can make makeindex drop the entry "
                 "entirely -- missing from the index, with only a line in the "
-                ".ilg log to say so. Write '\"\"' for a quotation mark.",
+                ".ilg log to say so. Write two of them for a quotation mark.",
                 QUOTE_CHAR * 2,
             ))
             idx += 1

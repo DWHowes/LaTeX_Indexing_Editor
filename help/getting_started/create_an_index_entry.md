@@ -51,6 +51,22 @@ The buttons act on heading text only, never on a sort key: they grey out while a
 
 > Cross-references ("see"/"see also" pointers) are created separately, in the **Cross-References** tab of Edit Entries — not from this window. See [Cross-References](../index_tree/cross_references.md).
 
+## Warning icons
+
+All six fields — the three heading levels and their three **Sort as** fields — are checked as you type. An icon at the right-hand end of a field means its text contains a character that LaTeX or `makeindex` will read as something other than what you meant. Hover it for one line per problem.
+
+A **triangle** means real trouble: the document won't build, or the entry is silently lost or truncated. The one worth knowing about is a bare `%`, which starts a LaTeX comment — `\index{Profit % margin}` compiles with no warning anywhere, and the printed index shows just *Profit*, with no page number. Bare `&`, `#`, `_`, `^` and unpaired `$` stop the build on the *second* pass, when the index is read back in, so the error points into a generated file rather than at anything you wrote.
+
+An **information icon** means it will build but won't say what you typed: `!`, `@` and `|` are `makeindex`'s grammar, so `Bang! Goes` becomes two heading levels, `user@host` files under *user*, and `a|b` treats *b* as a page-style command.
+
+**Click the icon to correct the whole field at once.** One click fixes every character in it — three stray ampersands in a heading are one decision, not three. `%` `&` `#` `_` `^` `$` get a backslash; `!` `@` `|` get `makeindex`'s quote mark (`Bang"! Goes` prints as *Bang! Goes*); a quotation mark is doubled. **Ctrl+Z in the field puts it back** if the correction wasn't what you wanted.
+
+Some findings have no mechanical fix — an unmatched brace, or a trailing backslash, need you to say what you meant. The icon still appears, greyed, with the explanation in its tooltip.
+
+**Nothing here blocks anything.** The entry inserts either way; this is advice, not a gate. The same checks appear as icons in the [entry table](../entry_table/editing.md), so an entry gets the same reading whether you create it or edit it later.
+
+> The `~` character is deliberately left alone: it's a non-breaking space, and a perfectly ordinary thing to want in an index entry.
+
 ## Page Ref
 
 **Plain** / **Bold Page** / **Italic Page** — how this entry's page number itself should be styled in the printed index (Plain is the default). This is the "page style" mentioned in [Range References](../index_tree/range_references.md) and [Inserting Entries](../index_tree/inserting_entries.md); it applies to the whole entry, not a fragment of text the way Text Style does. Bold and Italic write `|textbf` and `|textit` — real LaTeX commands, so the compiled index has something to call.

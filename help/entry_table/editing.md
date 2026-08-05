@@ -20,6 +20,16 @@ Click into a cell and type to change it. An edit here rewrites the corresponding
 
 The rewrite goes into the open tab's buffer (or straight to the file, if that file isn't open in a tab); the project database is updated when you [save](../getting_started/saving_and_closing.md).
 
+## Warning icons
+
+A small icon beside a Display or Sort value means the text in that cell contains a character that LaTeX or `makeindex` will read as something other than what you typed. Hover it for the details — one line per problem, saying exactly what will happen.
+
+A **triangle** means the entry is in real trouble: the document won't build, or the entry will be silently dropped or truncated. The worst of these is a bare `%`, which starts a LaTeX comment — the document compiles with no warning of any kind, and the printed index quietly shows only the text before the `%`, with no page number. Bare `&`, `#`, `_`, `^` and unpaired `$` stop the build on the second pass, with the error pointing into a generated file rather than at your source. A bare `"` or an unmatched brace has its own consequences, all described in the tooltip.
+
+An **information icon** means the entry will build but won't mean what you typed: `!`, `@` and `|` are `makeindex`'s own grammar — the level break, the sort key, and the page style — so `Bang! Goes` becomes two heading levels and `user@host` files under *user*. The tooltip gives you the correction (prefix the character with a quote mark: `Bang"! Goes`).
+
+The icons appear on entries loaded from your files and on cells you edit, and go away as soon as the text is clean. **Nothing is blocked.** This is advice; the entry inserts, edits and saves either way. To have a field corrected for you in one click, use the same icons in the [Index Entry window](../getting_started/create_an_index_entry.md) — a table cell reports the problem but has nowhere to put a button.
+
 ## Searching
 
 The search box above the table filters rows live by Main, Sub1, and Sub2 display text — type to narrow the list down to matching entries.

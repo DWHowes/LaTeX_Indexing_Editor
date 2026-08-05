@@ -5,7 +5,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Signal, Slot, Qt, QPoint, QSettings
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 
+from models import index_syntax_check as syntax
 from models import index_tag_grammar as grammar
+from views import index_syntax_advice as advice
 from views.entry_modifier_table_view import EntryModifierTableView
 
 # ---------------------------------------------------------------------------
@@ -25,6 +27,18 @@ _HEADERS = ["ID", "Main Display", "Main Sort", "Sub1 Display", "Sub1 Sort",
 
 # Columns that must never be edited by the user
 _READ_ONLY_COLS = frozenset({COL_ID})
+
+# Which columns carry entry text, and what that text is for. The Page
+# column is deliberately absent: its content is a command name chosen from
+# a combo box, not something anyone types a per-cent sign into.
+_SYNTAX_ROLE_BY_COLUMN = {
+    COL_MAIN_DISP: syntax.ROLE_DISPLAY,
+    COL_MAIN_SORT: syntax.ROLE_SORT,
+    COL_SUB1_DISP: syntax.ROLE_DISPLAY,
+    COL_SUB1_SORT: syntax.ROLE_SORT,
+    COL_SUB2_DISP: syntax.ROLE_DISPLAY,
+    COL_SUB2_SORT: syntax.ROLE_SORT,
+}
 
 # Global (QSettings) key for persisted column visibility -- deliberately not
 # routed through IndexPrefsConfigModel/project_metadata: this is a per-user
@@ -236,6 +250,40 @@ def _fields_from_row_items(row_items: list[QStandardItem | None]) -> dict:
         "sub2_sort": _text(COL_SUB2_SORT),
         "encap": encap or "",
     }
+
+
+def _advise_cell(item: QStandardItem | None, column: int) -> None:
+    r"""
+    Marks one cell with whatever :mod:`models.index_syntax_check` has to
+    say about its text -- an icon beside the value, the findings in the
+    cell's tooltip.
+
+    Advice only, and less of it than the Index Entry window offers: there
+    is no click target in a table cell, so this reports and does not
+    repair. The wording is the same either way, because both call
+    :func:`index_syntax_advice.advise` -- an entry that was created with a
+    bare "%" in it and an entry that was edited into one are the same
+    entry, and used to be told two different things about it (nothing, in
+    both cases).
+
+    Applied on every path that writes a cell, including the ones that put
+    a value back, so that a corrected cell loses its icon rather than
+    keeping a stale one.
+    """
+    role = _SYNTAX_ROLE_BY_COLUMN.get(column)
+    if item is None or role is None:
+        return
+
+    icon, tooltip, _fixable = advice.advise(item.text(), role=role)
+    item.setData(icon, Qt.ItemDataRole.DecorationRole)
+    item.setToolTip(tooltip)
+
+
+def _advise_row(row_items: list[QStandardItem | None]) -> None:
+    """:func:`_advise_cell` across a whole row's heading cells."""
+    for column in _SYNTAX_ROLE_BY_COLUMN:
+        if column < len(row_items):
+            _advise_cell(row_items[column], column)
 
 
 class PageStyleDelegate(QStyledItemDelegate):
@@ -541,6 +589,7 @@ class EntryModifierList(QWidget):
                 _item(parsed["sub2_sort"]),
                 _make_encap_item(stored_encap),
             ]
+            _advise_row(row)
             self.base_model.appendRow(row)
 
             self._location_map[unique_id] = {
@@ -622,7 +671,7 @@ class EntryModifierList(QWidget):
         def _item(text: str) -> QStandardItem:
             return QStandardItem(text)
 
-        self.base_model.appendRow([
+        new_row_items = [
             id_item,
             _item(parsed["main_disp"]),
             _item(parsed["main_sort"]),
@@ -631,7 +680,9 @@ class EntryModifierList(QWidget):
             _item(parsed["sub2_disp"]),
             _item(parsed["sub2_sort"]),
             _make_encap_item(stored_encap),
-        ])
+        ]
+        _advise_row(new_row_items)
+        self.base_model.appendRow(new_row_items)
 
         # Update the location map so get_location_metadata works immediately
         self._location_map[unique_id] = {
@@ -837,6 +888,7 @@ class EntryModifierList(QWidget):
             encap_item = self.base_model.item(row, COL_ENCAP)
             if encap_item is not None:
                 encap_item.setData(stash["encap"], Qt.ItemDataRole.EditRole)
+            _advise_row([self.base_model.item(row, c) for c in range(len(_HEADERS))])
         finally:
             self.base_model.dataChanged.connect(self._on_cell_data_changed)
 
@@ -873,6 +925,12 @@ class EntryModifierList(QWidget):
         encap_item = row_items[COL_ENCAP]
         if col == COL_ENCAP and encap_item:
             _apply_encap_font(encap_item, encap_item.text())
+
+        # The edited cell is re-read whether or not the row goes on to
+        # validate, so that the icon describes what is on screen right
+        # now. Decoration and tooltip are not EditRole/DisplayRole, so
+        # this does not come back round through here.
+        _advise_cell(row_items[col] if col < len(row_items) else None, col)
 
         fields = _fields_from_row_items(row_items)
         error = self._validate_hierarchy(fields)

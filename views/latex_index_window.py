@@ -21,6 +21,7 @@ from PySide6.QtCore import QEvent, Qt, Signal, QSize, Slot, QSettings
 from controllers.app_style_configuration import AppStyleConfiguration
 from models import index_syntax_check as syntax
 from models import index_tag_grammar as grammar
+from views import index_syntax_advice as advice
 from views.latex_entry_auto_completer import LatexEntryAutoCompleter
 
 class EntryWindowTitleBar(QWidget):
@@ -202,6 +203,13 @@ class LatexIndexWindow(QDockWidget):
         #: row -> display text whose split was undone, so that leaving the
         #: field again does not silently re-apply it.
         self._declined_splits = {}
+
+        #: field -> its standing syntax-advice QAction. One per field for
+        #: the life of the window, shown and hidden rather than created
+        #: and destroyed: the fix runs from inside the action's own
+        #: triggered handler and immediately changes the text, so deleting
+        #: it there would be deleting the sender mid-signal.
+        self._syntax_notices = {}
 
         self._init_ui()
 
@@ -402,6 +410,9 @@ class LatexIndexWindow(QDockWidget):
             # to grey out while it has focus.
             field.installEventFilter(self)
 
+        for field, role in self._checked_fields():
+            self._attach_syntax_notice(field, role)
+
         self.show_sort_keys = QCheckBox("Show sort keys")
         self.show_sort_keys.setToolTip(
             "Show the sort field on every level, so a heading with no "
@@ -552,6 +563,93 @@ class LatexIndexWindow(QDockWidget):
             f"Split undone — “{original}” restored exactly as typed.",
             8000,
         )
+
+    # ------------------------------------------------------------------
+    # Syntax advice
+    # ------------------------------------------------------------------
+
+    #: What the tooltip says once there is something to click.
+    _FIX_HINT = "Click this icon to correct the whole field."
+
+    def _checked_fields(self) -> list:
+        """
+        Every field whose text ends up inside an ``\\index{...}``, paired
+        with what that text is for. All six: a sort key never prints, but
+        it is written into the same macro argument, so a "%" in one
+        comments out the rest of the entry just the same.
+        """
+        return (
+            [(field, syntax.ROLE_DISPLAY) for field in self._display_fields()]
+            + [(field, syntax.ROLE_SORT) for field in self.sort_entries]
+        )
+
+    def _attach_syntax_notice(self, field: QLineEdit, role: str) -> None:
+        """Gives one field its standing advice icon, hidden until needed."""
+        action = field.addAction(
+            advice.icon_for(syntax.ERROR), QLineEdit.ActionPosition.TrailingPosition
+        )
+        action.setVisible(False)
+        action.triggered.connect(lambda *_: self._apply_syntax_fix(field, role))
+        self._syntax_notices[field] = action
+
+        field.textChanged.connect(lambda *_: self._refresh_syntax_notice(field, role))
+
+    def _refresh_syntax_notice(self, field: QLineEdit, role: str) -> None:
+        """
+        Re-reads one field and shows, hides or re-words its icon.
+
+        Live, on every keystroke, which is the whole point: the characters
+        this warns about are ones nothing else will ever mention -- a bare
+        "%" compiles clean and quietly truncates the printed entry -- so
+        the moment to say so is while the text is still being typed and
+        not after a build has come back wrong.
+        """
+        action = self._syntax_notices.get(field)
+        if action is None:
+            return
+
+        icon, tooltip, fixable = advice.advise(
+            field.text(), role=role, fix_hint=self._FIX_HINT
+        )
+        if icon is None:
+            action.setVisible(False)
+            action.setToolTip("")
+            return
+
+        action.setIcon(icon)
+        action.setToolTip(tooltip)
+        action.setEnabled(fixable)
+        action.setVisible(True)
+
+    def _apply_syntax_fix(self, field: QLineEdit, role: str) -> None:
+        """
+        Repairs the whole field at once -- see
+        :func:`index_syntax_check.apply_fixes` for why not one finding at
+        a time.
+
+        Written through the field's own editing operations rather than
+        setText, so that Ctrl+Z in the field puts it back: a mechanical
+        repair someone did not want should cost one keystroke to undo.
+        """
+        fixed = syntax.apply_fixes(field.text(), role=role)
+        if fixed == field.text():
+            return
+
+        field.setFocus()
+        field.selectAll()
+        field.insert(fixed)
+
+        remaining = syntax.check(fixed, role=role)
+        if remaining:
+            self.statusMessageRequested.emit(
+                "Corrected what could be corrected — what is left needs a "
+                "decision, not an escape character. Hover the icon.",
+                8000,
+            )
+        else:
+            self.statusMessageRequested.emit(
+                "Corrected: the text now means itself to makeindex.", 5000
+            )
 
     def _display_fields(self) -> list:
         return [self.main_entry, self.sub1_entry, self.sub2_entry]

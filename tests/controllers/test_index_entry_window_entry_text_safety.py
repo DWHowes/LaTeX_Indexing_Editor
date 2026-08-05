@@ -129,7 +129,7 @@ class TestSortKeySplitNotice:
         window.main_entry.editingFinished.emit()
 
         assert MAIN in window._split_notices
-        assert len(window.main_entry.actions()) == 1
+        assert window._split_notices[MAIN] in window.main_entry.actions()
         assert "user@host" in window._split_notices[MAIN].toolTip()
 
     def test_undoing_restores_the_text_exactly_as_typed(self, window):
@@ -158,10 +158,11 @@ class TestSortKeySplitNotice:
         window.main_entry.setText("user@host")
         window.main_entry.editingFinished.emit()
 
-        window._split_notices[MAIN].trigger()
+        undo = window._split_notices[MAIN]
+        undo.trigger()
 
         assert window._split_notices == {}
-        assert window.main_entry.actions() == []
+        assert undo not in window.main_entry.actions()
 
     def test_leaving_the_field_again_does_not_re_split_it(self, window):
         """
@@ -208,9 +209,10 @@ class TestSortKeySplitNotice:
     def test_an_insert_clears_the_notice_and_the_memory(self, window):
         window.main_entry.setText("user@host")
         window.main_entry.editingFinished.emit()
+        undo = window._split_notices[MAIN]
 
         window.reset_ui()
 
         assert window._split_notices == {}
         assert window._declined_splits == {}
-        assert window.main_entry.actions() == []
+        assert undo not in window.main_entry.actions()

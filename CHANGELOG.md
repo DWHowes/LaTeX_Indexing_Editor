@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### Entry text is now checked as you type
+
+Nothing in this editor has ever looked at *what* you type into an index entry. Three
+checks existed in the whole pipeline — "Main can't be empty", "Sub2 needs Sub1", and
+a note about missing sort keys — and not one of them knew any LaTeX.
+
+The worst thing that could get through, and the reason this exists: **a bare `%`
+silently ruins the entry.** `\index{Profit % margin}` compiles clean, with no warning
+at any stage, and the printed index contains just *Profit* — the rest of the term
+gone, the page number gone. Nothing anywhere tells you.
+
+All six fields in the **Index Entry** window — the three heading levels and their
+three **Sort as** fields — now carry a small icon whenever their text contains a
+character LaTeX or `makeindex` will read as something other than what you meant.
+Hover it for one line per problem, in plain terms. The same icons appear in the
+**entry table**, on entries loaded from your files and on cells you edit, so an entry
+reads the same way whether you created it or are correcting it later.
+
+| | What it means | Examples |
+|---|---|---|
+| ⚠ | The build breaks, or the entry is silently lost | `%`, `&`, `#`, `_`, `^`, an unpaired `$`, a bare `"`, an unmatched brace, a trailing `\` |
+| ℹ | It builds, but it doesn't say what you typed | `Bang! Goes` → two heading levels; `user@host` → filed under *user*; `a\|b` → *b* read as a page style |
+
+`&`, `#`, `_`, `^` and `$` are the ones that look fine and then fail on the **second**
+LaTeX pass, when the index is read back in — with the error pointing into a generated
+`.ind` file rather than at anything you wrote.
+
+**In the Index Entry window, click the icon to correct the whole field at once** — an
+entry with three stray ampersands is one decision, not three. `Ctrl+Z` in the field
+puts it back. Findings with no mechanical fix (an unmatched brace, a trailing
+backslash) show a greyed icon and an explanation: those need you to say what you
+meant. A table cell reports but doesn't repair — there's nowhere to put a button.
+
+**Nothing is blocked.** Every entry still inserts, edits and saves exactly as before.
+`$` is checked for *pairs*, so `$E=mc^2$` is fine, and `^`/`_` are only flagged
+outside maths. `~` is left alone entirely — it's a non-breaking space, and a
+reasonable thing to want.
+
 ### `"` is now the escape character in an index entry, not `\`
 
 The editor used to treat `\!`, `\@` and `\|` as escaped characters — an
