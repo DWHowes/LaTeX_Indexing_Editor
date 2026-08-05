@@ -37,9 +37,15 @@ Tick **Show sort keys** to get the field on every level, formatted or not — fo
 
 This is the same `sortkey@displaytext` split the entry table exposes as its paired Display and Sort columns — the two ways of creating an entry write identical tags. See [Editing Entries](../entry_table/editing.md).
 
+**Typing an `@` in a heading field splits it here too.** `@` is `makeindex`'s own sort-key separator, so `Titanic@RMS \textit{Titanic}` moves apart into the two fields it means the moment you leave the field — which is also how an autocomplete suggestion carrying a sort key gets unpacked. When that isn't what you meant (`user@host` would file under *user* and print as *host*), the status bar says which level it happened on and a small **undo** button appears at the right-hand end of the field: click it to put the text back exactly as you typed it and empty the sort field again. That text won't be split again unless you edit it into something else.
+
 ## Text Style
 
 The **B** / **I** buttons format *part* of whatever you're currently typing — they wrap the **selected text** in whichever field you were last in (Main, Subhead 1, or Subhead 2) in `\textbf{...}`/`\textit{...}`. Use this to italicize or bold one word within a heading, not the whole entry's page number — for that, see **Page Ref** below. Select some text in a field first, then click B or I.
+
+**Your selection is widened first if it has to be.** A text field will let you select any two points, including the middle of a LaTeX command, and wrapping that literally produces markup that builds but prints wrongly. So before anything is wrapped, the selection is grown until a command can safely take it as an argument: a command is never cut in half, it keeps its argument group, and braces balance. With `RMS \textit{Titanic}` in the field, selecting just the `\` — or from just after it into the middle of the word — gives you `RMS \textbf{\textit{Titanic}}` either way, and the status bar mentions that it widened. The wrapped run is left selected so you can see what was taken. Selecting just the words inside a group still formats only those words.
+
+If the field's braces don't balance, the buttons decline and say why rather than nesting a good group inside a broken one — close the brace first.
 
 The buttons act on heading text only, never on a sort key: they grey out while a **Sort as** field has focus. A sort key is read by the indexing engine and never printed, so there is nothing in it to style.
 

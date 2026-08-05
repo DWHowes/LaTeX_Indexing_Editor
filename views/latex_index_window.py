@@ -14,10 +14,12 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QGridLayout,
     QCheckBox,
+    QStyle,
 )
 from PySide6.QtCore import QEvent, Qt, Signal, QSize, Slot, QSettings
 
 from controllers.app_style_configuration import AppStyleConfiguration
+from models import index_syntax_check as syntax
 from models import index_tag_grammar as grammar
 from views.latex_entry_auto_completer import LatexEntryAutoCompleter
 
@@ -175,6 +177,10 @@ class LatexIndexWindow(QDockWidget):
     #: reference to it; AppPipelineController connects this to showMessage.
     statusMessageRequested = Signal(str, int)
 
+    #: What each display field is called when it has to be named to
+    #: someone -- the status-bar notes, and nothing else, use these.
+    LEVEL_NAMES = ("Main", "Subhead 1", "Subhead 2")
+
     def __init__(self, title="LaTeX Index Entry", parent=None, tab_widget=None):
         super().__init__(title, parent)
 
@@ -189,6 +195,13 @@ class LatexIndexWindow(QDockWidget):
         self.last_focused_field = None
 
         self._completion_helpers = {}
+
+        #: row -> the QAction offering to undo an automatic sort-key split.
+        self._split_notices = {}
+
+        #: row -> display text whose split was undone, so that leaving the
+        #: field again does not silently re-apply it.
+        self._declined_splits = {}
 
         self._init_ui()
 
@@ -375,6 +388,11 @@ class LatexIndexWindow(QDockWidget):
 
             display_field.textChanged.connect(self._sync_sort_fields)
             display_field.editingFinished.connect(self._split_typed_sort_key)
+            # A notice describes one exact piece of text; the first
+            # keystroke after it makes it stale.
+            display_field.textEdited.connect(
+                lambda _text, row=row: self._clear_split_notice(row)
+            )
             if isinstance(display_field, CustomLineEdit):
                 display_field.collapsed.connect(partial(self._on_level_collapsed, row))
 
@@ -437,9 +455,26 @@ class LatexIndexWindow(QDockWidget):
         those headings were written with. Splitting on focus-out rather
         than on every keystroke means the "@" is not torn out from under
         someone mid-word.
+
+        The split is right far more often than it is wrong, but it used to
+        happen in complete silence, and the case where it is wrong is not
+        exotic: typing ``user@host`` produced ``\index{host}``, filed under
+        "user", with nothing on screen to say so. So it still splits --
+        and then says what it did, in the status bar and on the field
+        itself, with one click to put it back. Declining a split is
+        remembered against that exact text, so leaving the field again
+        does not re-apply it.
         """
-        for display_field, sort_field in zip(self._display_fields(), self.sort_entries):
-            key, display = grammar.split_sort_key(display_field.text())
+        split_levels: list[str] = []
+
+        for row, (display_field, sort_field) in enumerate(
+            zip(self._display_fields(), self.sort_entries)
+        ):
+            typed = display_field.text()
+            if typed == self._declined_splits.get(row):
+                continue
+
+            key, display = grammar.split_sort_key(typed)
             if not key or not display:
                 continue
 
@@ -450,7 +485,73 @@ class LatexIndexWindow(QDockWidget):
             sort_field.setText(key)
             sort_field.is_user_owned = True
 
+            self._show_split_notice(row, typed, key, display)
+            split_levels.append(self.LEVEL_NAMES[row])
+
+        if split_levels:
+            which = ", ".join(split_levels)
+            self.statusMessageRequested.emit(
+                f"“@” read as a sort key on {which} — the text before it now "
+                f"files the entry and is not printed. Click the arrow in the "
+                f"field to undo.",
+                8000,
+            )
+
         self._refresh_sort_field_visibility()
+
+    def _show_split_notice(self, row: int, original: str, key: str, display: str) -> None:
+        """Puts the one-click undo for an automatic split on the field."""
+        self._clear_split_notice(row)
+
+        field = self._display_fields()[row]
+        action = field.addAction(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogResetButton),
+            QLineEdit.ActionPosition.TrailingPosition,
+        )
+        action.setToolTip(
+            f"“{original}” was split: “{key}” files the entry, “{display}” is "
+            f"what prints.\nClick to put it back as typed."
+        )
+        action.triggered.connect(lambda *_: self._undo_split(row, original))
+        self._split_notices[row] = action
+
+    def _clear_split_notice(self, row: int) -> None:
+        field = self._display_fields()[row]
+        action = self._split_notices.pop(row, None)
+        if action is not None:
+            field.removeAction(action)
+            action.deleteLater()
+
+    def _clear_all_split_notices(self) -> None:
+        for row in list(self._split_notices):
+            self._clear_split_notice(row)
+        self._declined_splits.clear()
+
+    def _undo_split(self, row: int, original: str) -> None:
+        """Restores the text as it was typed, and stops re-splitting it."""
+        display_field = self._display_fields()[row]
+        sort_field = self.sort_entries[row]
+
+        display_field.blockSignals(True)
+        display_field.setText(original)
+        display_field.blockSignals(False)
+
+        # Back to exactly the state before the split: the sort field was
+        # empty and still following its display text, because a level
+        # whose text is "user@host" suggests nothing to file under.
+        sort_field.reset()
+
+        # Remembered against the text, not the field, so that the split
+        # comes back the moment the text is edited into something else --
+        # which is also what makes another focus-out harmless.
+        self._declined_splits[row] = original
+        self._clear_split_notice(row)
+        self._refresh_sort_field_visibility()
+
+        self.statusMessageRequested.emit(
+            f"Split undone — “{original}” restored exactly as typed.",
+            8000,
+        )
 
     def _display_fields(self) -> list:
         return [self.main_entry, self.sub1_entry, self.sub2_entry]
@@ -479,11 +580,10 @@ class LatexIndexWindow(QDockWidget):
         entries makeindex will file under a backslash. The controller
         reports these once, on insert; nothing is blocked or rewritten.
         """
-        names = ["Main", "Subhead 1", "Subhead 2"]
         return [
             name
             for name, display_field, sort_field in zip(
-                names, self._display_fields(), self.sort_entries
+                self.LEVEL_NAMES, self._display_fields(), self.sort_entries
             )
             if self._level_is_shown(display_field)
             and display_field.text().strip()
@@ -560,21 +660,59 @@ class LatexIndexWindow(QDockWidget):
         self._refresh_sort_field_visibility()
 
     def format_selected_text(self, command):
+        r"""
+        Wraps the selected text in ``\command{...}``.
+
+        The selection is first widened to something a macro can safely
+        take as its argument -- see
+        :func:`index_syntax_check.expand_to_safe_span`. This used to take
+        the raw character offsets literally, which a line edit is happy to
+        put anywhere: selecting just the backslash of
+        ``RMS \textit{Titanic}`` and pressing B wrote
+        ``RMS \textbf{\}textit{Titanic}``, and selecting from just after
+        that backslash into the middle of the word wrote
+        ``RMS \\textbf{textit{Tit}anic}``, where the doubled backslash is
+        a line break and "textit" prints as an ordinary word. Both reach
+        the printed index looking like damage rather than like an error.
+
+        A field whose braces do not balance is declined outright: there is
+        no span in it that wrapping would leave valid, so nesting another
+        group inside the broken one only buries the real problem.
+        """
         field = self.last_focused_field
         if not field or not field.hasSelectedText():
             return
 
-        start = field.selectionStart()
-        length = len(field.selectedText())
         full_text = field.text()
+        if not syntax.braces_balance(full_text):
+            self.statusMessageRequested.emit(
+                "Not formatted — this field has an unmatched brace. Close it "
+                "first, or the formatting would nest inside the broken group.",
+                6000,
+            )
+            return
+
+        raw_start = field.selectionStart()
+        raw_end = field.selectionEnd()
+        start, end = syntax.expand_to_safe_span(full_text, raw_start, raw_end)
 
         before = full_text[:start]
-        selection = field.selectedText()
-        after = full_text[start + length:]
+        selection = full_text[start:end]
+        after = full_text[end:]
 
-        new_text = f"{before}\\{command}{{{selection}}}{after}"
-        field.setText(new_text)
+        wrapper = f"\\{command}{{{selection}}}"
+        field.setText(f"{before}{wrapper}{after}")
         field.setFocus()
+        # Leave the wrapped run selected: it is how the widening shows
+        # itself, and it is the span someone would want to undo or retype.
+        field.setSelection(start, len(wrapper))
+
+        if (start, end) != (raw_start, raw_end):
+            self.statusMessageRequested.emit(
+                f"Selection widened to “{selection}” so the "
+                f"\\{command} wrapper stays valid LaTeX.",
+                6000,
+            )
 
     #: What the Page Ref radios write as the encap. These are real LaTeX
     #: commands: makeindex wraps the page number in whatever name follows
@@ -634,6 +772,9 @@ class LatexIndexWindow(QDockWidget):
         self.main_entry.clear()
         self.sub1_entry.clear()
         self.sub2_entry.clear()
+
+        # Both describe text that no longer exists.
+        self._clear_all_split_notices()
 
         for w in [self.sub1_label, self.sub1_entry, self.sub2_label, self.sub2_entry]:
             w.hide()

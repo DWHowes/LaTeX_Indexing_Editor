@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+### Bold and italic no longer break the markup around them
+
+The **B** and **I** buttons in the Index Entry window wrapped whatever you had
+selected, taken completely literally — and a text field will let you select any
+two points at all, including the middle of a LaTeX command. With
+`RMS \textit{Titanic}` in the field:
+
+| You selected | You got |
+|---|---|
+| just the `\` | `RMS \textbf{\}textit{Titanic}` |
+| from after the `\` into the middle of the word | `RMS \\textbf{textit{Tit}anic}` |
+
+Neither stops the document building. The first prints a stray brace; in the second
+the doubled backslash is a **line break** and `textit` prints as an ordinary word —
+so the damage shows up in the finished index rather than as an error you could act
+on.
+
+The selection is now widened, before anything is wrapped, to something a command
+can safely take as its argument: a command is never cut in half, it keeps its
+argument group, and braces balance. All three of the selections above now give you
+`RMS \textbf{\textit{Titanic}}`. The status bar says so when it happens, and the
+wrapped run is left selected so you can see what was taken.
+
+Selecting just the words inside a group still formats only those words. A field
+whose braces don't balance is declined outright, with a note saying why — wrapping
+there would only nest a good group inside a broken one.
+
+### An "@" moved into the sort field now says so, and offers to put it back
+
+Typing `user@host` into a heading level produced `\index{host}` — filed under
+*user*, printing as *host* — silently. `@` really is `makeindex`'s sort-key
+separator, and splitting it out is right far more often than it is wrong: it is
+also how an autocomplete suggestion carrying a sort key gets unpacked into the two
+fields it means. So it still splits.
+
+It just isn't silent any more. The status bar names the level it happened on, and
+the field itself gets a small **undo** button: one click puts the text back exactly
+as you typed it and empties the sort field again. Once you've done that, leaving
+the field won't re-split the same text — but editing it into something else arms
+the split again as normal.
+
 ### Sort keys are yours to set
 
 The Index Entry window now has a **Sort as** field beside each heading level, and
