@@ -5,10 +5,11 @@ The grammar being described is:
 
     \<command>{ level!level!level | encap }
 
-where sub-levels split on an unbraced, unescaped "!", the encap is
-whatever follows the *last top-level* "|", and each level may carry a
-sort key ahead of an unbraced "@" (``sortkey@display text``). The encap
-is one of:
+where sub-levels split on an unbraced "!", the encap is whatever follows
+the *last top-level* "|", and each level may carry a sort key ahead of an
+unbraced "@" (``sortkey@display text``). A separator is suppressed by
+makeindex's quote character and by nothing else -- ``"!`` is an
+exclamation mark, ``\!`` is still a level break. The encap is one of:
 
   * a page style   -- "textbf", "textit", a user macro name, ...
   * a range marker -- "(" opens a range, ")" closes it -- optionally
@@ -24,13 +25,22 @@ sites disagreeing about the same tag. So: parse and serialize here, and
 nowhere else.
 
 The brace-aware behaviour below is ported from ``LatexIndexParser``,
-which was the most careful of the pre-existing implementations -- in
-particular it is the only one that got "a pipe inside braces is not the
-encap separator" right. Where the naive implementations differed, the
-careful behaviour wins and the naive site is corrected; where a
-difference was deliberate (display-oriented cleanup in the tree view,
-say) the caller now asks for it explicitly through a keyword argument
-rather than open-coding its own scan.
+which was the most careful of the pre-existing implementations. Where the
+naive implementations differed, the careful behaviour wins and the naive
+site is corrected; where a difference was deliberate (display-oriented
+cleanup in the tree view, say) the caller now asks for it explicitly
+through a keyword argument rather than open-coding its own scan.
+
+One caveat on that brace-awareness, since this file used to state the
+opposite: **makeindex does not respect brace nesting for its
+separators.** ``\index{Chapter {A|B}}`` really does come out as
+``\item Chapter {A, \B}{1}``, and ``\index{Note \textbf{a|b}}`` as
+``\item Note \textbf{a, \b}{4}``. The reading here -- a pipe inside
+braces is not the separator -- is nonetheless kept, because it is the
+better model of what the *entry* is and the whole application is built on
+it. The disagreement is reported instead:
+:mod:`models.index_syntax_check` flags a separator inside braces and
+offers the quote that resolves it, ``\textbf{a"|b}``.
 
 No PySide6 import here, deliberately -- this is a layer-1 module usable
 from models, controllers, views and workers alike.
@@ -67,9 +77,29 @@ XREF_TYPES = (XREF_SEE, XREF_SEEALSO)
 #: two are edited together; see FileTreePersistence for its use sites.
 SQL_IS_CROSS_REFERENCE = "(encap LIKE 'see{%' OR encap LIKE 'seealso{%')"
 
-#: Characters that a backslash may escape inside a tag body, suppressing
-#: their structural meaning.
-ESCAPABLE_CHARS = (LEVEL_SEPARATOR, SORT_KEY_SEPARATOR, ENCAP_SEPARATOR, "{", "}")
+#: makeindex's own escape character. It quotes the character after it and
+#: is then consumed: ``"!`` -> ``!``, ``""`` -> ``"``, and even ``"a`` ->
+#: ``a``, eaten ahead of an ordinary character -- so never emit a stray
+#: one.
+QUOTE_CHAR = '"'
+
+#: Characters a *backslash* suppresses. Braces only, and deliberately so.
+#: This is LaTeX's escape, and the layer it belongs to is "find the macro
+#: in the .tex file": ``\{`` is not a group opener there, so the brace
+#: counting has to know about it.
+LATEX_ESCAPABLE = ("{", "}")
+
+#: Characters the *quote* suppresses -- everything makeindex reads as
+#: grammar, itself included.
+#:
+#: These used to be in one tuple with the braces, on the assumption that a
+#: backslash escaped them too. It does not. A backslash means nothing at
+#: all to makeindex: it is copied verbatim into the .ind, where LaTeX
+#: interprets it, which is exactly why ``\%`` and ``\&`` work. So
+#: ``\index{A\|B}`` really does come out with an encap of "B", and this
+#: module read the same tag as a plain entry. Splitting the two tuples is
+#: what makes the app agree with the tool it is writing for.
+QUOTE_ESCAPABLE = (LEVEL_SEPARATOR, SORT_KEY_SEPARATOR, ENCAP_SEPARATOR, QUOTE_CHAR)
 
 _XREF_ENCAP_PATTERN = re.compile(
     r"^(" + XREF_SEEALSO + "|" + XREF_SEE + r")\{(.*)\}$", re.DOTALL
@@ -134,6 +164,143 @@ def extract_balanced_braces(text: str, start_pos: int) -> tuple[str, int]:
         result_chars.append(char)
         current_pos += 1
     return "", -1
+
+
+def _escape_length(text: str, idx: int) -> int:
+    r"""
+    How many characters the escape sequence starting at ``idx`` covers,
+    or 0 if none starts there.
+
+    Two mechanisms overlap in a tag body, owned by two different tools:
+
+      * ``\{`` and ``\}`` are LaTeX's, and matter because this module has
+        to count braces in real source;
+      * ``"x`` is makeindex's, and suppresses whatever ``x`` means to the
+        grammar -- including another quote, so ``""`` is one literal
+        quote mark.
+
+    The one place they meet is ``\"``, which makeindex defines as a
+    literal quote character rather than an escape. That is not a corner
+    case here: ``\"o`` is how an umlaut is written, and reading its quote
+    as an escape would turn ö into ø in the printed index.
+    """
+    step = _latex_escape_length(text, idx)
+    if step:
+        return step
+    if text[idx] == QUOTE_CHAR and idx + 1 < len(text):
+        return 2
+    return 0
+
+
+def _latex_escape_length(text: str, idx: int) -> int:
+    r"""
+    The backslash half of :func:`_escape_length`, on its own.
+
+    Separated because writing an escape and reading one are not
+    symmetrical. Reading, ``"x`` is an escape already in place and must be
+    stepped over; writing, a ``"`` in plain text is a quotation mark and
+    has to be doubled. The backslash sequences are stepped over either
+    way -- they are LaTeX's, and are none of makeindex's business.
+    """
+    if idx + 1 >= len(text):
+        return 0
+    if text[idx] == "\\" and (
+        text[idx + 1] in LATEX_ESCAPABLE or text[idx + 1] == QUOTE_CHAR
+    ):
+        return 2
+    return 0
+
+
+def _escaped_positions(text: str) -> set[int]:
+    """
+    Every index covered by an escape sequence -- the escape characters
+    themselves included -- so that a right-to-left scan can skip them
+    without re-deriving the left-to-right reading.
+    """
+    covered: set[int] = set()
+    idx = 0
+    length = len(text)
+
+    while idx < length:
+        step = _escape_length(text, idx)
+        if step:
+            covered.update(range(idx, idx + step))
+            idx += step
+        else:
+            idx += 1
+
+    return covered
+
+
+def escape_for_makeindex(text: str) -> str:
+    r"""
+    Quotes every character makeindex would otherwise read as grammar, so
+    that the text means itself: ``Bang! Goes`` -> ``Bang"! Goes``, and a
+    quotation mark -> ``""``.
+
+    **Takes plain text**, and is the exact inverse of
+    :func:`unescape_makeindex` rather than something to apply twice --
+    there is no telling an already-escaped ``""`` from two quotation marks
+    someone typed, so a second pass would escape the escapes. Unescape
+    first if the input's state is not known.
+
+    Backslash sequences pass through untouched, which is the whole reason
+    this is not a plain character map: ``\"`` is a literal quote to
+    makeindex, and doubling that one would print ø where ö was meant.
+    """
+    text = text or ""
+    result: list[str] = []
+    idx = 0
+    length = len(text)
+
+    while idx < length:
+        step = _latex_escape_length(text, idx)
+        if step:
+            result.append(text[idx:idx + step])
+            idx += step
+            continue
+        char = text[idx]
+        if char in QUOTE_ESCAPABLE:
+            result.append(QUOTE_CHAR)
+        result.append(char)
+        idx += 1
+
+    return "".join(result)
+
+
+def unescape_makeindex(text: str) -> str:
+    r"""
+    What makeindex will actually put in the .ind: the inverse of
+    :func:`escape_for_makeindex`, with each quote consumed along with
+    whatever it was protecting.
+
+    Backslash sequences pass through whole, because makeindex passes them
+    through whole -- ``\"o`` has to reach LaTeX intact to print as ö.
+
+    Nothing in the application displays this form. Every view here shows
+    raw source, and a level reading ``Bang"! Goes`` is the honest thing to
+    show for a tag that says ``Bang"! Goes``. This exists for reasoning
+    about a tag's meaning -- comparing two headings, saying what will
+    print -- not for editing.
+    """
+    text = text or ""
+    result: list[str] = []
+    idx = 0
+    length = len(text)
+
+    while idx < length:
+        step = _escape_length(text, idx)
+        if step:
+            if text[idx] == QUOTE_CHAR:
+                result.append(text[idx + 1])
+            else:
+                result.append(text[idx:idx + step])
+            idx += step
+            continue
+        result.append(text[idx])
+        idx += 1
+
+    return "".join(result)
 
 
 def strip_string_macro(text: str) -> str:
@@ -201,9 +368,12 @@ def split_encap(text: str, *, strip: bool = True) -> tuple[str, str]:
     "|". Returns an empty encap when there is none.
 
     Scanning runs right-to-left tracking brace depth, so a "|" inside
-    braces -- ``\index{Chapter {A|B}}`` -- is left alone, and a
-    backslash-escaped ``\|`` is skipped. This is the behaviour the naive
-    ``raw.split("|")[0]`` sites got wrong.
+    braces -- ``\index{Chapter {A|B}}`` -- is left alone. This is the
+    behaviour the naive ``raw.split("|")[0]`` sites got wrong.
+
+    A quote-escaped ``"|`` is skipped; a backslash-escaped ``\|`` is
+    **not**, because makeindex does not honour it -- see
+    :data:`QUOTE_ESCAPABLE`.
 
     ``strip=False`` preserves surrounding whitespace on both halves, for
     callers rewriting macro text in place where whitespace is part of the
@@ -212,16 +382,18 @@ def split_encap(text: str, *, strip: bool = True) -> tuple[str, str]:
     if strip:
         text = text.strip()
 
+    escaped = _escaped_positions(text)
+
     brace_level = 0
     for i in range(len(text) - 1, -1, -1):
+        if i in escaped:
+            continue
         char = text[i]
         if char == "}":
             brace_level += 1
         elif char == "{":
             brace_level -= 1
         elif char == ENCAP_SEPARATOR and brace_level == 0:
-            if i > 0 and text[i - 1] == "\\":
-                continue
             body = text[:i]
             encap = text[i + 1:]
             return (body.strip(), encap.strip()) if strip else (body, encap)
@@ -252,12 +424,13 @@ def encap_from_stored(encap: Optional[str]) -> str:
 
 def split_levels(text: str) -> list[str]:
     r"""
-    Splits a levels string on unbraced, unescaped "!". Level text is
+    Splits a levels string on an unbraced "!" that makeindex would read
+    as one -- so ``"!`` does not split and ``\!`` does. Level text is
     returned verbatim -- no stripping, no dropping of empties -- so that
-    ``join_levels(split_levels(x)) == x`` for any input without escapes.
-    A trailing separator therefore yields a trailing empty level, which
-    is information (``\index{Main!}`` is a malformed tag worth seeing,
-    not a single-level tag).
+    ``join_levels(split_levels(x)) == x`` for any input. A trailing
+    separator therefore yields a trailing empty level, which is
+    information (``\index{Main!}`` is a malformed tag worth seeing, not a
+    single-level tag).
 
     Use :func:`split_levels_clean` for the display-oriented reading.
     """
@@ -269,9 +442,10 @@ def split_levels(text: str) -> list[str]:
 
     while idx < text_len:
         char = text[idx]
-        if char == "\\" and (idx + 1 < text_len) and text[idx + 1] in ESCAPABLE_CHARS:
-            current_part.append(text[idx:idx + 2])
-            idx += 2
+        step = _escape_length(text, idx)
+        if step:
+            current_part.append(text[idx:idx + step])
+            idx += step
             continue
 
         if char == "{":
@@ -338,9 +512,10 @@ def parent_path(heading_text: str) -> str:
 
 def split_sort_key(level: str) -> tuple[str, str]:
     r"""
-    Splits one level into (sort_key, display_text) at an unbraced,
-    unescaped "@". Returns ("", level) when the level carries no sort
-    key, so the second element is always the text to show a user.
+    Splits one level into (sort_key, display_text) at the first unbraced
+    "@" that makeindex would read as one -- so ``"@`` does not split and
+    ``\@`` does. Returns ("", level) when the level carries no sort key,
+    so the second element is always the text to show a user.
 
     Both halves are stripped. Note that ``"Widgets@"`` yields an empty
     display half -- a tag that genuinely displays nothing -- rather than
@@ -352,8 +527,9 @@ def split_sort_key(level: str) -> tuple[str, str]:
 
     while idx < text_len:
         char = level[idx]
-        if char == "\\" and (idx + 1 < text_len) and level[idx + 1] == SORT_KEY_SEPARATOR:
-            idx += 2
+        step = _escape_length(level, idx)
+        if step:
+            idx += step
             continue
 
         if char == "{":

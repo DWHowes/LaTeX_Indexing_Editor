@@ -94,8 +94,20 @@ class TestEncapAndPageStyles:
         assert payloads[0][1]["encap"] == "("
         assert payloads[1][1]["encap"] == ")"
 
-    def test_escaped_pipe_is_not_treated_as_encap_separator(self, tmp_path):
+    def test_a_backslashed_pipe_is_still_the_encap_separator(self, tmp_path):
+        r"""
+        A backslash means nothing to makeindex -- it is copied into the
+        .ind verbatim -- so ``\index{A\|B}`` really does carry an encap of
+        "B". This was read as a plain entry, which put the parser and the
+        tool it parses for into disagreement about the same tag.
+        """
         path = _write_tex(tmp_path, r"\index{A\|B}")
+        payloads, _ = LatexIndexParser.parse_file(path)
+        _, uid_dict = payloads[0]
+        assert uid_dict["encap"] == "B"
+
+    def test_a_quoted_pipe_is_not_the_encap_separator(self, tmp_path):
+        path = _write_tex(tmp_path, r'\index{A"|B}')
         payloads, _ = LatexIndexParser.parse_file(path)
         _, uid_dict = payloads[0]
         assert uid_dict["encap"] == "standard"

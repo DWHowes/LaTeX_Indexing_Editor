@@ -36,8 +36,25 @@ class TestSplitEncap:
     def test_xref_encap_containing_a_pipe(self):
         assert grammar.split_encap("Main|see{A|B}") == ("Main", "see{A|B}")
 
-    def test_escaped_pipe_is_not_a_separator(self):
-        assert grammar.split_encap(r"Main\|Sub") == (r"Main\|Sub", "")
+    def test_a_backslash_does_not_protect_the_pipe(self):
+        r"""
+        It never did, in the tool this module writes for. makeindex has no
+        use for a backslash at all -- it copies it into the .ind and lets
+        LaTeX deal with it -- so ``\index{Main\|Sub}`` really does come
+        out with an encap of "Sub". This used to be read as a plain entry,
+        which meant the app and makeindex disagreed about the same tag.
+        """
+        assert grammar.split_encap(r"Main\|Sub") == ("Main\\", "Sub")
+
+    def test_a_quote_does_protect_it(self):
+        assert grammar.split_encap(r'Main"|Sub') == (r'Main"|Sub', "")
+
+    def test_a_doubled_quote_is_a_literal_and_still_lets_the_pipe_separate(self):
+        assert grammar.split_encap(r'Main""|bold') == (r'Main""', "bold")
+
+    def test_a_backslashed_quote_is_a_literal_quote_not_an_escape(self):
+        r"""``\"`` is how an umlaut is written; its quote protects nothing."""
+        assert grammar.split_encap(r'M\"unchen|bold') == (r'M\"unchen', "bold")
 
     def test_whitespace_stripped_by_default(self):
         assert grammar.split_encap("  Main | bold  ") == ("Main", "bold")
@@ -90,8 +107,15 @@ class TestSplitLevels:
     def test_bang_inside_braces_does_not_split(self):
         assert grammar.split_levels("A{B!C}D") == ["A{B!C}D"]
 
-    def test_escaped_bang_does_not_split(self):
-        assert grammar.split_levels(r"A\!B!C") == [r"A\!B", "C"]
+    def test_a_backslash_does_not_protect_the_bang(self):
+        """makeindex splits on it regardless; so, now, does this."""
+        assert grammar.split_levels(r"A\!B!C") == ["A\\", "B", "C"]
+
+    def test_a_quote_does_protect_it(self):
+        assert grammar.split_levels(r'A"!B!C') == [r'A"!B', "C"]
+
+    def test_a_quoted_bang_survives_the_round_trip(self):
+        assert grammar.join_levels(grammar.split_levels(r'A"!B!C')) == r'A"!B!C'
 
     def test_trailing_separator_yields_empty_level(self):
         assert grammar.split_levels("Main!") == ["Main", ""]
@@ -175,8 +199,11 @@ class TestSortKeys:
     def test_at_inside_braces_is_not_a_separator(self):
         assert grammar.split_sort_key("a{b@c}d") == ("", "a{b@c}d")
 
-    def test_escaped_at_is_not_a_separator(self):
-        assert grammar.split_sort_key(r"a\@b") == ("", r"a\@b")
+    def test_a_backslash_does_not_protect_the_at(self):
+        assert grammar.split_sort_key(r"a\@b") == ("a\\", "b")
+
+    def test_a_quote_does_protect_it(self):
+        assert grammar.split_sort_key(r'a"@b') == ("", r'a"@b')
 
     def test_first_top_level_at_wins(self):
         assert grammar.split_sort_key("a@b@c") == ("a", "b@c")
@@ -600,6 +627,66 @@ class TestStripStringMacro:
 
     def test_leaves_other_text_alone(self):
         assert grammar.strip_string_macro("Plain text") == "Plain text"
+
+
+class TestMakeindexEscaping:
+    r"""
+    The quote is the only escape makeindex honours. The backslash it
+    simply copies into the .ind for LaTeX to interpret -- which is why
+    ``\%`` works and ``\!`` does not.
+    """
+
+    @pytest.mark.parametrize("plain, escaped", [
+        ("Bang! Goes", 'Bang"! Goes'),
+        ("user@host", 'user"@host'),
+        ("a|b", 'a"|b'),
+        ('say "hi"', 'say ""hi""'),
+        ("nothing to do", "nothing to do"),
+        ("", ""),
+    ])
+    def test_escape_quotes_every_separator(self, plain, escaped):
+        assert grammar.escape_for_makeindex(plain) == escaped
+
+    def test_escaping_takes_plain_text_and_is_not_idempotent(self):
+        """
+        Pinned rather than papered over: an already-escaped '""' and two
+        typed quotation marks are the same three characters, so a second
+        pass has to escape the escapes. Unescape first if unsure.
+        """
+        once = grammar.escape_for_makeindex("Bang! Goes")
+        assert once == 'Bang"! Goes'
+        assert grammar.escape_for_makeindex(once) == 'Bang"""! Goes'
+
+    def test_an_umlaut_keeps_its_single_quote(self):
+        r"""
+        ``\"`` is a literal quote to makeindex, not an escape. Doubling it
+        would print ø where ö was meant.
+        """
+        assert grammar.escape_for_makeindex(r"M\"unchen") == r"M\"unchen"
+
+    @pytest.mark.parametrize("escaped, meaning", [
+        ('Bang"! Goes', "Bang! Goes"),
+        ('a""b', 'a"b'),
+        ('"a', "a"),
+        (r"M\"unchen", r"M\"unchen"),
+        (r"A\!B", r"A\!B"),
+        ("plain", "plain"),
+    ])
+    def test_unescape_says_what_makeindex_will_see(self, escaped, meaning):
+        assert grammar.unescape_makeindex(escaped) == meaning
+
+    @pytest.mark.parametrize("plain", [
+        "Bang! Goes", "user@host", "a|b", 'say "hi"', "plain words", r"M\"unchen",
+    ])
+    def test_the_pair_round_trips(self, plain):
+        assert grammar.unescape_makeindex(grammar.escape_for_makeindex(plain)) == plain
+
+    def test_escaped_text_no_longer_splits(self):
+        escaped = grammar.escape_for_makeindex("Bang! Goes")
+        assert grammar.split_levels(escaped) == [escaped]
+        assert grammar.split_encap(grammar.escape_for_makeindex("a|b")) == (r'a"|b', "")
+        assert grammar.split_sort_key(grammar.escape_for_makeindex("user@host")) == \
+            ("", r'user"@host')
 
 
 class TestExtractBalancedBraces:

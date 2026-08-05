@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### `"` is now the escape character in an index entry, not `\`
+
+The editor used to treat `\!`, `\@` and `\|` as escaped characters — an
+exclamation mark, an at-sign, a vertical bar, stripped of their meaning as index
+grammar. **`makeindex` has never read them that way.** A backslash means nothing at
+all to `makeindex`; it copies it straight into the generated index for LaTeX to
+deal with, which is exactly why `\%` and `\&` work. So `\index{A\|B}` really does
+come out with a page style of `B`, and this editor showed it to you as a plain
+entry with a stray `\|` in the middle of it.
+
+The escape `makeindex` does honour is the **double quote**:
+
+| Written | Read as |
+|---|---|
+| `Bang"! Goes` | one heading, printing *Bang! Goes* |
+| `user"@host` | one heading, printing *user@host* |
+| `a"\|b` | one heading, printing *a\|b* |
+| `""` | one quotation mark |
+| `\"o` | ö — a LaTeX umlaut, its quote left alone |
+
+That is now what the editor reads. **If a project already contains `\!`, `\@` or
+`\|` inside an `\index` tag, those entries will be read differently from now on** —
+as the level break, sort key or page style `makeindex` was always going to make of
+them. Nothing is rewritten in your files; the editor has simply stopped disagreeing
+with the tool it writes for. Backslash escaping of braces (`\{`, `\}`) is
+unaffected — that one is LaTeX's, and it always worked.
+
 ### Bold and italic no longer break the markup around them
 
 The **B** and **I** buttons in the Index Entry window wrapped whatever you had
