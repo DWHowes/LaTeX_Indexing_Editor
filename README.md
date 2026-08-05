@@ -42,9 +42,9 @@ No Python, no setup — just download and run the installer.
 
 1. **Download the installer**
 
-   **[⬇ Download LatexIndexingEditor-Setup-0.2.0-alpha.exe](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases/download/v0.2.0-alpha/LatexIndexingEditor-Setup-0.2.0-alpha.exe)**
+   **[⬇ Download LatexIndexingEditor-Setup-0.3.0-alpha.exe](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases/download/v0.3.0-alpha/LatexIndexingEditor-Setup-0.3.0-alpha.exe)**
 
-   (Windows only. See the [release page](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases/tag/v0.2.0-alpha) for release notes, or the [full list of releases](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases) for other versions.)
+   (Windows only. See the [release page](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases/tag/v0.3.0-alpha) for release notes, or the [full list of releases](https://github.com/DWHowes/LaTeX_Indexing_Editor/releases) for other versions.)
 
 2. **Run the installer**
 
@@ -55,6 +55,12 @@ No Python, no setup — just download and run the installer.
 3. **Launch it**
 
    Find "LaTeX Indexing Editor" in your Start Menu (or on your Desktop, if you checked that option during install) and open it.
+
+4. **Read the guide (optional)**
+
+   The installer also puts three PDFs on your machine: the **User Guide**, which walks through every part of the application; a **Design Overview** of how it is built; and a **Name Cache SQL Queries** reference. Open them from the "LaTeX Indexing Editor Documentation" shortcut in your Start Menu, next to the one that launches the app.
+
+   The application also has its own built-in help — **Help → Contents...**, or `F1` — which covers the same ground in shorter form, without leaving the app.
 
 #### Reporting problems
 

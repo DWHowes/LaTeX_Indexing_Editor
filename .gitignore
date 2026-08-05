@@ -5,7 +5,13 @@ session_logs
 .session_backups
 __pycache__
 data
-documentation
+# The authoring sources (.docx/.rtf) and their screenshots stay out; the
+# PDFs are the deliverable and ship inside the installer, so they are
+# tracked. Written as documentation/* rather than documentation, because
+# git will not descend into an excluded directory and a negation inside
+# one has no effect.
+documentation/*
+!documentation/*.pdf
 *.txt
 !requirements.txt
 !requirements-dev.txt

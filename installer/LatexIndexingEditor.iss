@@ -7,7 +7,7 @@
 #define MyAppName "LaTeX Indexing Editor"
 ; Keep in step with APP_VERSION in models/app_version.py, which is what the
 ; About box reports -- Inno cannot read the Python module.
-#define MyAppVersion "0.2.0-alpha"
+#define MyAppVersion "0.3.0-alpha"
 #define MyAppPublisher "DH Indexing"
 #define MyAppExeName "LatexIndexingEditor.exe"
 #define MySourceDir "..\dist\LatexIndexingEditor"
@@ -50,6 +50,10 @@ Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdir
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+; The guide and reference PDFs are installed beside the executable, under
+; %LOCALAPPDATA%\Programs -- somewhere nobody browses to. Without this
+; shortcut they would ship and never be found.
+Name: "{autoprograms}\{#MyAppName} Documentation"; Filename: "{app}\documentation"
 Name: "{autoprograms}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]

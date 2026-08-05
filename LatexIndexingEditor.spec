@@ -14,6 +14,12 @@ a = Analysis(
         ('data', 'data'),
         ('help', 'help'),
         ('icons', 'icons'),
+        # The PDFs only, deliberately -- documentation/ also holds the
+        # .docx/.rtf authoring sources and their screenshot folder, none
+        # of which a tester has any use for and all of which are several
+        # times the size of what they produce. The same split is in
+        # .gitignore, and for the same reason.
+        ('documentation/*.pdf', 'documentation'),
     ],
     hiddenimports=[],
     hookspath=[],

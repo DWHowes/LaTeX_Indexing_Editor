@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-alpha — 5 August 2026
+
+This release is mostly about one thing: **the editor now knows what `makeindex`
+does with what you type, and says so.** Until now it looked at the structure of an
+entry and never at its content, so a heading containing a bare `%` could travel all
+the way to the printed index — truncated, page number gone — without a single
+warning from anything. That is fixed, along with the places the editor's own idea
+of `\index` syntax differed from the real one.
+
+The other headline is **sort keys**: the editor no longer invents one behind your
+back, and every heading level now has a **Sort as** field of its own.
+
+The full guide and reference PDFs now ship with the installer — see the last
+section.
 
 ### Entry text is now checked as you type
 
@@ -246,6 +259,43 @@ only the target.
 - The standalone theme editor follows the application theme. The colour previews
   inside it deliberately do not, since their whole job is to show the colours you
   are choosing.
+
+### Documentation now ships with the application
+
+The installer places three PDFs alongside the program, reachable from a **"LaTeX
+Indexing Editor Documentation"** shortcut in your Start Menu:
+
+- **User Guide** — the full guide, twelve chapters and every screen.
+- **Design Overview** — how the application is put together, for anyone reading or
+  changing the code.
+- **Name Cache SQL Queries** — reference for the authority-lookup cache.
+
+The application's own **Help → Contents...** (`F1`) is unchanged and still covers
+the same ground in shorter form.
+
+### Under the hood
+
+- One module now owns every question of "what will LaTeX and `makeindex` make of
+  this text", and both the Index Entry window and the entry table ask it, so the two
+  cannot give different answers about the same entry.
+- The `\index` grammar gained the quote escape and lost the backslash one, which
+  removed a class of disagreement between this editor and the tool it writes for.
+- Test suite grew from roughly 1265 tests to 1530, all passing.
+
+### Upgrading from 0.2.0-alpha
+
+- Installs cleanly over the previous version; your projects and settings are
+  unaffected.
+- **If any of your `\index` tags contain `\!`, `\@` or `\|`, those entries will read
+  differently after upgrading** — as the level break, sort key or page style that
+  `makeindex` was always going to make of them. Nothing in your files is rewritten;
+  the editor has simply stopped disagreeing with `makeindex` about them. See the
+  escape-character section above.
+- Entries that were given a sort key automatically by an older version keep it. It
+  is now visible and editable in both the **Sort as** field and the entry table's
+  Sort columns, which is where to correct one that was guessed wrongly.
+
+---
 
 ## 0.2.0-alpha — 31 July 2026
 
