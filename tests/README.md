@@ -32,6 +32,11 @@ Five sections follow, one per layer, then three cross-cutting sections:
 [Gotchas when writing tests](#gotchas-when-writing-tests), and
 [The known-dead-signal xfail convention](#the-known-dead-signal-xfail-convention).
 
+Layer 1 also holds one test file whose subject is not a bug at all but a
+contract with an external tool: see [The app disagreeing with the tool it writes
+for](#the-app-disagreeing-with-the-tool-it-writes-for) before changing anything
+about how `\index` syntax is read or written.
+
 **A note on how to extend this file.** Every entry below is anchored to a
 named module, test file or section — never to a position ("the five above",
 "see the previous paragraph", "as of today"). Positional and time-relative
@@ -44,8 +49,8 @@ extend a named one, and link to sections by name.
 ## Layer 1 (unit)
 
 Pure logic with no PySide6 dependency, covering every module identified for
-it. One subsection per module; the two `\index`-grammar modules come first
-because they carry most of this layer's weight and most of its history.
+it. One subsection per module; the `\index`-grammar modules come first because
+they carry most of this layer's weight and most of its history.
 
 Each subsection is named for the module under test, whose tests usually live
 in the correspondingly named `tests/unit/models/test_<module>.py`, so
@@ -112,6 +117,77 @@ ranges the moment this changed — covered where they live, in
 its *own* copy of the rule, `EntryModifierList._is_range_encap`, was folded
 into the grammar; see [`entry_modifier_list.py` page-style
 delegate](#entry_modifier_listpy-page-style-delegate).
+
+**The escape character is `"`, and it never was `\`.** `ESCAPABLE_CHARS` used
+to hold `! @ | { }` in one tuple, on the assumption that a backslash suppressed
+all five. It suppresses the braces only. `makeindex` has no use for a backslash
+at all — it copies one verbatim into the `.ind` for LaTeX to interpret, which
+is exactly why `\%` and `\&` work — so `\index{A\|B}` really does carry an
+encap of `B`, and this module read the same tag as a plain entry. The tuple is
+now `LATEX_ESCAPABLE` (braces, backslash-escaped, a *scanning* concern) and
+`QUOTE_ESCAPABLE` (`! @ | "`, quote-escaped, a *grammar* concern), with
+`escape_for_makeindex`/`unescape_makeindex` as the pair that writes and reads
+that form. Three things worth knowing before editing the scan loops:
+
+- **`\"` is a literal quote character, not an escape.** That is `makeindex`'s
+  own rule and it is not a corner case: `\"o` is how an umlaut is written, and
+  reading its quote as an escape turns ö into ø in the printed index.
+  `_latex_escape_length` exists to step over it on both the reading and the
+  writing side.
+- **`escape_for_makeindex` is deliberately not idempotent**, and
+  `test_escaping_takes_plain_text_and_is_not_idempotent` pins that rather than
+  papering over it. An already-escaped `""` and two typed quotation marks are
+  the same three characters, so a second pass escapes the escapes. It is the
+  exact inverse of `unescape_makeindex`; unescape first if the input's state is
+  unknown.
+- **`split_encap` still scans right-to-left**, consulting a precomputed
+  `_escaped_positions` set rather than being rewritten left-to-right. A
+  left-to-right rewrite reads identically on well-formed input and *differently*
+  on input whose braces do not balance, which is not a change to make as a side
+  effect of adding quote handling.
+
+Four tests encoded the old behaviour and were rewritten to the corrected
+reading rather than deleted, three here and one in
+`test_latex_index_parser.py`. Changing what an already-shipped project's tags
+mean is a real decision; see [The app disagreeing with the tool it writes
+for](#the-app-disagreeing-with-the-tool-it-writes-for).
+
+### `index_syntax_check.py`
+
+The advisory checker behind the warning icons in the Index Entry window and the
+entry table. `check(text, *, role)` returns `Finding`s; `apply_fixes` repairs a
+whole field at once; `expand_to_safe_span` and `braces_balance` serve the
+formatting buttons. No Qt, and nothing here blocks anything — every finding is
+advice a caller may show and a user may ignore.
+
+**Every expectation in `test_index_syntax_check.py` is pinned to something
+measured against real pdflatex + `makeindex` 2.17, not reasoned about**, and
+that is the property to preserve when extending it. Two findings would not have
+been believed from reading alone:
+
+- A bare `%` is an **error** even though the document compiles clean with no
+  warning at any stage — the printed index silently loses the rest of the term
+  and its page number. This one finding is why the module exists.
+- Bare `&`, `_`, `#`, `$`, `^` pass a one-pass probe and fail on the **second**
+  pdflatex pass, when `\printindex` reads the `.ind` back. A probe that does not
+  run the second pass reports them all as fine.
+
+`$` is checked for **parity**, so `$E=mc^2$` is clean, and `^`/`_` are findings
+only outside math mode. `~` is deliberately not checked at all: it is a
+non-breaking space and an ordinary thing to want in a heading.
+
+Two details that look like typos and are not. `^` fixes to `\^{}` rather than
+`\^`, because a bare `\^` is an accent command still waiting for its argument —
+the obvious fix trades one broken build for another. And `Finding` carries a
+`length`, because `\!` is a *two*-character finding: the backslash does not
+protect the separator, so the fix replaces both characters with `"!`.
+
+`TestExpandToSafeSpan` covers the formatting-button fix; the failure it
+describes is under [Formatting buttons taking a selection
+literally](#formatting-buttons-taking-a-selection-literally). Its cases are
+written as the *selections a user makes*, not as offsets — a test named for
+"selecting only the backslash" survives a rewrite of the expansion algorithm,
+one named for `(4, 5)` does not.
 
 ### `index_command_stack.py`
 
@@ -459,6 +535,58 @@ The hierarchy-validation gate (`_validate_hierarchy`/`_on_cell_data_changed`/
 through before `entry_modifier_edit_committed` can fire and drive the whole
 staging → `.tex` write → DB flush pipeline. See
 `test_entry_modifier_list_hierarchy_validation.py`.
+
+### Entry text safety in the Index Entry window
+
+`test_index_entry_window_entry_text_safety.py` covers the two things the window
+used to do to entry text in silence. Both are described in full under
+[Formatting buttons taking a selection
+literally](#formatting-buttons-taking-a-selection-literally) and [Silent
+transformations of what the user typed](#silent-transformations-of-what-the-user-typed).
+
+The window is driven directly rather than through real mouse selection —
+`setSelection` then `format_selected_text`, `editingFinished.emit()` for the
+focus-out split — because what is under test is the decision each makes, not
+Qt's selection or focus machinery.
+
+**Do not assert on `field.actions()` being empty or having a length.** Two
+different trailing actions live on those fields: the sort-key split's undo
+button, which comes and goes, and the standing syntax-advice action, which
+exists for the window's life and is merely hidden while the text is clean. An
+earlier version of this file counted actions and broke the moment the second
+one arrived. Assert membership of the specific action instead
+(`window._split_notices[MAIN] in window.main_entry.actions()`).
+
+### Syntax advice on both surfaces
+
+`test_index_syntax_advice_surfaces.py` covers `views/index_syntax_advice.py`
+and the two places that call it — the six fields of the Index Entry window and
+the Display/Sort cells of the entry table. The presentation layer exists
+precisely so the two cannot drift, so the file ends with a test asserting the
+table's tooltip *is* the window's tooltip minus its fix hint. Creating an entry
+and editing one must say the same thing about the same text.
+
+Three things worth knowing before editing it:
+
+- **It needs a `QApplication` even for the tests that touch no widget.**
+  `advise()` reaches for `QApplication.style()` to build its icons, which
+  returns `None` with no instance and fails with an `AttributeError` far from
+  the cause. An autouse `_application(qapp)` fixture supplies one.
+- **The window's icon is one standing `QAction` per field, shown and hidden**,
+  never created and destroyed. The fix runs from inside that action's own
+  `triggered` handler and immediately changes the text, so a create/destroy
+  design would be deleting the sender mid-signal. Tests reach it as
+  `window._syntax_notices[field]` and assert `isVisible()`/`isEnabled()`.
+- **The table's icons ride on `DecorationRole`/`ToolTipRole`**, which are not
+  `EditRole`/`DisplayRole`, so writing them from `_on_cell_data_changed` does
+  not come back round through that handler. Every path that writes a cell
+  applies the advice, the restore-from-stash path included, or a corrected cell
+  keeps a stale icon.
+
+`test_the_repair_is_undoable_in_the_field` pins a small thing that is easy to
+undo by accident: the fix is written with `selectAll()` + `insert()`, not
+`setText()`, because `setText` clears `QLineEdit`'s undo stack and a mechanical
+correction someone did not want should cost one keystroke to reverse.
 
 ### `IndexTreeView` (view-layer logic)
 
@@ -1002,6 +1130,84 @@ times:
 3. Saves never re-stamped `project_file_sync_state`, so the app reported the
    user's own edits as external ones; see
    [Checksum re-stamping on save](#checksum-re-stamping-on-save).
+
+### The app disagreeing with the tool it writes for
+
+This application's whole output is input to `makeindex`. Every time it has
+decided for itself what a piece of `\index` syntax means, rather than checking,
+it has eventually been wrong — and the damage is always quiet, because the
+document still builds and only the *printed index* is wrong. Five instances:
+
+1. **`range_role` was `encap == "("`,** an exact comparison, so a styled range
+   (`|(textbf`) read as a plain entry whose page style was the nonsense command
+   `(textbf`. See [`index_tag_grammar.py`](#index_tag_grammarpy).
+2. **The Page Ref buttons wrote `|bold` and `|italic`,** neither of which is a
+   LaTeX command — `makeindex` wraps the page number in whatever name follows
+   the `|`, so the compiled index called an undefined `\bold`.
+3. **A styled range was written `|textbf|(`.** `makeindex` reads `(` as a
+   marker only at the *start* of an encap, so that is not a range at all; and
+   this application's own grammar splits at the last `|`, so it then read its
+   own output back as a heading containing `|textbf`. See
+   [`LatexIndexController` (entry creation)](#latexindexcontroller-entry-creation).
+4. **`\!`, `\@` and `\|` were treated as escapes.** They are not; a backslash
+   means nothing to `makeindex`. See [`index_tag_grammar.py`](#index_tag_grammarpy).
+5. **Brace nesting — the one kept deliberately.** `makeindex` does *not*
+   respect braces for its separators: `\index{Note \textbf{a|b}}` really comes
+   out as `\item Note \textbf{a, \b}{4}`. The brace-aware reading here is still
+   the better model of what an entry *is*, and the whole application is built
+   on it, so it stays and the disagreement is **reported** instead — see
+   [`index_syntax_check.py`](#index_syntax_checkpy).
+
+Two lessons. **Measure, and measure through the second pass.** Several of these
+characters pass a single pdflatex run and fail only when `\printindex` reads the
+`.ind` back, with the error pointing into a generated file; a one-pass probe
+reports them as fine. And **a correction here changes what an already-shipped
+project's tags mean.** That is a decision, not a refactor: instance 4 was taken
+knowingly, with the four tests that encoded the old reading rewritten rather
+than deleted, and the change written up for users rather than slipped in.
+
+### Formatting buttons taking a selection literally
+
+A text field will let a user select any two character positions, including
+inside a LaTeX command. `LatexIndexWindow.format_selected_text` used to wrap
+exactly that. With `RMS \textit{Titanic}` in the field, selecting just the
+backslash produced `RMS \textbf{\}textit{Titanic}`, and selecting from just
+after it into the middle of the word produced `RMS \\textbf{textit{Tit}anic}` —
+where `\\` is a line break and `textit` prints as an ordinary word.
+
+This belongs to the same family as [The app disagreeing with the tool it writes
+for](#the-app-disagreeing-with-the-tool-it-writes-for) in its consequence:
+both reach the *printed index* looking like damage rather than stopping with an
+error anyone could act on.
+
+The fix widens the selection first (`expand_to_safe_span`) rather than refusing:
+a macro token is never cut in half, a macro keeps its argument group, and braces
+balance. A field whose braces do not balance to begin with is declined outright,
+because there is no safe span in it to widen to. See
+[`index_syntax_check.py`](#index_syntax_checkpy) and [Entry text safety in the
+Index Entry window](#entry-text-safety-in-the-index-entry-window).
+
+### Silent transformations of what the user typed
+
+An automatic correction that is right most of the time still has to be visible
+the times it is wrong, because the user has no other way to find out. Two
+instances, both in the Index Entry window:
+
+1. **A typed `@` was moved without a word.** `user@host` became
+   `\index{host}`, filed under *user*. The split itself is right far more often
+   than not — it is also how an autocomplete suggestion carrying a sort key
+   gets unpacked — so it still happens; it now names the level in the status bar
+   and puts a one-click undo on the field. Declining is remembered against the
+   *text*, not the field, so the focus-out that follows the undo click does not
+   immediately re-apply it.
+2. **A sort key was invented from formatting.** Any level containing bold or
+   italic had one generated by stripping the macros, so
+   `\textit{The Quality of Mercy}` filed under T. Nothing is generated now; see
+   `test_index_entry_window_sort_keys.py`.
+
+**When adding an automatic correction to this application, give it a visible
+notice and a way back in the same change.** Both of these were found by asking
+what the feature does when it guesses wrong, not by a failing test.
 
 ### Styling a widget takes its sub-controls away from the native style
 
