@@ -5,8 +5,6 @@ from contextlib import contextmanager
 from typing import List, Dict, Any
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, Qt
-
 from models import index_tag_grammar as grammar
 
 class _TransactionConnection:
@@ -43,9 +41,10 @@ class _TransactionConnection:
 
 
 class FileTreePersistence:
-    # Define roles as explicit class constants to isolate them from controllers
-    DIRECTORY_FLAG_ROLE = Qt.ItemDataRole.UserRole
-    ABSOLUTE_PATH_ROLE = Qt.ItemDataRole.UserRole + 1
+    # This repository deals in paths, never in view indices. The item-data
+    # roles the workspace tree stores its nodes under, and the two accessors
+    # that read them, live on FileTreeView -- they were here, which meant a
+    # database module imported QModelIndex.
 
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -148,16 +147,53 @@ class FileTreePersistence:
         return conn
 
     @staticmethod
-    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl_type: str) -> None:
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl_type: str) -> bool:
         """
         Additive schema migration: adds `column` to `table` if it isn't
         already there. Existing rows backfill via ddl_type's DEFAULT.
         Table/column names are only ever passed as string literals from
         this file, never user input, so f-string interpolation here is safe.
+
+        Returns True if the column was just added, so a caller needing a
+        computed backfill (rather than a constant DEFAULT) can run it once.
         """
         existing_columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-        if column not in existing_columns:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+        if column in existing_columns:
+            return False
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+        return True
+
+    @staticmethod
+    def _cross_reference_flag(encap) -> int:
+        """
+        The stored form of "this reference is a cross-reference", derived
+        from its encap by the grammar -- the only thing in the application
+        entitled to an opinion on what a cross-reference looks like.
+        """
+        return 1 if grammar.is_xref_encap(encap) else 0
+
+    @classmethod
+    def _backfill_cross_reference_flags(cls, conn: sqlite3.Connection) -> int:
+        """
+        Sets is_cross_reference on every existing row from its encap. Run
+        once, when the column is first added to an older project database.
+        Returns the number of rows flagged, for the trace log.
+        """
+        rows = conn.execute(
+            "SELECT unique_id_number, encap FROM project_references"
+        ).fetchall()
+
+        flagged = [
+            (row[0],) for row in rows if cls._cross_reference_flag(row[1])
+        ]
+        if flagged:
+            conn.executemany(
+                "UPDATE project_references SET is_cross_reference = 1 "
+                "WHERE unique_id_number = ?",
+                flagged,
+            )
+        print(f"[DB TRACE] is_cross_reference backfilled: {len(flagged)} of {len(rows)} row(s).")
+        return len(flagged)
 
     def initialize_database_schema(self) -> None:
         """Enforces relational integrity constraints matching the worker keys at cold boot."""
@@ -217,6 +253,7 @@ class FileTreePersistence:
                     has_references INTEGER DEFAULT 0,
                     range_partner_id INTEGER DEFAULT NULL,
                     is_range_closer INTEGER DEFAULT 0,
+                    is_cross_reference INTEGER NOT NULL DEFAULT 0,
                     macro_command TEXT NOT NULL DEFAULT 'index',
                     FOREIGN KEY(heading_id) REFERENCES project_headings(id) ON DELETE SET NULL
                 );
@@ -228,6 +265,24 @@ class FileTreePersistence:
             # explicitly. Runs every time this method does (project open/switch),
             # so it's a one-time no-op after the first open post-upgrade.
             self._ensure_column(conn, "project_references", "macro_command", "TEXT NOT NULL DEFAULT 'index'")
+
+            # Same self-heal for is_cross_reference, but the backfill is a
+            # computed one rather than a constant DEFAULT: whether a row is a
+            # cross-reference is a fact about its encap, and every existing
+            # row already has one.
+            #
+            # This column exists so the queries below can ask "is this a
+            # cross-reference?" without SQL having to know what a
+            # cross-reference looks like in LaTeX. Three of them used to
+            # interpolate a `(encap LIKE 'see{%' OR encap LIKE 'seealso{%')`
+            # fragment, which put markup inside the database layer and gave
+            # the schema a second, looser opinion on xref-ness than
+            # index_tag_grammar's -- looser because a LIKE prefix accepts an
+            # unterminated `see{Target` that the grammar rejects. The stored
+            # flag is written from the grammar, so there is now one answer.
+            if self._ensure_column(conn, "project_references", "is_cross_reference",
+                                   "INTEGER NOT NULL DEFAULT 0"):
+                self._backfill_cross_reference_flags(conn)
 
             # Partition 5: Per-file content checksums, recorded whenever
             # project_headings/project_references are known to genuinely
@@ -319,19 +374,6 @@ class FileTreePersistence:
                 "SELECT absolute_path FROM project_files WHERE is_active = 1"
             )
             return [row["absolute_path"] for row in cursor.fetchall()]
-
-    def is_directory_node(self, index: QModelIndex) -> bool:
-        """Translates index indicators to clean domain booleans."""
-        if not index.isValid():
-            return False
-        return bool(index.data(self.DIRECTORY_FLAG_ROLE))
-
-    def get_absolute_path(self, index: QModelIndex) -> str:
-        """Resolves raw data stream indices into clean, normalized path strings."""
-        if not index.isValid():
-            return ""
-        raw_path = str(index.data(self.ABSOLUTE_PATH_ROLE) or "")
-        return os.path.normpath(raw_path) if raw_path else ""
 
     def prune_file_record(self, absolute_path: str) -> bool:
         """
@@ -540,7 +582,7 @@ class FileTreePersistence:
         (the term written directly on an ordinary \\index macro somewhere in
         the project, from before the Cross-References tab existed), rather
         than a row already managed via project_cross_references. Same
-        encap-prefix predicate fetch_index_statistics's is_cross_reference_sql
+        is_cross_reference flag that fetch_index_statistics
         and fetch_range_consistency_candidates already use to recognize a
         cross-reference row.
         """
@@ -552,7 +594,7 @@ class FileTreePersistence:
                 cursor = conn.execute(
                     "SELECT unique_id_number, heading_raw_text, file_path, line_number, encap "
                     "FROM project_references "
-                    f"WHERE {grammar.SQL_IS_CROSS_REFERENCE} "
+                    "WHERE is_cross_reference = 1 "
                     "ORDER BY heading_raw_text COLLATE NOCASE"
                 )
                 return [dict(row) for row in cursor.fetchall()]
@@ -900,6 +942,10 @@ class FileTreePersistence:
                             1 if r.get("has_references") else 0,
                             r.get("range_partner_id"), # Int or None
                             1 if r.get("is_range_closer") else 0,
+                            # Derived here, never taken from the caller's dict:
+                            # xref-ness is a function of the encap, and a
+                            # second copy of it in the payload could disagree.
+                            self._cross_reference_flag(r.get("encap")),
                             str(r.get("macro_command") or "index")
                         )
                         for r in references
@@ -910,8 +956,8 @@ class FileTreePersistence:
                             heading_id, heading_raw_text, uid, unique_id_number,
                             file_path, line_number, column_offset, absolute_position, absolute_end,
                             encap, see_references, seealso_references, has_references,
-                            range_partner_id, is_range_closer, macro_command
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                            range_partner_id, is_range_closer, is_cross_reference, macro_command
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                     """, references_batch)
                     
                 conn.commit()
@@ -1049,10 +1095,10 @@ class FileTreePersistence:
         column regardless (LatexIndexParser via index_tag_grammar.
         split_encap, and CrossReferenceController via
         cross_reference_model.build_xref_index_macro for a cross-reference
-        created through the Cross-References tab), so the encap LIKE
-        predicate -- index_tag_grammar.SQL_IS_CROSS_REFERENCE, used below
-        -- remains the simplest signal both entry-creation paths agree on
-        regardless of DB vintage. Range closers are excluded from both counts --
+        created through the Cross-References tab), so the is_cross_reference
+        flag derived from that encap -- see _cross_reference_flag -- remains
+        the simplest signal both entry-creation paths agree on regardless of
+        DB vintage. Range closers are excluded from both counts --
         they're the second half of one logical range entry, not an
         independent reference; the range's opener already accounts for it.
         """
@@ -1066,11 +1112,6 @@ class FileTreePersistence:
         if not self.db_path:
             return stats
 
-        # SQLite cannot call into index_tag_grammar, so the see/seealso
-        # shape is spelled out once there as SQL_IS_CROSS_REFERENCE and
-        # reused here -- the two halves of the grammar stay in one file.
-        is_cross_reference_sql = grammar.SQL_IS_CROSS_REFERENCE
-
         try:
             with self._get_connection() as conn:
                 for depth, key in ((0, "main_headings"), (1, "sub1_headings"), (2, "sub2_headings")):
@@ -1081,13 +1122,13 @@ class FileTreePersistence:
 
                 row = conn.execute(
                     "SELECT COUNT(*) AS c FROM project_references "
-                    f"WHERE is_range_closer = 0 AND NOT {is_cross_reference_sql}"
+                    "WHERE is_range_closer = 0 AND is_cross_reference = 0"
                 ).fetchone()
                 stats["total_references"] = row["c"] if row else 0
 
                 row = conn.execute(
                     "SELECT COUNT(*) AS c FROM project_references "
-                    f"WHERE is_range_closer = 0 AND {is_cross_reference_sql}"
+                    "WHERE is_range_closer = 0 AND is_cross_reference = 1"
                 ).fetchone()
                 stats["total_cross_references"] = row["c"] if row else 0
         except sqlite3.Error as e:
@@ -1134,7 +1175,7 @@ class FileTreePersistence:
                 cursor = conn.execute(
                     "SELECT unique_id_number, heading_id, file_path, line_number, "
                     "column_offset, absolute_position, encap FROM project_references "
-                    f"WHERE NOT {grammar.SQL_IS_CROSS_REFERENCE} "
+                    "WHERE is_cross_reference = 0 "
                     "ORDER BY file_path, heading_id, absolute_position"
                 )
                 rows = [dict(row) for row in cursor.fetchall()]
@@ -1222,6 +1263,16 @@ class FileTreePersistence:
         if not fields_to_write:
             print(f"[DB TRACE] update_reference_field: no mutable fields in payload for ID {entry_id}")
             return False
+
+        # is_cross_reference is derived, not mutable: it rides along with any
+        # write that changes the encap it is derived from, and is not
+        # settable on its own. Editing a "see{X}" encap into a page style
+        # (or the reverse) would otherwise leave the flag behind, and every
+        # cross-reference query reads the flag.
+        if "encap" in fields_to_write:
+            fields_to_write["is_cross_reference"] = self._cross_reference_flag(
+                fields_to_write["encap"]
+            )
 
         set_clause = ", ".join(f"{col} = ?" for col in fields_to_write)
         values = list(fields_to_write.values())
@@ -1387,14 +1438,16 @@ class FileTreePersistence:
                         absolute_position, absolute_end,
                         encap, heading_id,
                         see_references, seealso_references, has_references,
-                        range_partner_id, is_range_closer, macro_command
+                        range_partner_id, is_range_closer, is_cross_reference,
+                        macro_command
                     ) VALUES (
                         :unique_id_number, :heading_raw_text, :uid,
                         :file_path, :line_number, :column_offset,
                         :absolute_position, :absolute_end,
                         :encap, :heading_id,
                         :see_references, :seealso_references, :has_references,
-                        :range_partner_id, :is_range_closer, :macro_command
+                        :range_partner_id, :is_range_closer, :is_cross_reference,
+                        :macro_command
                     )
                 """, {
                     **entry_dict,
@@ -1403,6 +1456,7 @@ class FileTreePersistence:
                     "has_references": 1 if entry_dict.get("has_references", True) else 0,
                     "range_partner_id": entry_dict.get("range_partner_id"),
                     "is_range_closer": 1 if entry_dict.get("is_range_closer", False) else 0,
+                    "is_cross_reference": self._cross_reference_flag(entry_dict.get("encap")),
                     "macro_command": entry_dict.get("macro_command") or "index",
                 })
             return True

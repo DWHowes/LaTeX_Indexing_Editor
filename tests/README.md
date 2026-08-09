@@ -20,7 +20,9 @@ that construct real widgets) runs headlessly in a plain terminal or CI.
 tests/
   conftest.py                    # QT_QPA_PLATFORM=offscreen, fresh_persistence, sample_project_dir, booted_app
   fixtures/sample_project/       # small checked-in .tex project used across layers
-  unit/models/                   # layer 1: pure logic, no PySide6 dependency
+  unit/                          # layer 1: pure logic, no PySide6 dependency
+  unit/test_layering.py          #   ...plus the static import-direction scan (not module-specific)
+  unit/models/                   #   one file per module under test
   persistence/                   # layer 2: FileTreePersistence + ProjectLoadWorker's sync logic
   controllers/                   # layer 3: one controller at a time, hand-built collaborators
   integration/                   # layer 4: boots the REAL AppPipelineController object graph
@@ -277,6 +279,28 @@ pytest's own output for the rest of the run — see also
 [the theme broker gotcha](#the-theme-broker-is-a-process-wide-singleton) for
 the other process-wide state this suite has to put back.
 
+### Import direction (`test_layering.py`)
+
+The one file in this layer whose subject is not a module but the **shape of
+the import graph**. It exists because the `indexcore` extraction found five
+layering faults in modules headed for the shared package — none of them a
+runtime bug, all of them extraction blockers, because a model that imports a
+view is fine until the model moves package and the view does not.
+
+Three assertions, all static: no module in `models/` imports `views` or
+`controllers`; no module imports itself; and the modules named in
+`QT_FREE_MODULES` import no `PySide6`. The scan reads import statements out of
+the parse tree rather than importing anything, so a module needing a GUI, a
+display or a project on disk is covered exactly like one that isn't, and
+function-body imports count — a deferred import breaks the cycle at runtime but
+keeps the coupling this file is about.
+
+**Extend `QT_FREE_MODULES` as each extraction phase moves more code into a
+Qt-free layer.** It is the cheapest available enforcement of the rule that
+`indexcore`'s model, dialect, backend, persistence, syntax and session layers
+import nothing outside the standard library, which is what lets the Word and
+InDesign backends run headlessly.
+
 ### `entry_modifier_list.py` encap style values
 
 `test_encap_style_values.py` covers a single free function,
@@ -284,6 +308,12 @@ the other process-wide state this suite has to put back.
 module. The bold/italic encap name lists behind the Entry Table's Page column
 became a user preference (Preferences → General) because a project styling its
 page numbers with its own macro silently got a plain, mis-styled cell for it.
+
+The *defaults* those lists start from live on `index_tag_grammar`, not here:
+which markup means bold is a fact about the format. They used to sit in
+`views/entry_modifier_list.py` and be imported upwards by
+`models/preferences_persistence.py`, which is one of the faults
+[`test_layering.py`](#import-direction-test_layeringpy) now prevents.
 
 The lists are module-level state read while building every table row, so each
 test restores the defaults afterwards; a leaked value changes how an unrelated
@@ -384,6 +414,20 @@ Split by concern rather than by class: `test_schema_and_setup.py`,
 `test_metadata_and_commands.py`, `test_index_manifest.py`,
 `test_statistics_and_queries.py`, `test_cross_references.py`,
 `test_sync_checksums.py`, and `test_project_load_worker.py`.
+
+`test_schema_and_setup.py` also covers **`is_cross_reference`**, the stored
+boolean on `project_references` that replaced an
+`(encap LIKE 'see{%' OR encap LIKE 'seealso{%')` fragment three queries used to
+interpolate. The flag is *derived*, never supplied by a caller, so the coverage
+is about it staying in step with the encap it comes from: set on both insert
+paths, rewritten by any update that touches `encap` in either direction, left
+alone by an update that doesn't, and backfilled once — computed, not from a
+constant `DEFAULT` — when an older project database first gains the column.
+One test pins that the backfill does **not** re-run on a second open: it is a
+migration, not a repair pass. Note that the flag is stricter than the `LIKE`
+prefix it replaced, since it is computed by `grammar.is_xref_encap`; an
+unterminated `see{Target` is no longer a cross-reference, which is the point —
+the database now holds the same opinion as the rest of the application.
 
 `test_project_load_worker.py` also pins that a **styled** range written by
 hand — `\index{term|(textbf}` … `\index{term|)textbf}`, valid `makeindex` that
@@ -613,6 +657,14 @@ guard. See `test_context_menu_subsystem.py`, and
 [`QMenu.exec()` cannot be monkeypatched](#qmenuexec-cannot-be-monkeypatched)
 for why `populate_menu_actions` is called directly.
 
+`FileTreeContextMenuManager` emits **paths**, not `QModelIndex`, and the tests
+assert the emitted path rather than the row it came from. Both actions used to
+emit the index and leave the receiving controller to ask *the persistence
+layer* to read the item roles out of it — which is how `QModelIndex` came to be
+imported by the database module. Resolving an index belongs to this layer, so
+the directory guard on Prune is tested here too: a folder carries a path like
+any other node, so nothing but an explicit check stops it being pruned.
+
 ### Custom LaTeX commands
 
 `LatexCommandRegistryModel` (the global, `QSettings`-backed command registry
@@ -807,10 +859,17 @@ queued-connection timing.
 ### Project lifecycle
 
 Project open and base-file auto-detection (`test_base_file.py`);
-prune/reopen/restore and "Set as root file" via both the `QModelIndex`
+prune/reopen/restore and "Set as root file" via both the right-click
 context-menu path and the plain string path (`test_project_lifecycle.py`). A
 pruned file resurrecting on reopen was a real reported bug, proven fixed
 end-to-end here rather than only at the controller level.
+
+`test_base_file.py` drives the context-menu route by building the real menu
+for a tree node and triggering the action, rather than calling a controller
+slot with a `QModelIndex`. There is no such slot any more — both routes carry
+a path and land on `_handle_file_set_as_root` (see
+[`context_menu_subsystem.py`](#context_menu_subsystempy)) — and going through
+the menu covers the resolution step that the deleted adapter used to own.
 
 ### Resync
 

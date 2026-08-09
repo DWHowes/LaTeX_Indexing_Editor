@@ -64,8 +64,6 @@ from PySide6.QtCore import Qt, Signal, Slot, QModelIndex
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QFontMetrics, QCursor
 from PySide6.QtWidgets import QTreeView, QAbstractItemView, QStyle
 
-# Explicitly import required styling custom extensions
-from views.index_tree_view import CaseInsensitiveItem
 
 class IndexTreeView(QTreeView):
     """
@@ -379,9 +377,14 @@ class IndexTreeView(QTreeView):
                 h_id = head.get("id")
                 associated_refs = id_to_refs.get(int(h_id), []) if h_id is not None else []
 
+                # The heading path each reference hangs from, re-joined from
+                # the cleaned level parts. Named for what it holds, not for
+                # the format it happens to be joined in: the separator is the
+                # dialect's business, and this key travels in a record shared
+                # with subsystems that have no LaTeX in them.
                 for r_dict in associated_refs:
                     if isinstance(r_dict, dict):
-                        r_dict["entry_path_latex_format"] = grammar.join_levels(parts)
+                        r_dict["heading_path"] = grammar.join_levels(parts)
 
                 self._insert_visual_node(self.base_model.invisibleRootItem(), parts, associated_refs)
 

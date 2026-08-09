@@ -118,17 +118,22 @@ class IndexTreeContextMenuManager(BaseContextMenuManager):
 class FileTreeContextMenuManager(BaseContextMenuManager):
     """
     Subclass: File Asset Visual Context Actions.
-    Pure Interface: Emits raw indices to the controller for file validation checks.
+
+    Emits resolved *paths*, not indices. It used to emit the QModelIndex and
+    let the receiving controller ask the persistence layer to read the item
+    roles out of it, which is how a Qt view type ended up imported by the
+    database module. Reading an index is this layer's job; the controller and
+    the repository below it deal in paths.
     """
-    prune_file_triggered = Signal(QModelIndex)
-    set_root_file_triggered = Signal(QModelIndex)
+    prune_file_triggered = Signal(str)
+    set_root_file_triggered = Signal(str)
 
     def populate_menu_actions(self, menu_container: QMenu, proxy_index: QModelIndex):
         if proxy_index.column() != 0:
             proxy_index = proxy_index.siblingAtColumn(0)
 
         display_name = str(proxy_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
-        file_path = str(proxy_index.data(Qt.ItemDataRole.UserRole + 1) or "").strip()
+        file_path = self._path_of(proxy_index)
 
         set_root_action = QAction(f"Set '{display_name}' as root file", menu_container)
         set_root_action.setData(proxy_index)
@@ -154,21 +159,34 @@ class FileTreeContextMenuManager(BaseContextMenuManager):
             menu_container.addSeparator()
             menu_container.addAction(prune_action)
 
+    def _path_of(self, proxy_index: QModelIndex) -> str:
+        """The tree node's absolute path, normalized, or "" if it has none."""
+        if not isinstance(proxy_index, QModelIndex) or not proxy_index.isValid():
+            return ""
+        return self.view_widget.absolute_path_of(proxy_index).strip()
+
     @Slot()
     def _on_set_root_file_clicked(self):
         action = self.sender()
         if action and isinstance(action, QAction):
-            target_index = action.data()
-            if isinstance(target_index, QModelIndex) and target_index.isValid():
-                self.set_root_file_triggered.emit(target_index)
+            file_path = self._path_of(action.data())
+            if file_path:
+                self.set_root_file_triggered.emit(file_path)
 
     @Slot()
     def _on_prune_clicked(self):
         action = self.sender()
         if action and isinstance(action, QAction):
             target_index = action.data()
-            if isinstance(target_index, QModelIndex) and target_index.isValid():
-                self.prune_file_triggered.emit(target_index)
+            if not isinstance(target_index, QModelIndex) or not target_index.isValid():
+                return
+            # A folder has a path like anything else, so the guard has to be
+            # explicit: pruning is a per-file record operation.
+            if self.view_widget.is_directory_node(target_index):
+                return
+            file_path = self._path_of(target_index)
+            if file_path:
+                self.prune_file_triggered.emit(file_path)
 
 class EditEntryContextMenuManager(BaseContextMenuManager):
     """

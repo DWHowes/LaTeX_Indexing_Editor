@@ -3,14 +3,17 @@ GUI smoke test: the "Set as root file" workflow, driven through the real
 booted app. sample_project's main.tex auto-detects as the base file on open
 (it's the only file with both \\documentclass and \\begin{document}), so
 these tests explicitly override that choice to a different file, exercising
-both real entry points -- the QModelIndex-driven context-menu path
-(_handle_file_set_as_root_index) and the plain string path
-(_handle_file_set_as_root, used by FileTreeView.set_root_requested).
+both real entry points -- the right-click context-menu path and the plain
+string path (FileTreeView.set_root_requested). Both now carry a path: the
+context menu used to emit its QModelIndex and route through an adapter slot
+that asked FileTreePersistence to read the item roles out of it, which is
+how a Qt view type came to be imported by the database module.
 """
 import os
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QStandardItem
+from PySide6.QtWidgets import QMenu
 
 
 def _find_tree_item(base_model: QStandardItem, file_name: str) -> QStandardItem | None:
@@ -52,12 +55,30 @@ class TestSetAsRootFileByPath:
         assert pipeline_ctrl.file_tree_widget.root_file_path == os.path.normpath(intro_path)
 
 
-class TestSetAsRootFileByTreeIndex:
+def _trigger_set_root_from_context_menu(pipeline_ctrl, file_name: str) -> None:
+    """
+    Drives the real right-click route: the menu the app builds for that
+    tree node, and the action the user would click. populate_menu_actions
+    is called directly rather than going through QMenu.exec(), which blocks
+    forever headlessly -- an action's trigger() still fires the whole
+    signal chain synchronously.
+    """
+    proxy_index = _proxy_index_for(pipeline_ctrl.file_tree_widget, file_name)
+    menu = QMenu()
+    pipeline_ctrl._file_context_manager.populate_menu_actions(menu, proxy_index)
+
+    for action in menu.actions():
+        if action.text().startswith("Set "):
+            action.trigger()
+            return
+    raise AssertionError(f"no 'Set as root file' action in the menu for {file_name!r}")
+
+
+class TestSetAsRootFileFromTheContextMenu:
     def test_updates_project_metadata_and_tree_indicator(self, opened_project):
         pipeline_ctrl, project_dir = opened_project
-        proxy_index = _proxy_index_for(pipeline_ctrl.file_tree_widget, "intro.tex")
 
-        pipeline_ctrl._handle_file_set_as_root_index(proxy_index)
+        _trigger_set_root_from_context_menu(pipeline_ctrl, "intro.tex")
 
         expected = os.path.normpath(str(project_dir / "01.Intro" / "intro.tex"))
         assert pipeline_ctrl.scope_ctrl.get_current_project_metadata_value("root_tex_file") == expected
@@ -69,8 +90,7 @@ class TestSetAsRootFileByTreeIndex:
         original_root = pipeline_ctrl.scope_ctrl.get_current_project_metadata_value("root_tex_file")
         assert os.path.basename(original_root) == "main.tex"
 
-        proxy_index = _proxy_index_for(pipeline_ctrl.file_tree_widget, "intro.tex")
-        pipeline_ctrl._handle_file_set_as_root_index(proxy_index)
+        _trigger_set_root_from_context_menu(pipeline_ctrl, "intro.tex")
 
         new_root = pipeline_ctrl.scope_ctrl.get_current_project_metadata_value("root_tex_file")
         assert os.path.basename(new_root) == "intro.tex"

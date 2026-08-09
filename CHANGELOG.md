@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+### Groundwork for the shared `indexcore` package (phase 0)
+
+Three index editors are being built against three document formats — LaTeX, Word
+and InDesign — and roughly half of this one is format-agnostic. That half is being
+lifted into a package all three share, in phases, each of which leaves this
+application working and its test suite green. **Phase 0 is preparation only: five
+places where the code was tangled in a way that would have been copied into all
+three applications.** There is nothing new to use here.
+
+The one change that reaches your projects: **`project_references` gains an
+`is_cross_reference` column**, and an existing project is upgraded the first time
+this build opens it. Nothing is asked of you and nothing is rewritten except that
+one flag. Whether a reference is a cross-reference used to be worked out inside
+the database queries themselves, by matching the text of the entry's page-style
+field; it is now recorded when the entry is written, by the same code that reads
+every other part of an `\index` tag. That means the database and the rest of the
+application can no longer disagree about what a cross-reference is — and they
+could, slightly: a malformed `see{Target` with no closing brace counted as one in
+the database and as an ordinary entry everywhere else. It is now an ordinary entry
+in both.
+
+One consequence worth knowing if you keep an older build around: a project opened
+in this build still opens in 0.3.0-alpha afterwards. But a cross-reference *added*
+while back on the old build will not be flagged, and this build would then count it
+as an ordinary entry. Don't alternate between builds on the same project.
+
+The rest is invisible: the workspace tree's right-click **Prune** and **Set as root
+file** actions now go through the same path as their double-click equivalents
+rather than a second, near-duplicate one, and the bold/italic page-number style
+names moved next to the rest of the `\index` grammar. Two tests were added that
+check nothing about behaviour and everything about which parts of the code are
+allowed to depend on which — the specific problem phase 0 exists to clear.
+
 ## 0.3.0-alpha — 5 August 2026
 
 This release is mostly about one thing: **the editor now knows what `makeindex`

@@ -261,13 +261,14 @@ class AppPipelineController(QObject):
         self.file_tree_widget.set_root_requested.connect(self._handle_file_set_as_root)
         self.file_tree_widget.file_prune_requested.connect(self._handle_file_prune_requested)
         # The live right-click "Prune" / "Set as root" actions are built by
-        # _file_context_manager and emit *_triggered(QModelIndex) directly --
-        # they do not route through FileTreeView's file_prune_requested /
-        # set_root_requested signals above.
-        self._file_context_manager.prune_file_triggered.connect(self.scope_ctrl.process_file_pruning_request)
-        self._file_context_manager.set_root_file_triggered.connect(self._handle_file_set_as_root_index)
+        # _file_context_manager and emit *_triggered(str) directly -- they do
+        # not route through FileTreeView's file_prune_requested /
+        # set_root_requested signals above, but they now carry the same
+        # payload, so both routes land on the same slot.
+        self._file_context_manager.prune_file_triggered.connect(self._handle_file_prune_requested)
+        self._file_context_manager.set_root_file_triggered.connect(self._handle_file_set_as_root)
         # Keep the workspace tree display in sync with a successful prune --
-        # process_file_pruning_request/prune_project_file only mutate the DB.
+        # prune_project_file only mutates the DB.
         self.scope_ctrl.file_pruned.connect(self.file_tree_widget.remove_file_node)
 
         # Connect the direct tree view update to the indexInserted signal
@@ -858,21 +859,6 @@ class AppPipelineController(QObject):
             self.window.status_bar.showMessage("Root file set successfully.", 3000)
         else:
             print("PERSISTENCE ERROR: No file database persistence model has been set.")
-
-    @Slot(QModelIndex)
-    def _handle_file_set_as_root_index(self, proxy_index: QModelIndex):
-        """
-        Adapter for the live right-click "Set as root file" action, which
-        emits a QModelIndex (see _file_context_manager.set_root_file_triggered
-        wiring in _bind_signal_pipelines) rather than the str path
-        _handle_file_set_as_root expects.
-        """
-        persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
-        if not persistence:
-            return
-        file_path = persistence.get_absolute_path(proxy_index)
-        if file_path:
-            self._handle_file_set_as_root(file_path)
 
     @Slot(str)
     def _handle_file_prune_requested(self, absolute_path: str):

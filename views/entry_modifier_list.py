@@ -106,15 +106,13 @@ def _parse_heading_raw_text(heading_raw_text: str) -> dict:
     )
 
 
-# The encap names the Page column renders as bold or italic. These are the
-# built-in defaults; a project that wraps page numbers in its own macro
-# (\strong, \important, a Table-of-Authorities style) would otherwise get a
-# plain, mis-styled cell for it, so both lists are user-editable from
-# Preferences -> General and pushed in here by set_encap_style_values().
-DEFAULT_BOLD_ENCAP_VALUES = ("bold", "textbf", "bf")
-DEFAULT_ITALIC_ENCAP_VALUES = ("textit", "it", "italic")
-
-_BOLD_ENCAP_VALUES = frozenset(DEFAULT_BOLD_ENCAP_VALUES)
+# The encap names the Page column renders as bold or italic live on the
+# grammar (grammar.DEFAULT_BOLD_ENCAP_VALUES / DEFAULT_ITALIC_ENCAP_VALUES),
+# because which markup means "bold" is a fact about the format, not about
+# this widget. They are the built-in defaults only: both lists are
+# user-editable from Preferences -> General and pushed in here by
+# set_encap_style_values().
+_BOLD_ENCAP_VALUES = frozenset(grammar.DEFAULT_BOLD_ENCAP_VALUES)
 
 
 def set_encap_style_values(bold_values=None, italic_values=None) -> None:
@@ -200,7 +198,7 @@ def _make_encap_item(value: str) -> QStandardItem:
     return item
 
 
-_ITALIC_ENCAP_VALUES = frozenset(DEFAULT_ITALIC_ENCAP_VALUES)
+_ITALIC_ENCAP_VALUES = frozenset(grammar.DEFAULT_ITALIC_ENCAP_VALUES)
 
 
 def _is_italic_encap(value: str) -> bool:

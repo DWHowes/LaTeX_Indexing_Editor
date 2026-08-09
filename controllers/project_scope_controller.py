@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal, Slot, QModelIndex
+from PySide6.QtCore import QObject, Signal, Slot
 
 
 def _flatten_tex_file_nodes(file_tree_payload: list[dict]) -> list[dict]:
@@ -67,31 +67,6 @@ class ProjectScopeController(QObject):
         self.model.update_file_active_state(absolute_path, is_active)
         self.scope_mutated.emit()
 
-    @Slot(QModelIndex)
-    def process_file_pruning_request(self, proxy_index: QModelIndex):
-        """
-        Processes file pruning actions out-of-band from view space.
-        Strict MVC: Queries model data cleanly via imported class contracts.
-        """
-        if not proxy_index.isValid() or not self.model:
-            return
-
-        # Delegate directory evaluations directly back to the Model Layer
-        if self.model.is_directory_node(proxy_index):
-            return
-
-        # Delegate cross-platform string path normalization back to the Model Layer
-        clean_absolute_path = self.model.get_absolute_path(proxy_index)
-        
-        if clean_absolute_path:
-            print(f"[SCOPE CONTROLLER] Routing asset prune for: {clean_absolute_path}")
-            # Update the transaction state model safely inside memory frames
-            removed = self.model.prune_file_record(clean_absolute_path)
-            # Notify all downstream processing panels that search boundaries mutated
-            self.scope_mutated.emit()
-            if removed:
-                self.file_pruned.emit(clean_absolute_path)
-
     def get_active_search_scope(self) -> list[str]:
         """Returns the current list of paths for the Advanced Search Engine."""
         return self.model.fetch_active_unpruned_paths()
@@ -105,7 +80,7 @@ class ProjectScopeController(QObject):
     def unprune_project_file(self, absolute_path: str) -> bool:
         """
         Restores a previously pruned file back into the active project
-        scope. Inverse of prune_project_file/process_file_pruning_request.
+        scope. Inverse of prune_project_file.
         Callers that need the Workspace Files tree to reflect the restore
         immediately (PrunedFilesController) do so themselves via a batched
         rebuild after processing the whole restore list, rather than this
@@ -125,9 +100,15 @@ class ProjectScopeController(QObject):
     def prune_project_file(self, absolute_path: str) -> bool:
         """
         Removes a file's project_files record given its raw absolute path
-        string, as emitted by FileTreeView.file_prune_requested. Normalizes
+        string, as emitted by FileTreeView.file_prune_requested and by the
+        right-click Prune action (FileTreeContextMenuManager). Normalizes
         before delegating to the model so it matches the normalized form
         upsert_project_files stored the row under.
+
+        Both prune routes land here. The context-menu one used to have its
+        own index-taking slot that asked FileTreePersistence to read the
+        item roles -- the two paths could and did diverge, and it was also
+        how a Qt view type ended up in the database module.
         """
         if not absolute_path or not self.model:
             return False

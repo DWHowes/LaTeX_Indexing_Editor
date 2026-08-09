@@ -2,7 +2,7 @@ import json
 import os
 from PySide6.QtCore import QObject, QSettings, QDir, QByteArray
 
-from views.entry_modifier_list import (
+from models.index_tag_grammar import (
     DEFAULT_BOLD_ENCAP_VALUES,
     DEFAULT_ITALIC_ENCAP_VALUES,
 )

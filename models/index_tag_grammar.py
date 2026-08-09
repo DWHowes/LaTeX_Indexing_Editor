@@ -71,11 +71,21 @@ XREF_SEE = "see"
 XREF_SEEALSO = "seealso"
 XREF_TYPES = (XREF_SEE, XREF_SEEALSO)
 
-#: SQL fragment matching cross-reference rows in project_references.
-#: SQLite cannot call into this module, so this predicate is the one
-#: unavoidable duplicate of the see/seealso grammar. It lives here so the
-#: two are edited together; see FileTreePersistence for its use sites.
-SQL_IS_CROSS_REFERENCE = "(encap LIKE 'see{%' OR encap LIKE 'seealso{%')"
+#: The page-style vocabulary: which encap names mean "bold" and which mean
+#: "italic" to a reader. Built-in defaults only -- a project that wraps page
+#: numbers in its own macro (\strong, \important, a Table-of-Authorities
+#: style) would otherwise get a plain, mis-styled Page cell for it, so both
+#: lists are user-editable from Preferences -> General and pushed into the
+#: Entry Table by ``entry_modifier_list.set_encap_style_values()``.
+#:
+#: This is grammar, not presentation: "textbf means bold" is a fact about
+#: LaTeX markup, and the equivalent fact for another format is a different
+#: list (Word's ``\b`` switch, an InDesign character style). It lived in
+#: ``views/entry_modifier_list.py`` and was imported *upwards* by
+#: ``models/preferences_persistence.py``, which made the global settings
+#: store depend on a widget module.
+DEFAULT_BOLD_ENCAP_VALUES = ("bold", "textbf", "bf")
+DEFAULT_ITALIC_ENCAP_VALUES = ("textit", "it", "italic")
 
 #: makeindex's own escape character. It quotes the character after it and
 #: is then consumed: ``"!`` -> ``!``, ``""`` -> ``"``, and even ``"a`` ->

@@ -10,6 +10,7 @@ and a leaked value would change how an unrelated test renders.
 """
 import pytest
 
+from models import index_tag_grammar as grammar
 from views import entry_modifier_list as eml
 
 
@@ -17,8 +18,8 @@ from views import entry_modifier_list as eml
 def _restore_defaults():
     yield
     eml.set_encap_style_values(
-        list(eml.DEFAULT_BOLD_ENCAP_VALUES),
-        list(eml.DEFAULT_ITALIC_ENCAP_VALUES),
+        list(grammar.DEFAULT_BOLD_ENCAP_VALUES),
+        list(grammar.DEFAULT_ITALIC_ENCAP_VALUES),
     )
 
 
