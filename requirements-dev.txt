@@ -2,3 +2,9 @@
 pytest==9.1.1
 pytest-qt==4.5.0
 pytest-cov==7.1.0
+
+# Needed to build the installer (LatexIndexingEditor.spec), not to run the
+# app or the suite. Recorded here because it was installed in the venv and
+# in no requirements file, so rebuilding the venv from these files would
+# have produced an environment that could not package a release.
+pyinstaller==6.21.0
