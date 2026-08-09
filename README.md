@@ -30,16 +30,16 @@ A high-performance desktop application built with Python and PySide6 (Qt) design
    pip install -r requirements.txt
    ```
    
-   This application also needs **`indexcore`**, the package it shares with the
+   This application also needs **`bookindexcore`**, the package it shares with the
    Word and InDesign index editors. While the extraction is in progress it is
    installed from a sibling checkout rather than downloaded, so clone it beside
    this repository and install it editable:
    
    ```
-   pip install -e ../indexcore[qt,naming,help,search]
+   pip install -e ../bookindexcore[qt,naming,help,search]
    ```
    
-   Editable means a change in `indexcore` is live here with no reinstall.
+   Editable means a change in `bookindexcore` is live here with no reinstall.
    Install it into the same virtual environment you activated above — into a
    different interpreter and this application will keep running an older copy
    with nothing to tell you.
@@ -111,10 +111,10 @@ pip install -r requirements-dev.txt
 
 This installs everything `requirements.txt` does, plus `pytest` (the tool that runs the tests) and a couple of its add-ons. You only need to do this once per virtual environment.
 
-`indexcore` carries its own suite, and it has to pass too — roughly a fifth of what used to be tested here is now tested there. Install its dev extras once:
+`bookindexcore` carries its own suite, and it has to pass too — roughly a fifth of what used to be tested here is now tested there. Install its dev extras once:
 
 ```
-pip install -e ../indexcore[qt,naming,help,search,dev]
+pip install -e ../bookindexcore[qt,naming,help,search,dev]
 ```
 
 ### Running the tests
@@ -132,7 +132,7 @@ That's it. It will print a line for every test file it runs, then finish with a 
 Then run the shared package's suite as well:
 
 ```
-cd ../indexcore
+cd ../bookindexcore
 pytest
 ```
 

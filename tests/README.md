@@ -3,20 +3,20 @@
 ## This is no longer the only suite
 
 Extraction phase 1 moved the format-agnostic half of several subsystems into
-the **`indexcore`** package, and their tests went with them. Name filing, the
+the **`bookindexcore`** package, and their tests went with them. Name filing, the
 undo stack, the change journal, the staging model, session backup and logging,
 theming, help content, search, and the shared About box are all tested in
-`../indexcore/tests/` now, not here. What stays is everything that is about
+`../bookindexcore/tests/` now, not here. What stays is everything that is about
 *this* application: LaTeX grammar, the `.tex` backend, persistence, and the
 wiring that connects the shared pieces to this app's own.
 
-Run both. `indexcore` is installed editable, so a change there is live here
+Run both. `bookindexcore` is installed editable, so a change there is live here
 immediately — and a change there that breaks this application will not show up
 in this suite's collection, only in its failures.
 
 ```
 pytest                              # this application
-cd ../indexcore && pytest           # the shared package
+cd ../bookindexcore && pytest           # the shared package
 ```
 
 ## Running
@@ -211,7 +211,7 @@ written as the *selections a user makes*, not as offsets — a test named for
 one named for `(4, 5)` does not.
 
 ### `index_command_stack.py`
-**Moved to `indexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../indexcore/tests/README.md`. This heading is kept because other sections link to it.
+**Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `latex_index_parser.py`
 
@@ -224,15 +224,15 @@ scrubbing macro definitions, and turning positions into line/column
 coordinates — and delegates everything between the braces.
 
 ### `name_inverter.py`
-**Moved to `indexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../indexcore/tests/README.md`. This heading is kept because other sections link to it.
+**Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `session_logger.py`
-**Moved to `indexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../indexcore/tests/README.md`. This heading is kept because other sections link to it.
+**Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### Import direction (`test_layering.py`)
 
 The one file in this layer whose subject is not a module but the **shape of
-the import graph**. It exists because the `indexcore` extraction found five
+the import graph**. It exists because the `bookindexcore` extraction found five
 layering faults in modules headed for the shared package — none of them a
 runtime bug, all of them extraction blockers, because a model that imports a
 view is fine until the model moves package and the view does not.
@@ -247,7 +247,7 @@ keeps the coupling this file is about.
 
 **Extend `QT_FREE_MODULES` as each extraction phase moves more code into a
 Qt-free layer.** It is the cheapest available enforcement of the rule that
-`indexcore`'s model, dialect, backend, persistence, syntax and session layers
+`bookindexcore`'s model, dialect, backend, persistence, syntax and session layers
 import nothing outside the standard library, which is what lets the Word and
 InDesign backends run headlessly.
 
@@ -316,7 +316,7 @@ rather than guessed — the escaping is easy to get subtly wrong by inspection
 alone. No bugs found.
 
 ### `session_backup_manager.py`
-**Moved to `indexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../indexcore/tests/README.md`. This heading is kept because other sections link to it.
+**Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `latex_entry_model.py`
 
@@ -326,10 +326,10 @@ and `metadata`'s exact dict shape, all in isolation beyond what
 `test_latex_index_controller_insert.py` exercises end-to-end. No bugs found.
 
 ### `help_content_model.py`
-**Moved to `indexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../indexcore/tests/README.md`. This heading is kept because other sections link to it.
+**Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `theme_config_model.py`
-**Moved to `indexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../indexcore/tests/README.md`. This heading is kept because other sections link to it.
+**Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `app_paths.py`
 

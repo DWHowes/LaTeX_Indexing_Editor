@@ -4,7 +4,7 @@ tree, and the entry table.
 
 The plumbing they share -- attaching to a viewport once it exists, catching the
 request from both viewport and widget, theming the menu, suppressing an empty
-one -- is ``indexcore.ui.context_menu.BaseContextMenuManager``. What stays here
+one -- is ``bookindexcore.ui.context_menu.BaseContextMenuManager``. What stays here
 is the part that is about *this* application: which actions a menu offers and
 what they mean. "Prune" against a LaTeX project file has nothing in common with
 what the word would mean to an InDesign story, and the entry-table manager
@@ -17,7 +17,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QModelIndex
 from PySide6.QtWidgets import QMenu
 from PySide6.QtGui import QAction
 
-from indexcore.ui.context_menu import BaseContextMenuManager
+from bookindexcore.ui.context_menu import BaseContextMenuManager
 
 from views.entry_modifier_list import COL_ID, COL_MAIN_DISP, COL_SUB2_DISP
 

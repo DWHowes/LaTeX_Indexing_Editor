@@ -24,7 +24,7 @@ def version_string() -> str:
 
 def app_identity():
     """
-    This application's identity, in the form indexcore's shared About box
+    This application's identity, in the form bookindexcore's shared About box
     takes.
 
     Built here rather than in the shared package because the package must not
@@ -32,9 +32,9 @@ def app_identity():
     module-level constant because the logo paths come from
     ``app_paths.get_app_root()`` -- which is correct only when called from a
     module sitting one directory below the application root, and so is
-    deliberately not importable from indexcore at all (design document 7.3).
+    deliberately not importable from bookindexcore at all (design document 7.3).
     """
-    from indexcore.ui.identity import AppIdentity
+    from bookindexcore.ui.identity import AppIdentity
 
     from models.app_paths import get_app_root
 

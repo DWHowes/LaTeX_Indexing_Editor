@@ -1,9 +1,9 @@
 from models.index_prefs_config_model import IndexPrefsConfigModel
 from models.preferences_persistence import PreferencesPersistence
 
-from indexcore.ui.theme.controller import ThemeConfigController
+from bookindexcore.ui.theme.controller import ThemeConfigController
 
-from indexcore.ui.style import AppStyleConfiguration
+from bookindexcore.ui.style import AppStyleConfiguration
 from views.index_prefs_config_dialog import IndexPrefsConfigDialog
 
 

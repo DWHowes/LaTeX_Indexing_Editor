@@ -4,7 +4,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QLabel
 from PySide6.QtCore import Qt
 
-from indexcore.ui.style import AppStyleConfiguration
+from bookindexcore.ui.style import AppStyleConfiguration
 
 # Matches the fixed RTF preamble RtfExportView.render() always emits, up to
 # and including the "\fs24 " that starts the body content.

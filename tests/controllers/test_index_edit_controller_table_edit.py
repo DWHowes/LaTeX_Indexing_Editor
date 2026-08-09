@@ -22,10 +22,10 @@ from PySide6.QtWidgets import QTabWidget
 
 from models.latex_index_parser import LatexIndexParser
 from models.entry_modifier_model import EntryModifierModel
-from indexcore.qt.staging import QtIndexEditStagingModel
+from bookindexcore.qt.staging import QtIndexEditStagingModel
 from models.index_tree_model_engine import IndexTreeModelEngine
-from indexcore.util.text import TextSanitizer
-from indexcore.session.backup import SessionBackupManager
+from bookindexcore.util.text import TextSanitizer
+from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from controllers.index_edit_controller import IndexEditController
 from views.index_tree_view import IndexTreeView

@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette, QColor
-from indexcore.ui.style import AppStyleConfiguration
+from bookindexcore.ui.style import AppStyleConfiguration
 
 class HeadNoteDialog(QDialog):
     """

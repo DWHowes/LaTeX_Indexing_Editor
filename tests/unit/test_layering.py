@@ -1,11 +1,11 @@
 """
-Layering rules for the packages headed into ``indexcore``.
+Layering rules for the packages headed into ``bookindexcore``.
 
 These are not tests of behaviour. They are tests of *direction*: a model
 that imports a view compiles and runs perfectly well today and becomes an
 import cycle the moment the model moves into a shared package and the view
 does not. Five such faults were found when the extraction was planned
-(indexcore design document section 6); this file is what stops a sixth.
+(bookindexcore design document section 6); this file is what stops a sixth.
 
 The scan is static -- it reads the import statements out of the parse tree
 rather than importing anything -- so a module that needs a GUI, a display,
@@ -27,7 +27,7 @@ FORBIDDEN_IMPORTS = {
 
 
 #: Modules that must import no Qt at all. Every one of these is on the
-#: extraction plan's Tier A or Tier B list, and `indexcore`'s model, dialect,
+#: extraction plan's Tier A or Tier B list, and `bookindexcore`'s model, dialect,
 #: persistence, syntax and session layers are required to import nothing
 #: outside the standard library so the Word and InDesign apps can run their
 #: headless backends without Qt installed. The list is deliberately explicit
@@ -36,7 +36,7 @@ FORBIDDEN_IMPORTS = {
 #:
 #: **Extend this in every extraction phase** as more code becomes core-bound.
 #: It shrinks as well as grows: a module that has actually *moved* leaves this
-#: list, because `indexcore`'s own `tests/test_no_third_party_in_core.py`
+#: list, because `bookindexcore`'s own `tests/test_no_third_party_in_core.py`
 #: takes over — and does it better, adding a runtime check with Qt blocked at
 #: the import finder. Phase 1 removed six entries that way.
 QT_FREE_MODULES = (
@@ -93,7 +93,7 @@ def test_a_layer_does_not_import_upwards(package, path):
     assert not offenders, (
         f"{package}/{path.name} imports {', '.join(offenders)}. "
         f"A {package} module must not depend on a layer above it -- see the "
-        f"indexcore design document, section 6."
+        f"bookindexcore design document, section 6."
     )
 
 
@@ -140,7 +140,7 @@ def test_a_core_module_imports_no_qt(relative_path):
 
     assert not offenders, (
         f"{relative_path} imports {', '.join(offenders)}. This module is "
-        f"headed for a Qt-free layer of indexcore -- see the design "
+        f"headed for a Qt-free layer of bookindexcore -- see the design "
         f"document, section 7.1."
     )
 

@@ -1,7 +1,7 @@
 """
 This application's identity, and the Help menu wiring that shows it.
 
-The About *dialog* itself moved to indexcore in extraction phase 1, and its
+The About *dialog* itself moved to bookindexcore in extraction phase 1, and its
 own behaviour -- rendering an identity, swapping logo ink with the theme,
 surviving a missing asset -- is tested there, against a synthetic identity.
 What cannot move is everything on this page: that this application's version
@@ -16,8 +16,8 @@ that is what these drive.
 """
 import pytest
 
-from indexcore.ui.help.controller import HelpController
-from indexcore.ui.identity import AppIdentity
+from bookindexcore.ui.help.controller import HelpController
+from bookindexcore.ui.identity import AppIdentity
 from models.app_paths import get_app_root
 from models.app_version import (
     APP_COPYRIGHT,
@@ -61,7 +61,7 @@ class TestAppVersionModule:
 class TestAppIdentityFactory:
     """
     ``app_identity()`` is the adapter between this application's constants
-    and the shape indexcore's shared About box takes. It is a function rather
+    and the shape bookindexcore's shared About box takes. It is a function rather
     than a constant because the logo paths come from ``get_app_root()``,
     which must be called from a module inside the application -- moved into
     the shared package it would resolve into site-packages (design document

@@ -12,18 +12,18 @@ import pytest
 from PySide6.QtCore import QSettings
 
 from models.file_tree_persistence import FileTreePersistence
-from indexcore.session.logger import SessionLogger
+from bookindexcore.session.logger import SessionLogger
 from models.preferences_persistence import PreferencesPersistence
-from indexcore.util.text import TextSanitizer
-from indexcore.session.backup import SessionBackupManager
-from indexcore.naming.inverter import NameInverter
+from bookindexcore.util.text import TextSanitizer
+from bookindexcore.session.backup import SessionBackupManager
+from bookindexcore.naming.inverter import NameInverter
 
 from views.latex_editor import LatexEditor
 from controllers.app_pipeline_controller import AppPipelineController
 from controllers.document_io_controller import DocumentIOController
 from controllers.workspace_lifecycle_controller import WorkspaceLifecycleController
-from indexcore.ui.style import AppStyleConfiguration
-from indexcore.qt.watcher import ExternalFileWatcherEngine
+from bookindexcore.ui.style import AppStyleConfiguration
+from bookindexcore.qt.watcher import ExternalFileWatcherEngine
 from controllers.project_scope_controller import ProjectScopeController
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"

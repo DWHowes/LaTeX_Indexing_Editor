@@ -17,7 +17,7 @@ import pytest
 from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 
-from indexcore.naming.inverter import NameInversionResult
+from bookindexcore.naming.inverter import NameInversionResult
 
 
 @pytest.fixture

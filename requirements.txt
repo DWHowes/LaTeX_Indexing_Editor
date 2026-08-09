@@ -1,13 +1,13 @@
-# indexcore -- the package this application shares with the Word and InDesign
+# bookindexcore -- the package this application shares with the Word and InDesign
 # index editors -- is NOT listed here yet, and must be installed separately:
 #
-#     pip install -e ../indexcore[qt,naming,help,search]
+#     pip install -e ../bookindexcore[qt,naming,help,search]
 #
 # It is installed editable, from a sibling checkout, because the extraction is
 # still in progress and a change to the shared code has to be visible here
 # immediately. At the phase 6 gate it becomes an ordinary pinned line:
 #
-#     indexcore @ git+https://github.com/DWHowes/indexcore@v0.1.0
+#     bookindexcore @ git+https://github.com/DWHowes/bookindexcore@v0.1.0
 #
 # The four extras above are what this application uses: Qt widgets, the name
 # authorities, the help viewer, and fuzzy search. The core itself has no

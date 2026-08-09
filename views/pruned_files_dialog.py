@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
 )
 
-from indexcore.ui.style import AppStyleConfiguration
+from bookindexcore.ui.style import AppStyleConfiguration
 
 
 class PrunedFilesDialog(QDialog):

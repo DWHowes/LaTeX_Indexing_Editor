@@ -18,8 +18,8 @@ from PySide6.QtWidgets import QTabWidget
 
 from controllers.cross_reference_controller import CrossReferenceController
 from views.cross_reference_list import CrossReferenceList
-from indexcore.util.text import TextSanitizer
-from indexcore.session.backup import SessionBackupManager
+from bookindexcore.util.text import TextSanitizer
+from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 
 

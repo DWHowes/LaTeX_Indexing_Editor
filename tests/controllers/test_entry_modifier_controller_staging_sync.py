@@ -17,7 +17,7 @@ import pytest
 from PySide6.QtCore import QObject, Signal
 
 from models.entry_modifier_model import EntryModifierModel
-from indexcore.qt.staging import QtIndexEditStagingModel
+from bookindexcore.qt.staging import QtIndexEditStagingModel
 from controllers.entry_modifier_controller import EntryModifierController
 from views.entry_modifier_list import EntryModifierList
 

@@ -3,11 +3,11 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
 from views.latex_editor import LatexEditor
-from indexcore.session.logger import SessionLogger
+from bookindexcore.session.logger import SessionLogger
 from models.preferences_persistence import PreferencesPersistence
-from indexcore.util.text import TextSanitizer
-from indexcore.session.backup import SessionBackupManager
-from indexcore.naming.inverter import NameInverter
+from bookindexcore.util.text import TextSanitizer
+from bookindexcore.session.backup import SessionBackupManager
+from bookindexcore.naming.inverter import NameInverter
 from models.app_paths import get_app_root
 from models.app_version import APP_NAME, APP_VERSION
 
@@ -15,8 +15,8 @@ from models.app_version import APP_NAME, APP_VERSION
 from controllers.app_pipeline_controller import AppPipelineController
 from controllers.document_io_controller import DocumentIOController
 from controllers.workspace_lifecycle_controller import WorkspaceLifecycleController
-from indexcore.ui.style import AppStyleConfiguration
-from indexcore.qt.watcher import ExternalFileWatcherEngine
+from bookindexcore.ui.style import AppStyleConfiguration
+from bookindexcore.qt.watcher import ExternalFileWatcherEngine
 from models.file_tree_persistence import FileTreePersistence
 from controllers.project_scope_controller import ProjectScopeController
 

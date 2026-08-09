@@ -30,9 +30,9 @@ app object graph.
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QTabWidget
 
-from indexcore.model.ids import MacroIDGenerator
-from indexcore.session.backup import SessionBackupManager
-from indexcore.util.text import TextSanitizer
+from bookindexcore.model.ids import MacroIDGenerator
+from bookindexcore.session.backup import SessionBackupManager
+from bookindexcore.util.text import TextSanitizer
 from controllers.document_io_controller import DocumentIOController
 from controllers.latex_index_controller import LatexIndexController
 from views.editor_tab import EditorTab

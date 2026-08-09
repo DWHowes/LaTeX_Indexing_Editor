@@ -16,10 +16,10 @@ from dataclasses import asdict
 import pytest
 from PySide6.QtWidgets import QSpinBox, QTabBar
 
-from indexcore.ui.style import AppStyleConfiguration
-from indexcore.ui.theme.config_model import DarkThemeColours, LightThemeColours
+from bookindexcore.ui.style import AppStyleConfiguration
+from bookindexcore.ui.theme.config_model import DarkThemeColours, LightThemeColours
 from views.index_prefs_config_dialog import IndexPrefsConfigDialog
-from indexcore.ui.theme.config_dialog import ThemeConfigDialog
+from bookindexcore.ui.theme.config_dialog import ThemeConfigDialog
 
 
 def _luminance(rgb):

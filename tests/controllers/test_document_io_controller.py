@@ -20,8 +20,8 @@ is exactly what this controller exists to get right.
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QTabWidget, QWidget
 
-from indexcore.session.backup import SessionBackupManager
-from indexcore.util.text import TextSanitizer
+from bookindexcore.session.backup import SessionBackupManager
+from bookindexcore.util.text import TextSanitizer
 from controllers.document_io_controller import DocumentIOController
 from views.editor_tab import EditorTab
 

@@ -4,7 +4,7 @@ from PySide6.QtGui import QAction
 from models.latex_command_registry_model import LatexCommandRegistryModel
 from views.latex_command_dialog import CreateCommandDialog
 from views.latex_command_wizard_dialog import LatexCommandWizardDialog
-from indexcore.ui.style import AppStyleConfiguration
+from bookindexcore.ui.style import AppStyleConfiguration
 
 class CreateCommandController(QObject):
     def __init__(self, window, command_registry: LatexCommandRegistryModel):

@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from models.range_consistency_model import find_range_consistency_issues
 from views.range_consistency_dialog import RangeConsistencyDialog
-from indexcore.ui.style import AppStyleConfiguration
+from bookindexcore.ui.style import AppStyleConfiguration
 
 
 class RangeConsistencyController(QObject):
