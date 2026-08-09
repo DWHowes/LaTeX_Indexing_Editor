@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QEvent, Qt, Signal, QSize, Slot, QSettings
 
-from controllers.app_style_configuration import AppStyleConfiguration
+from indexcore.ui.style import AppStyleConfiguration
 from models import index_syntax_check as syntax
 from models import index_tag_grammar as grammar
 from views import index_syntax_advice as advice

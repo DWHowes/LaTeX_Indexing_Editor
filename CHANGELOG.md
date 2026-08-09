@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### The shared `indexcore` package now exists (phase 1)
+
+About 4,800 lines have moved out of this application and into a package it
+shares with the Word and InDesign index editors: name filing, undo/redo, the
+change journal, the staging model, session backups and logging, theming, the
+help viewer, project search, the About box, and the right-click menu plumbing.
+Nothing about any of them changed. **There is nothing new to use, and nothing
+that used to work should behave differently.**
+
+Three small things did change shape, all of them invisible in use:
+
+- **The About box now reports which `indexcore` it is running**, next to the
+  Python and Qt versions it already showed. One shared core serving three
+  applications means a bug report that doesn't say which core it ran against
+  can't be acted on.
+- The name-authority lookups (VIAF, Library of Congress) used to identify
+  themselves as "LaTeX Indexing Editor". They still do from this application —
+  but the name is now supplied by whichever application is asking, so a Word
+  user's lookups won't be logged at VIAF as coming from the LaTeX editor.
+- The application no longer bundles copies of the shared modules; it installs
+  the package. For anyone building from source that means one extra step, and
+  `installer/README` has it.
+
+The test suite split with the code: 1,395 tests here, 312 in `indexcore`, up
+from 1,696 in one place. Both must pass.
+
 ### Groundwork for the shared `indexcore` package (phase 0)
 
 Three index editors are being built against three document formats — LaTeX, Word

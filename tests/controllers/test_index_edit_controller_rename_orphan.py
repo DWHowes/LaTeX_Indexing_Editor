@@ -21,9 +21,9 @@ from PySide6.QtWidgets import QTabWidget
 
 from models.latex_index_parser import LatexIndexParser
 from models.entry_modifier_model import EntryModifierModel
-from models.index_edit_staging_model import IndexEditStagingModel
-from models.text_sanitizer import TextSanitizer
-from models.session_backup_manager import SessionBackupManager
+from indexcore.qt.staging import QtIndexEditStagingModel
+from indexcore.util.text import TextSanitizer
+from indexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from controllers.index_edit_controller import IndexEditController
 from views.index_tree_view import IndexTreeView
@@ -84,7 +84,7 @@ def _build_stack(tmp_path, qtbot, tex_content: str, heading_raw_text: str):
     }
     col1.setData([ref], Qt.ItemDataRole.UserRole + 1)
 
-    staging_model = IndexEditStagingModel()
+    staging_model = QtIndexEditStagingModel()
     entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
     entry_model.load_records([ref])
 
@@ -374,7 +374,7 @@ class TestOrphanCleanupAfterDeletion:
         col1.setData([first_ref, second_ref], Qt.ItemDataRole.UserRole + 1)
         root.appendRow([col0, col1])
 
-        staging_model = IndexEditStagingModel()
+        staging_model = QtIndexEditStagingModel()
         entry_model = EntryModifierModel(persistence=persistence, staging_model=staging_model)
         entry_model.load_records([first_ref, second_ref])
 

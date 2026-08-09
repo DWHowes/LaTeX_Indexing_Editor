@@ -8,10 +8,10 @@ from models.preferences_persistence import (
     RECENT_PROJECTS_MAX_SHOWN,
     RECENT_PROJECTS_MIN_SHOWN,
 )
-from models.theme_config_model import DarkThemeColours, LightThemeColours
+from indexcore.ui.theme.config_model import DarkThemeColours, LightThemeColours
 
-from controllers.app_style_configuration import AppStyleConfiguration
-from views.theme_config_dialog import _ThemeTab
+from indexcore.ui.style import AppStyleConfiguration
+from indexcore.ui.theme.config_dialog import _ThemeTab
 
 class IndexPrefsConfigDialog(QDialog):
     sig_config_accepted = Signal(dict, dict, dict)  # prefs, dark_colours, light_colours

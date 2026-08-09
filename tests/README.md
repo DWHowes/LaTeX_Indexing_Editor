@@ -1,5 +1,24 @@
 # Test suite
 
+## This is no longer the only suite
+
+Extraction phase 1 moved the format-agnostic half of several subsystems into
+the **`indexcore`** package, and their tests went with them. Name filing, the
+undo stack, the change journal, the staging model, session backup and logging,
+theming, help content, search, and the shared About box are all tested in
+`../indexcore/tests/` now, not here. What stays is everything that is about
+*this* application: LaTeX grammar, the `.tex` backend, persistence, and the
+wiring that connects the shared pieces to this app's own.
+
+Run both. `indexcore` is installed editable, so a change there is live here
+immediately — and a change there that breaks this application will not show up
+in this suite's collection, only in its failures.
+
+```
+pytest                              # this application
+cd ../indexcore && pytest           # the shared package
+```
+
 ## Running
 
 ```
@@ -192,23 +211,7 @@ written as the *selections a user makes*, not as offsets — a test named for
 one named for `(4, 5)` does not.
 
 ### `index_command_stack.py`
-
-The undo/redo records — `MacroEdit`, `EntrySnapshot`, `HeadingChange`,
-`IndexCommand` — and the stacks holding them. Pure data with no Qt and no
-I/O; execution lives in `IndexEditController.apply_command`, so the
-arithmetic every undo depends on is testable in isolation.
-
-The rule worth staring at is edit **ordering**: edits are applied front to
-back and each shifts everything after it, so `IndexCommand.inverted()` walks
-them backwards. Get that wrong and an undo writes to positions that no longer
-describe the text. `test_index_command_stack.py` pins it from both
-directions, including the range-pair case where a closer merged into its
-opener's command must come back off first.
-
-`TestConfigurableLimit` covers a later change: the undo depth became a user
-preference (Preferences → General), so the bound has to be changeable on a
-**live** stack rather than only at construction, and lowering it has to trim
-the oldest commands immediately rather than waiting for the next push.
+**Moved to `indexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../indexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `latex_index_parser.py`
 
@@ -221,63 +224,10 @@ scrubbing macro definitions, and turning positions into line/column
 coordinates — and delegates everything between the braces.
 
 ### `name_inverter.py`
-
-The offline rule-based logic (`_fast_invert` and friends). The methods that
-actually make requests — `_viaf_autosuggest_uncached`,
-`_fetch_viaf_authority_heading`, `_fetch_lc_authority_heading` — remain out of
-scope, but the *resolution* logic wrapped around them is now covered, because
-an AutoSuggest entry carrying neither an LC id nor a VIAF id falls straight
-through to its own `term`/`name` field without touching the network.
-`TestFetchAuthorityFromAutosuggestEntry` uses that route.
-
-Two real, pre-existing bugs were found here and confirmed empirically while
-writing the original coverage, not just inferred from reading: an
-`UnboundLocalError` on any name where "del" is the Spanish connector, and dead
-code — a regex guard that could never match — silently breaking the documented
-two-token "Mac Donald" form. Both are now fixed, with
-`test_two_token_mac_space_form_combines` and
-`test_del_connector_does_not_crash` in `test_name_inverter.py` as permanent
-regression coverage (no longer `xfail`).
-
-Three later additions each pin a fix of their own:
-
-- **`TestFetchAuthorityFromAutosuggestEntry`** — the trailing life-date
-  qualifier (`Marshall, John, 1755-1835`) used to be stripped on only *one* of
-  the four paths that can return a heading, the Library of Congress one. A
-  heading taken from VIAF's own record kept its dates, and VIAF main headings
-  carry them as a matter of course, so the same person resolved two different
-  ways depending on which id AutoSuggest happened to carry. Stripping now
-  happens once at the method's single exit point. Indexers strike these dates,
-  so the pre-fix behaviour produced a spurious "user correction" on every such
-  name.
-- **`TestConstructionWithoutACache`** — `self._conn` was assigned only inside
-  the branch that opens the database, so constructing with `viaf_enabled=False`
-  or no path left the attribute missing entirely and every later read of it
-  raised `AttributeError`, including from `close()` and `__del__`.
-- **`TestCachePathHandling`** — `os.makedirs(os.path.dirname(path))` sat
-  outside the `try`, so a bare relative filename (whose dirname is `""`) took
-  the constructor down, while every other way of failing to open the cache
-  degraded quietly. The call is now inside the `try` *and* guarded for the
-  empty-dirname case, so a bare filename genuinely works rather than merely
-  failing silently.
-
-The invariant all three protect: opening the cache either works or leaves a
-usable cacheless inverter. It must never raise out of the constructor.
+**Moved to `indexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../indexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `session_logger.py`
-
-`test_session_logger_folder.py` covers the log folder specifically — its name
-became a user preference (Preferences → General), and the default changed from
-the hidden `.session_logs` to a visible `session_logs`, on the grounds that a
-folder whose whole purpose is for the user to open and read it should not be
-hidden. `TestRealignToProjectRoot` covers the folder following the open
-project.
-
-Every test here stops the intercept in teardown. `SessionLogger` reassigns
-`sys.stdout`/`sys.stderr` on construction, and leaving that in place swallows
-pytest's own output for the rest of the run — see also
-[the theme broker gotcha](#the-theme-broker-is-a-process-wide-singleton) for
-the other process-wide state this suite has to put back.
+**Moved to `indexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../indexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### Import direction (`test_layering.py`)
 
@@ -366,10 +316,7 @@ rather than guessed — the escaping is easy to get subtly wrong by inspection
 alone. No bugs found.
 
 ### `session_backup_manager.py`
-
-Register/revert/restore-single/clear-all backup sequencing, real files under
-`tmp_path` throughout, no os/shutil mocking, since the sequencing itself is
-the whole point. No bugs found.
+**Moved to `indexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../indexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `latex_entry_model.py`
 
@@ -379,15 +326,10 @@ and `metadata`'s exact dict shape, all in isolation beyond what
 `test_latex_index_controller_insert.py` exercises end-to-end. No bugs found.
 
 ### `help_content_model.py`
-
-`load_toc`, and `render_topic_html`'s Markdown-to-HTML conversion, heading-id
-slugification, path-traversal refusal, and style templating. Real files under
-`tmp_path`, no `QTextBrowser`. No bugs found.
+**Moved to `indexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../indexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `theme_config_model.py`
-
-Mirrors `IndexPrefsConfigModel`'s update/serialize/seed/load/persist pattern
-for the dark/light colour dataclasses. No bugs found.
+**Moved to `indexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../indexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `app_paths.py`
 

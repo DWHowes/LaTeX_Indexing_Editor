@@ -4,7 +4,7 @@ from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import QMessageBox
 
 from models import index_tag_grammar as grammar
-from models.index_command_stack import (
+from indexcore.model.commands import (
     EntrySnapshot,
     HeadingChange,
     MacroEdit,
@@ -1090,7 +1090,7 @@ class IndexEditController(QObject):
         in that case, so the operation stays undoable once the cause is
         resolved.
         """
-        from models.index_command_stack import DELETE, EDIT, INSERT
+        from indexcore.model.commands import DELETE, EDIT, INSERT
 
         applied: list = []
         for edit in command.edits:

@@ -4,8 +4,8 @@ from PySide6.QtGui import QPalette, QTextDocument, QTextCursor, QColor, QFont, Q
 from PySide6.QtCore import QEvent, QTimer, Qt, Signal, QPointF
 
 from models.latex_highlighter import LatexHighlighter
-from controllers.app_style_configuration import AppStyleConfiguration
-from views.tab_find_dialog import TabFindDialog
+from indexcore.ui.style import AppStyleConfiguration
+from indexcore.ui.tab_find_dialog import TabFindDialog
 
 
 def build_tab_close_icon(is_modified: bool, size: int = 14) -> QIcon:

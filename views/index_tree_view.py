@@ -3,10 +3,10 @@ from PySide6.QtWidgets import QTreeView, QAbstractItemView, QApplication
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QCursor, QFontMetrics
 from PySide6.QtCore import Qt, Signal, Slot, QModelIndex, QSortFilterProxyModel, QItemSelectionModel, QElapsedTimer
 
-from controllers.app_style_configuration import AppStyleConfiguration
+from indexcore.ui.style import AppStyleConfiguration
 from models import index_tag_grammar as grammar
 from views.index_text_formatter_delegate import IndexTextFormatterDelegate
-from views.index_link_delegate import IndexLinkDelegate
+from indexcore.ui.entry_table.link_delegate import IndexLinkDelegate
 
 class CaseInsensitiveItem(QStandardItem):
     """Custom item helper providing case-insensitive text evaluation with cross-reference prioritization."""

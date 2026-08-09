@@ -15,7 +15,7 @@ just without the nondeterministic wait.
 """
 import os
 
-from controllers.external_file_watcher_engine import ExternalFileWatcherEngine
+from indexcore.qt.watcher import ExternalFileWatcherEngine
 
 
 class _Recorder:

@@ -2,7 +2,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from models.latex_command_registry_model import LatexCommandRegistryModel
 from views.project_command_manager_dialog import ProjectCommandManagerDialog
-from controllers.app_style_configuration import AppStyleConfiguration
+from indexcore.ui.style import AppStyleConfiguration
 
 
 class ProjectCommandManagerController(QObject):

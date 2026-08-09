@@ -3,7 +3,7 @@ import os
 from PySide6.QtCore import QObject, Signal
 
 from models import index_tag_grammar as grammar
-from models.pending_changes_journal import DELETE, INSERT, UPDATE, PendingChangesJournal
+from indexcore.model.journal import DELETE, INSERT, UPDATE, PendingChangesJournal
 
 class EntryModifierModel(QObject):
     """

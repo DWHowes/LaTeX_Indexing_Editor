@@ -8,7 +8,7 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem
 from models import index_syntax_check as syntax
 from models import index_tag_grammar as grammar
 from views import index_syntax_advice as advice
-from views.entry_modifier_table_view import EntryModifierTableView
+from indexcore.ui.entry_table.table_view import EntryModifierTableView
 
 # ---------------------------------------------------------------------------
 # Column index constants — single source of truth for the 8-column layout

@@ -20,3 +20,33 @@ APP_LICENCE = "MIT Licence"
 def version_string() -> str:
     """e.g. 'Version 0.3.0-alpha' -- the form shown in the About box."""
     return f"Version {APP_VERSION}"
+
+
+def app_identity():
+    """
+    This application's identity, in the form indexcore's shared About box
+    takes.
+
+    Built here rather than in the shared package because the package must not
+    know which application it is inside, and built as a function rather than a
+    module-level constant because the logo paths come from
+    ``app_paths.get_app_root()`` -- which is correct only when called from a
+    module sitting one directory below the application root, and so is
+    deliberately not importable from indexcore at all (design document 7.3).
+    """
+    from indexcore.ui.identity import AppIdentity
+
+    from models.app_paths import get_app_root
+
+    icons = get_app_root() / "icons"
+    return AppIdentity(
+        name=APP_NAME,
+        version=APP_VERSION,
+        tagline=APP_TAGLINE,
+        url=APP_URL,
+        copyright=APP_COPYRIGHT,
+        licence=APP_LICENCE,
+        publisher=APP_PUBLISHER,
+        logo_dark_ink=icons / "lidx_wordmark.png",
+        logo_light_ink=icons / "lidx_wordmark_light.png",
+    )

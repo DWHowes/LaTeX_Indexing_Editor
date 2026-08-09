@@ -3,7 +3,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Slot, Signal, QSize
 from PySide6.QtWidgets import QToolButton, QTabBar
 
-from controllers.app_style_configuration import AppStyleConfiguration
+from indexcore.ui.style import AppStyleConfiguration
 from controllers.index_navigation_helper import IndexNavigationHelper
 from views.editor_tab import EditorTab, build_tab_close_icon
 

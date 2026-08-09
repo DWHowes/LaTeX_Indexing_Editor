@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from models.cross_reference_model import parse_encap_xref, render_cross_refs_file
 from views.legacy_xref_migration_dialog import LegacyXrefMigrationDialog
-from controllers.app_style_configuration import AppStyleConfiguration
+from indexcore.ui.style import AppStyleConfiguration
 
 
 class CrossReferenceController(QObject):

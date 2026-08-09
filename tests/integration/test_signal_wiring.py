@@ -31,7 +31,13 @@ edit instead of a signal silently staying "known broken" forever.
 import pytest
 from PySide6.QtCore import QObject, Signal
 
-APP_MODULE_PREFIXES = ("controllers.", "views.", "models.")
+# "indexcore." is here for a reason worth stating: this sweep only inspects
+# objects whose class lives in one of these modules, so the moment a signal-
+# bearing class moved into the shared package it dropped out of the sweep
+# silently -- no failure, just less coverage. Every extraction phase moves
+# more of them. Signals declared in indexcore are still this application's
+# problem when this application is the one that has to connect them.
+APP_MODULE_PREFIXES = ("controllers.", "views.", "models.", "indexcore.")
 
 
 def _is_app_object(obj) -> bool:
@@ -176,7 +182,7 @@ def test_walk_finds_the_known_live_wired_signals_as_a_sanity_check(booted_app):
         ("views.main_menu_bar.MainMenuBar", "recent_menu_about_to_show"),
         ("views.file_tree_view.FileTreeView", "file_prune_requested"),
         ("controllers.index_edit_controller.IndexEditController", "heading_renamed"),
-        ("models.index_edit_staging_model.IndexEditStagingModel", "entry_staged"),
+        ("indexcore.qt.staging.QtIndexEditStagingModel", "entry_staged"),
     ]
     for key in expect_present_and_connected:
         assert key in by_key, f"Expected signal {key} was not found by the object walk at all."

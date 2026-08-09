@@ -26,23 +26,23 @@ FORBIDDEN_IMPORTS = {
 }
 
 
-#: Modules that must import no Qt at all. Every one of these is Tier A or the
-#: core half of Tier B in the extraction plan, and `indexcore`'s model,
-#: dialect, persistence, syntax and session layers are required to import
-#: nothing outside the standard library so the Word and InDesign apps can run
-#: their headless backends without Qt installed. The list is deliberately
-#: explicit rather than "everything in models/": several modules there stay
-#: behind in this application and are legitimately Qt-bound.
+#: Modules that must import no Qt at all. Every one of these is on the
+#: extraction plan's Tier A or Tier B list, and `indexcore`'s model, dialect,
+#: persistence, syntax and session layers are required to import nothing
+#: outside the standard library so the Word and InDesign apps can run their
+#: headless backends without Qt installed. The list is deliberately explicit
+#: rather than "everything in models/": several modules there stay behind in
+#: this application and are legitimately Qt-bound.
+#:
+#: **Extend this in every extraction phase** as more code becomes core-bound.
+#: It shrinks as well as grows: a module that has actually *moved* leaves this
+#: list, because `indexcore`'s own `tests/test_no_third_party_in_core.py`
+#: takes over — and does it better, adding a runtime check with Qt blocked at
+#: the import finder. Phase 1 removed six entries that way.
 QT_FREE_MODULES = (
     "models/file_tree_persistence.py",
     "models/index_tag_grammar.py",
-    "models/index_command_stack.py",
-    "models/pending_changes_journal.py",
     "models/index_syntax_check.py",
-    "models/name_inverter.py",
-    "models/text_sanitizer.py",
-    "models/macro_id_generator.py",
-    "models/session_backup_manager.py",
 )
 
 

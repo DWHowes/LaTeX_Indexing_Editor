@@ -15,9 +15,9 @@ import pytest
 from PySide6.QtCore import QSettings
 
 from models.index_prefs_config_model import IndexPrefsConfigModel
-from models.theme_config_model import ThemeConfigModel
+from indexcore.ui.theme.config_model import ThemeConfigModel
 from models.preferences_persistence import PreferencesPersistence
-from controllers.theme_config_controller import ThemeConfigController
+from indexcore.ui.theme.controller import ThemeConfigController
 from controllers.index_prefs_config_controller import IndexPrefsConfigController
 
 

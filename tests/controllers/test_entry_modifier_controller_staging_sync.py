@@ -17,7 +17,7 @@ import pytest
 from PySide6.QtCore import QObject, Signal
 
 from models.entry_modifier_model import EntryModifierModel
-from models.index_edit_staging_model import IndexEditStagingModel
+from indexcore.qt.staging import QtIndexEditStagingModel
 from controllers.entry_modifier_controller import EntryModifierController
 from views.entry_modifier_list import EntryModifierList
 
@@ -34,7 +34,7 @@ def wired_controller(qtbot):
     qtbot.addWidget(view)
 
     model = EntryModifierModel(persistence=None, staging_model=None)
-    staging_model = IndexEditStagingModel()
+    staging_model = QtIndexEditStagingModel()
     index_edit_ctrl = _FakeIndexEditController()
 
     controller = EntryModifierController(

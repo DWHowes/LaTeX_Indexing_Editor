@@ -1,90 +1,26 @@
+"""
+This application's three right-click menus: the index tree, the workspace file
+tree, and the entry table.
+
+The plumbing they share -- attaching to a viewport once it exists, catching the
+request from both viewport and widget, theming the menu, suppressing an empty
+one -- is ``indexcore.ui.context_menu.BaseContextMenuManager``. What stays here
+is the part that is about *this* application: which actions a menu offers and
+what they mean. "Prune" against a LaTeX project file has nothing in common with
+what the word would mean to an InDesign story, and the entry-table manager
+reads this app's 8-column layout constants, which the shared package does not
+have and will not until phase 4 parameterises the entry table.
+"""
 import os
 
-from PySide6.QtCore import QObject, Qt, Signal, Slot, QModelIndex, QPoint, QTimer, QEvent
+from PySide6.QtCore import Qt, Signal, Slot, QModelIndex
 from PySide6.QtWidgets import QMenu
 from PySide6.QtGui import QAction
 
-from controllers.app_style_configuration import AppStyleConfiguration
+from indexcore.ui.context_menu import BaseContextMenuManager
+
 from views.entry_modifier_list import COL_ID, COL_MAIN_DISP, COL_SUB2_DISP
 
-class BaseContextMenuManager(QObject):
-    """
-    POLYMORPHIC BASE CLASS (STRICT MVC presentation layer).
-    Handles visual UI mapping mechanics and custom stylesheet setups.
-    Has zero knowledge of backend data stores, paths, or pipeline operations.
-    """
-    def __init__(self, view_widget, parent=None):
-        super().__init__(parent)
-        self.view_widget = view_widget
-
-        if self.view_widget:
-            # Defer wiring so the viewport is guaranteed to exist.
-            # viewport() returns None if the widget hasn't been shown yet.
-            QTimer.singleShot(500, self._connect_viewport)
-
-    def _connect_viewport(self):
-        if not self.view_widget:
-            return
-
-        try:
-            viewport = self.view_widget.viewport()
-        except AttributeError:
-            viewport = None
-
-        if viewport is not None:
-            viewport.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            viewport.customContextMenuRequested.connect(self._intercept_context_request)
-            viewport.installEventFilter(self)
-
-            self.view_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            self.view_widget.customContextMenuRequested.connect(self._intercept_context_request)
-        else:
-            self.view_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            self.view_widget.customContextMenuRequested.connect(self._intercept_context_request)
-
-    @Slot(QPoint)
-    def _intercept_context_request(self, pixel_position):
-        if not self.view_widget:
-            return
-
-        try:
-            viewport = self.view_widget.viewport()
-        except AttributeError:
-            viewport = None
-
-        proxy_index = self.view_widget.indexAt(pixel_position)
-
-        if not proxy_index.isValid():
-            return
-
-        context_menu = QMenu(self.view_widget)
-
-        try:
-            context_menu.setStyleSheet(AppStyleConfiguration.get_unified_menu_stylesheet())
-        except ImportError:
-            pass
-
-        self.populate_menu_actions(context_menu, proxy_index)
-
-        if not context_menu.isEmpty():
-            if viewport is not None and self.sender() is viewport:
-                global_pos = viewport.mapToGlobal(pixel_position)
-            else:
-                global_pos = self.view_widget.mapToGlobal(pixel_position)
-            context_menu.exec(global_pos)
-
-    def eventFilter(self, watched, event):
-        if (
-            event.type() == QEvent.ContextMenu
-            and self.view_widget is not None
-            and watched is getattr(self.view_widget, "viewport", lambda: None)()
-        ):
-            self._intercept_context_request(event.pos())
-            return True
-        return super().eventFilter(watched, event)
-
-    def populate_menu_actions(self, menu_container: QMenu, proxy_index: QModelIndex):
-        raise NotImplementedError("Subclasses must implement populate_menu_actions.")
 
 class IndexTreeContextMenuManager(BaseContextMenuManager):
     """

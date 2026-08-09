@@ -25,9 +25,9 @@ from PySide6.QtWidgets import QTabWidget
 
 from models.latex_index_parser import LatexIndexParser
 from models.entry_modifier_model import EntryModifierModel
-from models.index_edit_staging_model import IndexEditStagingModel
-from models.text_sanitizer import TextSanitizer
-from models.session_backup_manager import SessionBackupManager
+from indexcore.qt.staging import QtIndexEditStagingModel
+from indexcore.util.text import TextSanitizer
+from indexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from controllers.index_edit_controller import IndexEditController
 from views.index_tree_view import IndexTreeView
@@ -114,7 +114,7 @@ def _register_heading(engine, heading_text: str, refs: list[dict]) -> int:
 def _new_stack(qtbot):
     tree = IndexTreeView(model_engine=_FakeEngine())
     qtbot.addWidget(tree)
-    staging_model = IndexEditStagingModel()
+    staging_model = QtIndexEditStagingModel()
     entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
     tabs = QTabWidget()
     qtbot.addWidget(tabs)

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 
-from controllers.app_style_configuration import AppStyleConfiguration
+from indexcore.ui.style import AppStyleConfiguration
 
 class CreateCommandDialog(QDialog):
     save_requested = Signal(str, str)

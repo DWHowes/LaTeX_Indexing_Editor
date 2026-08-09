@@ -17,7 +17,7 @@ custom-LaTeX-command test files.
 import pytest
 from PySide6.QtCore import QSettings
 
-from views.advanced_search_window import AdvancedSearchWindow
+from indexcore.ui.search.window import AdvancedSearchWindow
 
 
 @pytest.fixture(autouse=True)

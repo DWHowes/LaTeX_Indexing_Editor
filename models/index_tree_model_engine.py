@@ -2,7 +2,7 @@ import os
 import re
 
 from models import index_tag_grammar as grammar
-from models.pending_changes_journal import DELETE, INSERT, PendingChangesJournal
+from indexcore.model.journal import DELETE, INSERT, PendingChangesJournal
 
 class IndexTreeModelEngine:
     """

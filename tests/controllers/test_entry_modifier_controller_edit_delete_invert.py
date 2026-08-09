@@ -25,10 +25,10 @@ from PySide6.QtWidgets import QTabWidget, QMessageBox
 
 from models.latex_index_parser import LatexIndexParser
 from models.entry_modifier_model import EntryModifierModel
-from models.index_edit_staging_model import IndexEditStagingModel
+from indexcore.qt.staging import QtIndexEditStagingModel
 from models.index_tree_model_engine import IndexTreeModelEngine
-from models.text_sanitizer import TextSanitizer
-from models.session_backup_manager import SessionBackupManager
+from indexcore.util.text import TextSanitizer
+from indexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from controllers.index_edit_controller import IndexEditController
 from controllers.entry_modifier_controller import EntryModifierController
@@ -100,7 +100,7 @@ def _build_stack(tmp_path, qtbot, tex_content, heading_raw_text="Main"):
     _add_top_level_node(tree, heading_raw_text, refs)
     _register_heading(tree.engine, heading_raw_text, refs)
 
-    staging_model = IndexEditStagingModel()
+    staging_model = QtIndexEditStagingModel()
     entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
     entry_model.load_records(refs)
 
@@ -297,7 +297,7 @@ class TestInvertHeadingsForSelected:
         _register_heading(tree.engine, "Main!Sub1", [invertible_ref])
         _register_heading(tree.engine, "Other!Sub1!Sub2", [blocked_ref])
 
-        staging_model = IndexEditStagingModel()
+        staging_model = QtIndexEditStagingModel()
         entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
         entry_model.load_records([invertible_ref, blocked_ref])
 

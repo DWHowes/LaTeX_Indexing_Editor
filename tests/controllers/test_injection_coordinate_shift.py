@@ -27,8 +27,8 @@ import re
 import pytest
 
 from models.entry_modifier_model import EntryModifierModel
-from models.session_backup_manager import SessionBackupManager
-from models.text_sanitizer import TextSanitizer
+from indexcore.session.backup import SessionBackupManager
+from indexcore.util.text import TextSanitizer
 from controllers.document_io_controller import DocumentIOController
 
 

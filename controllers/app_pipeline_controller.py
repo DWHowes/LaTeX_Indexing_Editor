@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplicati
 from shiboken6 import isValid
 
 from models import index_tag_grammar as grammar
-from models.index_command_stack import (
+from indexcore.model.commands import (
     DEFAULT_LIMIT,
     EntrySnapshot,
     IndexCommandStack,
@@ -21,15 +21,15 @@ from models.index_command_stack import (
 from views.entry_modifier_list import set_encap_style_values
 from models.latex_entry_model import ReferenceCarrier
 from models.index_tree_model_engine import IndexTreeModelEngine
-from models.macro_id_generator import MacroIDGenerator
+from indexcore.model.ids import MacroIDGenerator
 from models.project_load_worker import SafeProjectLoadThread, ProjectLoadWorker
 from models.index_prefs_config_model import IndexPrefsConfigModel
 from models.rtf_export_model import RtfExportMetadata
 from models.latex_command_registry_model import LatexCommandRegistryModel
-from models.theme_config_model import ThemeConfigModel
+from indexcore.ui.theme.config_model import ThemeConfigModel
 from models.entry_modifier_model import EntryModifierModel
-from models.index_edit_staging_model import IndexEditStagingModel
-from models.name_inverter import NameInverter, NameInversionResult
+from indexcore.qt.staging import QtIndexEditStagingModel
+from indexcore.naming.inverter import NameInverter, NameInversionResult
 
 from controllers.index_tree_controller import IndexTreeController
 from controllers.context_menu_subsystem import FileTreeContextMenuManager, IndexTreeContextMenuManager, EditEntryContextMenuManager
@@ -37,21 +37,23 @@ from controllers.index_prefs_config_controller import IndexPrefsConfigController
 from controllers.rtf_export_controller import RtfExportThread
 from controllers.latex_command_controller import CreateCommandController
 from controllers.project_command_manager_controller import ProjectCommandManagerController
-from controllers.theme_config_controller import ThemeConfigController
+from indexcore.ui.theme.controller import ThemeConfigController
 from controllers.entry_modifier_controller import EntryModifierController
 from controllers.index_edit_controller import IndexEditController
 from controllers.range_consistency_controller import RangeConsistencyController
 from controllers.cross_reference_controller import CrossReferenceController
 from controllers.pruned_files_controller import PrunedFilesController
-from controllers.help_controller import HelpController
+from models.app_paths import get_app_root
+from models.app_version import app_identity
+from indexcore.ui.help.controller import HelpController
 
-from controllers.app_style_configuration import AppStyleConfiguration
+from indexcore.ui.style import AppStyleConfiguration
 from views.editor_tab import EditorTab
 from views.index_tree_view import IndexTreeView
 from views.project_sidebar_view import ProjectSidebarView
-from views.advanced_search_window import AdvancedSearchWindow
-from views.name_inversion_dialog import NameInversionDialog
-from views.index_statistics_dialog import IndexStatisticsDialog
+from indexcore.ui.search.window import AdvancedSearchWindow
+from indexcore.ui.dialogs.name_inversion_dialog import NameInversionDialog
+from indexcore.ui.dialogs.statistics_dialog import IndexStatisticsDialog
 from views.rtf_viewer_dialog import RtfViewerDialog
 from views.head_note_dialog import HeadNoteDialog
 
@@ -132,7 +134,7 @@ class AppPipelineController(QObject):
         # Session-only staging model tracking original/staged/dirty state for
         # in-flight bidirectional edits, keyed by unique_id_number. Must be
         # instantiated before any of its three consumers below.
-        self.index_edit_staging_model = IndexEditStagingModel(parent=self)
+        self.index_edit_staging_model = QtIndexEditStagingModel(parent=self)
 
         self.entry_modifier_model = EntryModifierModel(persistence=None)  # persistence injected after project load
         self.entry_modifier_model.set_staging_model(self.index_edit_staging_model)
@@ -179,7 +181,16 @@ class AppPipelineController(QObject):
             parent=self,
         )
 
-        self.help_ctrl = HelpController(window=self.window, parent=self)
+        # app_root and identity are injected: app_paths deliberately stays in
+        # this application (see indexcore design 7.3 -- moved into the package
+        # its non-frozen branch resolves into site-packages), and one shared
+        # About box has to be told whose application it is describing.
+        self.help_ctrl = HelpController(
+            window=self.window,
+            app_root=get_app_root(),
+            identity=app_identity(),
+            parent=self,
+        )
 
         max_existing_id = self.scope_ctrl.get_max_unique_id()
         starting_id = max_existing_id + 1  # 1 for new project, next available for existing

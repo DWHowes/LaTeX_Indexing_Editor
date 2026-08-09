@@ -28,11 +28,11 @@ from PySide6.QtWidgets import QTabWidget
 
 from models.latex_index_parser import LatexIndexParser
 from models.entry_modifier_model import EntryModifierModel
-from models.index_edit_staging_model import IndexEditStagingModel
+from indexcore.qt.staging import QtIndexEditStagingModel
 from models.index_tree_model_engine import IndexTreeModelEngine
 from models.file_tree_persistence import FileTreePersistence
-from models.text_sanitizer import TextSanitizer
-from models.session_backup_manager import SessionBackupManager
+from indexcore.util.text import TextSanitizer
+from indexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from controllers.index_edit_controller import IndexEditController
 from views.index_tree_view import IndexTreeView
@@ -102,7 +102,7 @@ class TestDiscardUncommittedEntry:
         for ref in refs:
             ref["heading_id"] = heading_id
 
-        staging_model = IndexEditStagingModel()
+        staging_model = QtIndexEditStagingModel()
         entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
         entry_model.load_records(refs)
         for ref in refs:
@@ -205,7 +205,7 @@ class TestDiscardDirtyEdits:
         })
         _add_top_level_node(tree, "Renamed", [ref])
 
-        staging_model = IndexEditStagingModel()
+        staging_model = QtIndexEditStagingModel()
         entry_model = EntryModifierModel(persistence=persistence, staging_model=staging_model)
         entry_model.load_records([ref])
         entry_model.mark_dirty(uid)
