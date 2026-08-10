@@ -5,7 +5,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Signal, Slot, Qt, QPoint, QSettings
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 
-from models import index_syntax_check as syntax
 from models import index_tag_grammar as grammar
 from bookindexcore.model.entry_table import layout_for, level_name
 from models.latex_dialect import LATEX_DIALECT
@@ -135,15 +134,11 @@ def _parse_heading_raw_text(heading_raw_text: str) -> dict:
     }
 
 
-# The encap names the Page column renders as bold or italic live on the
-# grammar (grammar.DEFAULT_BOLD_ENCAP_VALUES / DEFAULT_ITALIC_ENCAP_VALUES),
-# because which markup means "bold" is a fact about the format, not about
-# this widget. They are the built-in defaults only: both lists are
-# user-editable from Preferences -> General and pushed in here by
-# set_encap_style_values().
-_BOLD_ENCAP_VALUES = frozenset(grammar.DEFAULT_BOLD_ENCAP_VALUES)
-
-
+# Which markup means "bold" is a fact about the format, not about this
+# widget, so the answer lives on the dialect's page_style_vocabulary and is
+# read from there by _page_style_for below. LatexDialect seeds it from the
+# grammar's built-in defaults; both lists are user-editable from
+# Preferences -> General and pushed in by set_encap_style_values().
 def set_encap_style_values(bold_values=None, italic_values=None) -> None:
     """
     Replaces the bold and/or italic encap name sets.
@@ -160,8 +155,6 @@ def set_encap_style_values(bold_values=None, italic_values=None) -> None:
     (stripped and lowercased), so "TextBF " entered in the dialog matches
     a "textbf" encap in the source.
     """
-    global _BOLD_ENCAP_VALUES, _ITALIC_ENCAP_VALUES
-
     def _normalise(raw):
         if isinstance(raw, str):
             raw = raw.split(",")
@@ -169,20 +162,19 @@ def set_encap_style_values(bold_values=None, italic_values=None) -> None:
             str(item).strip().lower() for item in (raw or []) if str(item).strip()
         )
 
-    bold = _normalise(bold_values)
-    if bold:
-        _BOLD_ENCAP_VALUES = bold
+    # The dialect holds the answer -- its page_style_vocabulary is what every
+    # other surface reads, and what shared UI populates a page-style control
+    # from. This table used to keep its own pair of frozensets beside it,
+    # which is two copies of "which macro means bold" that could disagree:
+    # exactly the class of bug index_tag_grammar exists to end. There is one
+    # copy now, and this is the only writer.
+    current_bold = {s.value.lower() for s in dialect.page_style_vocabulary if s.bold}
+    current_italic = {s.value.lower() for s in dialect.page_style_vocabulary if s.italic}
 
-    italic = _normalise(italic_values)
-    if italic:
-        _ITALIC_ENCAP_VALUES = italic
-
-    # The dialect answers the same question for everything that is not this
-    # table -- its page_style_vocabulary is what shared UI will populate a
-    # page-style control from. Two copies of "which macro means bold" that
-    # can disagree is the class of bug index_tag_grammar exists to end, so
-    # the preference lands on both or on neither.
-    dialect.set_emphasis_values(_BOLD_ENCAP_VALUES, _ITALIC_ENCAP_VALUES)
+    dialect.set_emphasis_values(
+        _normalise(bold_values) or current_bold,
+        _normalise(italic_values) or current_italic,
+    )
 
 
 def _page_command(value: str) -> str:
@@ -200,9 +192,22 @@ def _page_command(value: str) -> str:
     return dialect.page_style_of(value)
 
 
+def _page_style_for(value: str):
+    """
+    The vocabulary entry for an encap's command half, or None when the
+    project uses a macro the dialect has never been told about.
+    """
+    command = _page_command(value).lower()
+    for style in dialect.page_style_vocabulary:
+        if style.value.lower() == command:
+            return style
+    return None
+
+
 def _is_bold_encap(value: str) -> bool:
     """Return True if *value* denotes a bold page-number encap style."""
-    return _page_command(value).lower() in _BOLD_ENCAP_VALUES
+    style = _page_style_for(value)
+    return bool(style and style.bold)
 
 
 def _apply_encap_font(item: QStandardItem, value: str) -> None:
@@ -234,12 +239,10 @@ def _make_encap_item(value: str) -> QStandardItem:
     return item
 
 
-_ITALIC_ENCAP_VALUES = frozenset(grammar.DEFAULT_ITALIC_ENCAP_VALUES)
-
-
 def _is_italic_encap(value: str) -> bool:
     """Return True if *value* denotes an italic page-number encap style."""
-    return _page_command(value).lower() in _ITALIC_ENCAP_VALUES
+    style = _page_style_for(value)
+    return bool(style and style.italic)
 
 
 def _is_range_encap(value: str) -> bool:
