@@ -51,6 +51,11 @@ QT_FREE_MODULES = (
     # The record mapping is the boundary between the shared IndexReference
     # and this application's columns. Everything that crosses it is data.
     "models/latex_record_mapping.py",
+    # The backend is deliberately Qt-free even though it lives in
+    # controllers/: it delegates every write to DocumentIOController, which
+    # is where the tab and buffer knowledge stays. Shared code holds a
+    # backend, and shared code has to run headless.
+    "controllers/latex_text_backend.py",
 )
 
 

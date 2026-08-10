@@ -350,6 +350,29 @@ class DocumentIOController(QObject):
                     return editor
         return None
 
+    def read_text(self, file_path: str) -> "str | None":
+        """
+        The file's current text: the open buffer if there is one, the disk
+        contents otherwise.
+
+        The open-editor-vs-disk branch is the one thing every reader here
+        has to get right and the one thing it is easy to skip -- a reader
+        that goes straight to disk sees a stale file whenever the user has
+        unsaved changes in that tab, which is most of the time. It was
+        written out separately in each reader; this is that branch, once.
+
+        Returns None if the file cannot be read.
+        """
+        open_editor = self._find_open_editor(file_path)
+        if open_editor:
+            return open_editor.document().toPlainText()
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception as e:
+            print(f"[IO ERROR] read_text: could not read {file_path}: {e}")
+            return None
+
     def read_macro_span(
         self,
         file_path: str,
@@ -376,16 +399,9 @@ class DocumentIOController(QObject):
         sees exactly what a rewrite would be reading. Returns None if the
         file can't be read.
         """
-        open_editor = self._find_open_editor(file_path)
-        if open_editor:
-            doc_text = open_editor.document().toPlainText()
-        else:
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    doc_text = f.read()
-            except Exception as e:
-                print(f"[IO ERROR] read_macro_span: could not read {file_path}: {e}")
-                return None
+        doc_text = self.read_text(file_path)
+        if doc_text is None:
+            return None
 
         if absolute_end > len(doc_text) or absolute_position < 0:
             print(
