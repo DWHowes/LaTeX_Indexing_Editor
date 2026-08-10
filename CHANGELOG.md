@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Internal: the tree and the entry table become shareable (phase 4a)
+
+**Nothing about using the application changes.** The index tree, the emphasis
+renderer, the advisory-warning icons and the tree's controller now live in the
+shared package, and the entry table stopped assuming that every index has
+exactly three levels with a sort key on each — because Word caps at three with
+a single sort key per entry, and InDesign allows four. The table you see is
+identical; it is now *derived* rather than written out, and a test asserts it
+comes out exactly as it always has.
+
+Two duplicate copies of information were removed, both harmless but both the
+kind of thing that eventually disagrees with itself:
+
+- The entry table kept its own record of where every entry sits in its file —
+  path, line, column, character offsets — rebuilt constantly and read by
+  nothing. The real one lives with the entry data.
+- It also kept its own list of which macros mean bold and italic, alongside
+  the one Preferences already writes to. There is one list now.
+
+One real fix: the tree sorted headings by splitting on the first `@`, ignoring
+braces. A heading like `a{b@c}d` sorted under `a{b` — a fragment of its own
+markup. Nothing ever reported it, because a wrong sort order looks like an
+opinion rather than a fault. (A *bare* `@` still starts a sort key, which is
+correct: that is what makeindex does, and the entry checker already warns
+about it.)
+
 ### Index entries are now typed records, and the document has a backend (phase 3)
 
 The largest internal change so far, and **nothing about using the
