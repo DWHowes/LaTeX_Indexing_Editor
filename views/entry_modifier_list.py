@@ -254,7 +254,7 @@ def _is_range_encap(value: str) -> bool:
     literals, which is what made this view read "(textbf" as an ordinary
     (and nonsensical) page-style command.
     """
-    return dialect.range_role(grammar.encap_from_stored(value)) is not None
+    return dialect.range_role(value) is not None
 
 
 # (label, canonical value) — order defines combo box index order
@@ -400,8 +400,13 @@ class PageStyleDelegate(QStyledItemDelegate):
         # row beneath it, so the marker has to come from the cell's
         # current value, not from whenever the editor was last loaded.
         current = str(index.data(Qt.ItemDataRole.EditRole) or "")
-        role = dialect.range_role(grammar.encap_from_stored(current))
-        model.setData(index, grammar.build_range_encap(role, value), Qt.ItemDataRole.EditRole)
+        role = dialect.range_role(current)
+        # build_page_style rather than the grammar's build_range_encap. Same
+        # result here -- the combo's Standard option is already "" rather than
+        # the stored "standard" spelling -- but it asks the dialect to
+        # reassemble the value instead of assuming this format keeps a marker
+        # and a command in one string, which two of the three do not.
+        model.setData(index, dialect.build_page_style(value, role), Qt.ItemDataRole.EditRole)
 
     def updateEditorGeometry(self, editor: QComboBox, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         editor.setGeometry(option.rect)
