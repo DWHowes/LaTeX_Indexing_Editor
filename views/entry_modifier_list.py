@@ -7,6 +7,8 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem
 
 from models import index_syntax_check as syntax
 from models import index_tag_grammar as grammar
+from bookindexcore.model.entry_table import layout_for, level_name
+from models.latex_dialect import LATEX_DIALECT
 from models.latex_dialect import LATEX_DIALECT as dialect
 from models.latex_record_mapping import (
     column_of, command_of, end_of, line_of, position_of, reference_from_row,
@@ -17,33 +19,47 @@ from views import index_syntax_advice as advice
 from bookindexcore.ui.entry_table.table_view import EntryModifierTableView
 
 # ---------------------------------------------------------------------------
-# Column index constants — single source of truth for the 8-column layout
+# The column layout, *derived* rather than declared
 # ---------------------------------------------------------------------------
-COL_ID         = 0
-COL_MAIN_DISP  = 1
-COL_MAIN_SORT  = 2
-COL_SUB1_DISP  = 3
-COL_SUB1_SORT  = 4
-COL_SUB2_DISP  = 5
-COL_SUB2_SORT  = 6
-COL_ENCAP      = 7
+# This module used to define the eight columns itself, which quietly encoded
+# two things that are only true of LaTeX: three levels, and a sort key on
+# every one of them. Word caps at three levels but has a single ``\y`` for the
+# whole entry, so three per-level Sort boxes would each write to the same
+# value; InDesign allows four levels.
+#
+# ``layout_for`` answers both from the dialect. Over LaTeX's it produces
+# exactly the eight columns below, in the same order, which is why nothing
+# here or in the tests had to change when it was introduced.
+#
+# The COL_* names are kept because they read better at a call site than
+# ``_LAYOUT.display_column(1)``, and because this module is still the only
+# consumer. When the widget itself moves to the shared package it will take
+# the layout object and these go.
+_LAYOUT = layout_for(LATEX_DIALECT)
 
-_HEADERS = ["ID", "Main Display", "Main Sort", "Sub1 Display", "Sub1 Sort",
-            "Sub2 Display", "Sub2 Sort", "Page"]
+COL_ID         = _LAYOUT.id_column
+COL_MAIN_DISP  = _LAYOUT.display_column(0)
+COL_MAIN_SORT  = _LAYOUT.sort_column(0)
+COL_SUB1_DISP  = _LAYOUT.display_column(1)
+COL_SUB1_SORT  = _LAYOUT.sort_column(1)
+COL_SUB2_DISP  = _LAYOUT.display_column(2)
+COL_SUB2_SORT  = _LAYOUT.sort_column(2)
+COL_ENCAP      = _LAYOUT.page_style_column
+
+_HEADERS = _LAYOUT.headers
 
 # Columns that must never be edited by the user
-_READ_ONLY_COLS = frozenset({COL_ID})
+_READ_ONLY_COLS = frozenset(
+    position for position in range(len(_LAYOUT)) if not _LAYOUT.is_editable(position)
+)
 
 # Which columns carry entry text, and what that text is for. The Page
 # column is deliberately absent: its content is a command name chosen from
 # a combo box, not something anyone types a per-cent sign into.
 _SYNTAX_ROLE_BY_COLUMN = {
-    COL_MAIN_DISP: syntax.ROLE_DISPLAY,
-    COL_MAIN_SORT: syntax.ROLE_SORT,
-    COL_SUB1_DISP: syntax.ROLE_DISPLAY,
-    COL_SUB1_SORT: syntax.ROLE_SORT,
-    COL_SUB2_DISP: syntax.ROLE_DISPLAY,
-    COL_SUB2_SORT: syntax.ROLE_SORT,
+    position: _LAYOUT.syntax_role_at(position)
+    for position in range(len(_LAYOUT))
+    if _LAYOUT.syntax_role_at(position) is not None
 }
 
 # Global (QSettings) key for persisted column visibility -- deliberately not
@@ -94,11 +110,15 @@ def _parse_heading_raw_text(heading_raw_text: str) -> dict:
 
         [level0[@display0]][!level1[@display1]][!level2[@display2]][|encap]
 
-    Returns a dict with keys:
-        main_sort, main_disp,
-        sub1_sort, sub1_disp,
-        sub2_sort, sub2_disp,
-        encap
+    Returns ``{"levels": [(sort, display), ...], "encap": str}``, with one
+    tuple per level the layout has -- padded with empty pairs where the
+    heading is shallower than the table is wide.
+
+    A list rather than the ``main_*``/``sub1_*``/``sub2_*`` keys it used to
+    return, because those names *were* the three-level assumption: a format
+    with four levels had nowhere to put the fourth, and one with a single
+    sort key per entry had three places to put one value. The table's depth
+    now comes from the dialect, so the field shape has to follow it.
 
     Parsing is strip=False so the encap round-trips through the table
     byte-for-byte; the individual level halves are stripped by
@@ -108,21 +128,14 @@ def _parse_heading_raw_text(heading_raw_text: str) -> dict:
     """
     tag = grammar.parse_body(heading_raw_text, strip=False)
     levels = tag.levels
-    encap = tag.encap
 
-    def _level(idx: int) -> tuple[str, str]:
-        return _parse_index_level(levels[idx]) if idx < len(levels) else ("", "")
-
-    main_sort, main_disp = _level(0)
-    sub1_sort, sub1_disp = _level(1)
-    sub2_sort, sub2_disp = _level(2)
-
-    return dict(
-        main_sort=main_sort, main_disp=main_disp,
-        sub1_sort=sub1_sort, sub1_disp=sub1_disp,
-        sub2_sort=sub2_sort, sub2_disp=sub2_disp,
-        encap=encap,
-    )
+    return {
+        "levels": [
+            _parse_index_level(levels[idx]) if idx < len(levels) else ("", "")
+            for idx in _LAYOUT.levels
+        ],
+        "encap": tag.encap,
+    }
 
 
 # The encap names the Page column renders as bold or italic live on the
@@ -265,15 +278,35 @@ def _fields_from_row_items(row_items: list[QStandardItem | None]) -> dict:
     encap_item = row_items[COL_ENCAP]
     encap = encap_item.data(Qt.ItemDataRole.EditRole) if encap_item else ""
 
+    def _pair(level: int) -> tuple[str, str]:
+        """One level as (sort, display), reading whichever columns exist."""
+        sort_column = _LAYOUT.sort_column(level)
+        return (
+            _text(sort_column) if sort_column is not None else "",
+            _text(_LAYOUT.display_column(level)),
+        )
+
     return {
-        "main_disp": _text(COL_MAIN_DISP),
-        "main_sort": _text(COL_MAIN_SORT),
-        "sub1_disp": _text(COL_SUB1_DISP),
-        "sub1_sort": _text(COL_SUB1_SORT),
-        "sub2_disp": _text(COL_SUB2_DISP),
-        "sub2_sort": _text(COL_SUB2_SORT),
+        "levels": [_pair(level) for level in _LAYOUT.levels],
         "encap": encap or "",
     }
+
+def _level_cells(parsed: dict, make_item) -> list:
+    """
+    The level cells of one row, in column order.
+
+    Built from the layout rather than written out, so a format with four
+    levels gets four and one with a single entry-scoped sort key gets no
+    per-level Sort cells at all. ``make_item`` differs between the two
+    builders below -- one marks cells editable, the other does not -- so it
+    is passed in rather than assumed.
+    """
+    cells = []
+    for level, (sort, display) in zip(_LAYOUT.levels, parsed["levels"]):
+        cells.append(make_item(display))
+        if _LAYOUT.sort_column(level) is not None:
+            cells.append(make_item(sort))
+    return cells
 
 
 def _advise_cell(item: QStandardItem | None, column: int) -> None:
@@ -532,9 +565,7 @@ class EntryModifierList(QWidget):
         current = _fields_from_row_items(row_items)
 
         new_fields = {
-            "main_disp": parsed["main_disp"], "main_sort": parsed["main_sort"],
-            "sub1_disp": parsed["sub1_disp"], "sub1_sort": parsed["sub1_sort"],
-            "sub2_disp": parsed["sub2_disp"], "sub2_sort": parsed["sub2_sort"],
+            "levels": list(parsed["levels"]),
             "encap": parsed["encap"],
         }
         if new_fields == current:
@@ -542,12 +573,11 @@ class EntryModifierList(QWidget):
 
         self.base_model.dataChanged.disconnect(self._on_cell_data_changed)
         try:
-            self.base_model.item(row, COL_MAIN_DISP).setText(new_fields["main_disp"])
-            self.base_model.item(row, COL_MAIN_SORT).setText(new_fields["main_sort"])
-            self.base_model.item(row, COL_SUB1_DISP).setText(new_fields["sub1_disp"])
-            self.base_model.item(row, COL_SUB1_SORT).setText(new_fields["sub1_sort"])
-            self.base_model.item(row, COL_SUB2_DISP).setText(new_fields["sub2_disp"])
-            self.base_model.item(row, COL_SUB2_SORT).setText(new_fields["sub2_sort"])
+            for level, (sort, display) in zip(_LAYOUT.levels, new_fields["levels"]):
+                self.base_model.item(row, _LAYOUT.display_column(level)).setText(display)
+                sort_column = _LAYOUT.sort_column(level)
+                if sort_column is not None:
+                    self.base_model.item(row, sort_column).setText(sort)
             encap_item = self.base_model.item(row, COL_ENCAP)
             if encap_item is not None:
                 encap_item.setText(new_fields["encap"])
@@ -606,12 +636,7 @@ class EntryModifierList(QWidget):
 
             row = [
                 id_item,
-                _item(parsed["main_disp"]),
-                _item(parsed["main_sort"]),
-                _item(parsed["sub1_disp"]),
-                _item(parsed["sub1_sort"]),
-                _item(parsed["sub2_disp"]),
-                _item(parsed["sub2_sort"]),
+                *_level_cells(parsed, _item),
                 _make_encap_item(stored_encap),
             ]
             _advise_row(row)
@@ -634,9 +659,7 @@ class EntryModifierList(QWidget):
             # (it was already a well-formed \index macro) — seed the
             # revert stash from it directly.
             self._last_valid_row_state[unique_id] = {
-                "main_disp": parsed["main_disp"], "main_sort": parsed["main_sort"],
-                "sub1_disp": parsed["sub1_disp"], "sub1_sort": parsed["sub1_sort"],
-                "sub2_disp": parsed["sub2_disp"], "sub2_sort": parsed["sub2_sort"],
+                "levels": list(parsed["levels"]),
                 "encap": stored_encap,
             }
 
@@ -699,12 +722,7 @@ class EntryModifierList(QWidget):
 
         new_row_items = [
             id_item,
-            _item(parsed["main_disp"]),
-            _item(parsed["main_sort"]),
-            _item(parsed["sub1_disp"]),
-            _item(parsed["sub1_sort"]),
-            _item(parsed["sub2_disp"]),
-            _item(parsed["sub2_sort"]),
+            *_level_cells(parsed, _item),
             _make_encap_item(stored_encap),
         ]
         _advise_row(new_row_items)
@@ -725,9 +743,7 @@ class EntryModifierList(QWidget):
         }
 
         self._last_valid_row_state[unique_id] = {
-            "main_disp": parsed["main_disp"], "main_sort": parsed["main_sort"],
-            "sub1_disp": parsed["sub1_disp"], "sub1_sort": parsed["sub1_sort"],
-            "sub2_disp": parsed["sub2_disp"], "sub2_sort": parsed["sub2_sort"],
+            "levels": list(parsed["levels"]),
             "encap": stored_encap,
         }
 
@@ -815,14 +831,16 @@ class EntryModifierList(QWidget):
         search_lower = search_text.lower()
         
         for row in range(self.base_model.rowCount()):
-            main_disp = self.base_model.item(row, COL_MAIN_DISP)
-            sub1_disp = self.base_model.item(row, COL_SUB1_DISP)
-            sub2_disp = self.base_model.item(row, COL_SUB2_DISP)
+            display_items = [
+                self.base_model.item(row, _LAYOUT.display_column(level))
+                for level in _LAYOUT.levels
+            ]
             
             matches = (
-                (main_disp and search_lower in main_disp.text().lower()) or
-                (sub1_disp and search_lower in sub1_disp.text().lower()) or
-                (sub2_disp and search_lower in sub2_disp.text().lower())
+                any(
+                    item and search_lower in item.text().lower()
+                    for item in display_items
+                )
             )
             
             # Map source row to proxy and hide/show accordingly
@@ -886,10 +904,19 @@ class EntryModifierList(QWidget):
         be populated first. (Sub1 with empty Sub2 is fine — Sub2 is simply
         absent, not an error.)
         """
-        if not fields["main_disp"]:
+        displays = [display.strip() for _sort, display in fields["levels"]]
+        if not displays or not displays[0]:
             return "Main heading cannot be empty — every entry must have a main heading."
-        if fields["sub2_disp"] and not fields["sub1_disp"]:
-            return "A Sub2 entry requires Sub1 to be filled in first."
+
+        # A gap in the middle, at any depth: a populated level whose parent
+        # is empty. Written as a scan rather than the single Sub2/Sub1 test
+        # it replaced, because the number of levels is the dialect's to say.
+        for level in range(1, len(displays)):
+            if displays[level] and not displays[level - 1]:
+                return (
+                    f"A {level_name(level)} entry requires "
+                    f"{level_name(level - 1)} to be filled in first."
+                )
         return None
 
     def _restore_row_from_stash(self, row: int, entry_id: int) -> None:
@@ -905,12 +932,11 @@ class EntryModifierList(QWidget):
 
         self.base_model.dataChanged.disconnect(self._on_cell_data_changed)
         try:
-            self.base_model.item(row, COL_MAIN_DISP).setText(stash["main_disp"])
-            self.base_model.item(row, COL_MAIN_SORT).setText(stash["main_sort"])
-            self.base_model.item(row, COL_SUB1_DISP).setText(stash["sub1_disp"])
-            self.base_model.item(row, COL_SUB1_SORT).setText(stash["sub1_sort"])
-            self.base_model.item(row, COL_SUB2_DISP).setText(stash["sub2_disp"])
-            self.base_model.item(row, COL_SUB2_SORT).setText(stash["sub2_sort"])
+            for level, (sort, display) in zip(_LAYOUT.levels, stash["levels"]):
+                self.base_model.item(row, _LAYOUT.display_column(level)).setText(display)
+                sort_column = _LAYOUT.sort_column(level)
+                if sort_column is not None:
+                    self.base_model.item(row, sort_column).setText(sort)
             encap_item = self.base_model.item(row, COL_ENCAP)
             if encap_item is not None:
                 encap_item.setData(stash["encap"], Qt.ItemDataRole.EditRole)

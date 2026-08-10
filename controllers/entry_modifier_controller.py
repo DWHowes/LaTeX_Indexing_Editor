@@ -148,11 +148,7 @@ class EntryModifierController(QObject):
                 return dialect.build_level(sort, disp)
             return disp
 
-        levels = [
-            _level(fields["main_disp"], fields["main_sort"]),
-            _level(fields["sub1_disp"], fields["sub1_sort"]),
-            _level(fields["sub2_disp"], fields["sub2_sort"]),
-        ]
+        levels = [_level(display, sort) for sort, display in fields["levels"]]
         # Drop empty sub-levels (main is required — enforced upstream by
         # the view/delegate, not re-validated here) but preserve depth
         # order: a populated sub2 with an empty sub1 shouldn't happen in
@@ -254,12 +250,14 @@ class EntryModifierController(QObject):
         succeeded = 0
         for entry_id in (entry_ids or []):
             fields = self.view.get_row_field_values(entry_id)
-            if fields is None or fields.get("sub2_disp", "").strip():
+            pairs = (fields or {}).get("levels", [])
+            deeper_than_two = any(display.strip() for _sort, display in pairs[2:])
+            if fields is None or deeper_than_two:
                 continue
 
             levels = [
-                _level(fields["sub1_disp"], fields["sub1_sort"]),
-                _level(fields["main_disp"], fields["main_sort"]),
+                _level(pairs[1][1], pairs[1][0]),
+                _level(pairs[0][1], pairs[0][0]),
             ]
             levels = [lvl for lvl in levels if lvl]
             if not levels:
