@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### Index entries are now typed records, and the document has a backend (phase 3)
+
+The largest internal change so far, and **nothing about using the
+application should be different.** Every index reference used to be a loose
+dictionary of column names passed from hand to hand; it is now a typed record
+that the shared package defines, converted to and from database rows at
+exactly one place.
+
+Four real bugs turned up while making the change, three of them introduced by
+it and caught by the test suite, one of them pre-existing and shipped:
+
+- **Discarding an edit could revert some fields and not others.** The code
+  that put a record back copied a hand-maintained list of column names, so a
+  column added to the database at any point since would revert everywhere
+  except on discard. It rebuilds from the row now, so there is no list to
+  fall out of date.
+- Undo-then-redo of a *newly inserted* entry took a different internal route
+  from every other undo, because the insert path recorded the entry in one
+  shape and the delete path in another.
+
+There is also a new `LatexTextBackend`: the part of the application that
+knows how to find an `\index` macro in a `.tex` file, move it, and say what
+else moved as a result. Nothing routes through it yet — it exists, is fully
+tested against the shared conformance suite, and is what the Word and
+InDesign editors will each have their own version of. Two things came out of
+building it:
+
+- Saving with no editor tab open reported failure even though the write had
+  already gone to disk.
+- The "read the open buffer, or the file if there is no buffer" decision was
+  written out separately in several places. It is one function now. Getting
+  it wrong means reading a stale file whenever you have unsaved changes in
+  that tab, which is most of the time.
+
+Tests: 1,541 here and 432 in `bookindexcore`, up from 1,494 and 374.
+
 ### Entries in a named index now work (phase 2)
 
 `imakeidx` lets a document declare more than one index and send an entry to a

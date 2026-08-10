@@ -118,6 +118,58 @@ Three things the battery cannot know and this file pins:
   application, which is the exact failure `index_tag_grammar` was written to
   end.
 
+### `latex_text_backend.py`
+
+`test_latex_text_backend.py` runs `bookindexcore.testing.backend_conformance`
+— the same battery the Word and InDesign backends will answer to — against a
+real folder of `.tex` files with a real `DocumentIOController` writing to
+them. Passing it was the stated exit condition for extraction phase 3.
+
+Most of the battery *mutates* the document, so `make_backend` builds a fresh
+project every time. A battery whose tests interfere is worse than none.
+
+`TestTheEntryTable` covers the thing this backend exists to do and the thing
+that is easiest to get wrong. A `.tex` file carries nothing that identifies a
+macro — no bookmark, no insert label, nothing but a position — so identity is
+assigned by whoever first scans it and then *maintained*. Re-deriving
+positions by rescanning would re-mint every anchor and orphan every locator
+held anywhere else. The tests pin that an anchor survives an edit that moves
+its entry, and that the table still agrees with the file afterwards: if it
+drifts, the next write guard refuses, which is exactly how an entry becomes
+uneditable.
+
+`shift_after` has its own test because it is the odd one out — a move the
+backend did not cause. The generated preamble and cross-reference blocks are
+spliced straight into a file by machinery that knows nothing about entries,
+and everything after the splice point moves anyway.
+
+### `latex_record_mapping.py`
+
+The boundary between this application's `project_references` columns and the
+shared `IndexReference`. `bookindexcore` owns the record, this application
+owns the schema, and neither knows the other's names — so
+`test_latex_record_mapping.py` is mostly about *losing* things.
+
+`test_no_column_is_silently_dropped` is the one to keep. A column no mapping
+names is lost on the next write, and the symptom shows up much later as a
+field that mysteriously reverts to its old value.
+
+Three things worth knowing about the mapping:
+
+- **The `encap` column holds three different things** — a page style, a range
+  marker, and a cross-reference — and the record keeps them as three fields.
+  Reading them as one string is a bug this project has already shipped.
+- **`is_range_closer` and `is_cross_reference` are derived, not stored.** They
+  are still written, because SQL queries filter on them, but a stored copy of
+  a derived value is a copy that can disagree with its source. A row claiming
+  to be a closer while its `encap` says otherwise is believed about its
+  `encap`.
+- **Positions never become record fields.**
+  `test_no_position_is_a_record_field` asserts that structurally. If
+  `absolute_position` ever reappears there, LaTeX's position model is in the
+  shared model — and Word re-resolves from a bookmark while InDesign has no
+  offsets at all.
+
 ### `index_tag_grammar.py`
 
 The single parser/serializer for `\index` tag structure: levels, encap, sort
