@@ -86,6 +86,12 @@ class LatexDialect:
     #: for Word, where a range is one field plus a bookmark.
     uses_paired_ranges = True
 
+    #: True, and LaTeX is the only one of the three for which it is: a
+    #: heading may contain ``\textbf{}`` or ``\textit{}``. Word styles the
+    #: page number instead and InDesign uses a character-style reference, so
+    #: neither carries emphasis in the entry text at all.
+    headings_carry_emphasis = True
+
     #: imakeidx carries the class itself, in ``\index[name]{...}``. Nothing
     #: has to be emulated and no level is spent.
     class_emulation = ClassEmulation.NATIVE
