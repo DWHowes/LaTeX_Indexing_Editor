@@ -32,12 +32,14 @@ class CaseInsensitiveItem(QStandardItem):
         # Forced Sorting Upgrade (@ operator support)
         # If the input contains a custom sort override (e.g. "alpha@\\alpha"),
         # extract the leading descriptor as the definitive sorting key.
-        if '@' in text:
-            key_part = text.split('@')[0].strip()
-        else:
-            key_part = text
-
-        return grammar.strip_formatting_macros(key_part).lower()
+        # Reading the override is the dialect's job. This used to be
+        # `text.split('@')[0]`, which is exactly the naive split the grammar
+        # module was written to end: it returns "a{b" for a heading of
+        # "a{b@c}d", so a term with a braced macro in it sorted under a
+        # fragment of its own markup. `sort_key_of` answers "what does this
+        # file under" for any format, including one with no per-level sort
+        # keys at all, where the answer is simply the display text.
+        return dialect.suggested_sort_key(dialect.sort_key_of(text)).lower()
 
     def __lt__(self, other):
         if not isinstance(other, QStandardItem):
@@ -55,8 +57,9 @@ class CaseInsensitiveItem(QStandardItem):
             if getattr(other, "is_see_also", False):
                 other_key = "\x00" + other_text.strip().lower()
             else:
-                other_part = other_text.split('@')[0].strip() if '@' in other_text else other_text
-                other_key = grammar.strip_formatting_macros(other_part).lower()
+                other_key = dialect.suggested_sort_key(
+                    dialect.sort_key_of(other_text)
+                ).lower()
 
         return self_key < other_key
 
