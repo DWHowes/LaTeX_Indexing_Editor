@@ -58,6 +58,9 @@ def _open_tab_at_start(pipeline_ctrl, file_path):
     return tab
 
 
+from models.latex_record_mapping import position_of
+
+
 def _insert(pipeline_ctrl, main, sub1=""):
     view = pipeline_ctrl.window.latex_index_window
     view.main_entry.setText(main)
@@ -71,7 +74,7 @@ def _records(pipeline_ctrl):
 
 def _find_uid(pipeline_ctrl, heading_text: str) -> int:
     for uid, rec in _records(pipeline_ctrl).items():
-        if rec.get("heading_raw_text") == heading_text:
+        if rec.heading_raw == heading_text:
             return uid
     raise AssertionError(f"no record found for heading {heading_text!r}")
 
@@ -157,15 +160,15 @@ class TestUndoRestoresCoordinates:
         pipeline_ctrl, project_dir = opened_project
         intro_path = project_dir / "01.Intro" / "intro.tex"
         intro_uid = _find_uid(pipeline_ctrl, "Introduction")
-        before_pos = _records(pipeline_ctrl)[intro_uid]["absolute_position"]
+        before_pos = position_of(_records(pipeline_ctrl)[intro_uid])
 
         tab = _open_tab_at_start(pipeline_ctrl, intro_path)
         _insert(pipeline_ctrl, "BrandNew")
-        assert _records(pipeline_ctrl)[intro_uid]["absolute_position"] != before_pos
+        assert position_of(_records(pipeline_ctrl)[intro_uid]) != before_pos
 
         _undo(pipeline_ctrl, tab, qtbot)
 
-        assert _records(pipeline_ctrl)[intro_uid]["absolute_position"] == before_pos
+        assert position_of(_records(pipeline_ctrl)[intro_uid]) == before_pos
 
     def test_coordinates_still_describe_the_real_text(self, opened_project, qtbot):
         """The assertion that actually matters: cached position == where the macro is."""
@@ -177,7 +180,7 @@ class TestUndoRestoresCoordinates:
         _insert(pipeline_ctrl, "BrandNew")
         _undo(pipeline_ctrl, tab, qtbot)
 
-        cached = _records(pipeline_ctrl)[intro_uid]["absolute_position"]
+        cached = position_of(_records(pipeline_ctrl)[intro_uid])
         assert tab.toPlainText().index(r"\index{Introduction}") == cached
 
 
@@ -283,7 +286,7 @@ class TestRangePairsUndoAtomically:
         self._insert_range(pipeline_ctrl, tab, "RangeTerm")
         pair_ids = [
             uid for uid, rec in _records(pipeline_ctrl).items()
-            if str(rec.get("heading_raw_text", "")).startswith("RangeTerm")
+            if rec.heading_raw.startswith("RangeTerm")
         ]
         assert len(pair_ids) == 2
 
@@ -375,7 +378,7 @@ class TestUndoingATableEdit:
 
         assert r"\index{Introduction}" in tab.toPlainText()
         assert r"\index{Renamed}" not in tab.toPlainText()
-        assert _records(pipeline_ctrl)[entry_id]["heading_raw_text"] == "Introduction"
+        assert _records(pipeline_ctrl)[entry_id].heading_raw == "Introduction"
 
     def test_coordinates_survive_a_length_changing_edit(self, opened_project, qtbot):
         """A longer heading shifts everything after it; undo must shift it back."""
@@ -384,16 +387,16 @@ class TestUndoingATableEdit:
         tab = _open_tab(pipeline_ctrl, intro_path)
         first_id = _find_uid(pipeline_ctrl, "Introduction")
         later_id = _find_uid(pipeline_ctrl, "Topics!Overview")
-        before_pos = _records(pipeline_ctrl)[later_id]["absolute_position"]
+        before_pos = position_of(_records(pipeline_ctrl)[later_id])
 
         pipeline_ctrl.index_edit_ctrl.handle_entry_table_edit(
             first_id, "AMuchLongerHeadingThanBefore"
         )
-        assert _records(pipeline_ctrl)[later_id]["absolute_position"] != before_pos
+        assert position_of(_records(pipeline_ctrl)[later_id]) != before_pos
 
         _undo(pipeline_ctrl, tab, qtbot)
 
-        assert _records(pipeline_ctrl)[later_id]["absolute_position"] == before_pos
+        assert position_of(_records(pipeline_ctrl)[later_id]) == before_pos
         assert tab.toPlainText().index(r"\index{Topics!Overview}") == before_pos
 
 

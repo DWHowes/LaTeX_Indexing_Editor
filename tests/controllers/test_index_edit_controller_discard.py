@@ -31,6 +31,7 @@ from models.entry_modifier_model import EntryModifierModel
 from bookindexcore.qt.staging import QtIndexEditStagingModel
 from models.index_tree_model_engine import IndexTreeModelEngine
 from models.file_tree_persistence import FileTreePersistence
+from models.latex_record_mapping import reference_from_row
 from bookindexcore.util.text import TextSanitizer
 from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
@@ -266,7 +267,7 @@ class TestDiscardDirtyEdits:
             "absolute_position": 0, "absolute_end": 10, "encap": "standard",
             "macro_command": "index", "is_range_closer": False,
         }
-        entry_model._records[999] = other_ref
+        entry_model._records[999] = reference_from_row(other_ref)
         entry_model.mark_dirty(999)
 
         controller.discard_dirty_edits(str(tmp_path / "chapter.tex"))

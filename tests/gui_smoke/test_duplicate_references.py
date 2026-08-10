@@ -44,7 +44,7 @@ def _clean_pipeline_state(opened_project):
 
 def _find_uid(pipeline_ctrl, heading_text: str, is_closer: bool = False) -> int:
     for uid, rec in pipeline_ctrl.entry_modifier_ctrl.model._records.items():
-        if rec.get("heading_raw_text") == heading_text and bool(rec.get("is_range_closer")) == is_closer:
+        if rec.heading_raw == heading_text and rec.is_range_closer == is_closer:
             return uid
     raise AssertionError(f"no record found for heading {heading_text!r} is_closer={is_closer}")
 
@@ -132,17 +132,17 @@ class TestDuplicateRangePair:
         records = pipeline_ctrl.entry_modifier_ctrl.model._records
         new_opener = next(
             r for uid, r in records.items()
-            if uid in new_ids and not r.get("is_range_closer")
+            if uid in new_ids and not r.is_range_closer
         )
         new_closer = next(
             r for uid, r in records.items()
-            if uid in new_ids and r.get("is_range_closer")
+            if uid in new_ids and r.is_range_closer
         )
-        assert new_opener["range_partner_id"] == new_closer["unique_id_number"]
-        assert new_closer["range_partner_id"] == new_opener["unique_id_number"]
+        assert new_opener.range_partner_id == new_closer.entry_id
+        assert new_closer.range_partner_id == new_opener.entry_id
         # The duplicate is its own independent pair, not linked to the original.
-        assert new_opener["unique_id_number"] != original_closer_uid
-        assert new_closer["unique_id_number"] != original_closer_uid
+        assert new_opener.entry_id != original_closer_uid
+        assert new_closer.entry_id != original_closer_uid
 
     def test_only_the_opener_gets_a_table_row(self, opened_project):
         pipeline_ctrl, _project_dir = opened_project

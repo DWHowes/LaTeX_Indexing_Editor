@@ -11,6 +11,10 @@ from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplicati
 from shiboken6 import isValid
 
 from models.latex_dialect import LATEX_DIALECT as dialect
+from models.latex_record_mapping import (
+    command_of, end_of, line_of, position_of, reference_from_row,
+    row_from_reference,
+)
 from bookindexcore.model.commands import (
     DEFAULT_LIMIT,
     EntrySnapshot,
@@ -644,9 +648,13 @@ class AppPipelineController(QObject):
             after_text=macro_text,
             command_name=entry_dict.get("macro_command", "index"),
         )
+        # The snapshot holds a *record*, the same as the deletion path's does.
+        # This one used to hold the raw insertion payload, so undo-then-redo
+        # of an insertion handed the restore path a dict where every other
+        # route handed it a record.
         snapshot = EntrySnapshot(
             entry_id=entry_id,
-            record=entry_dict,
+            record=reference_from_row(entry_dict),
             parts_list=tuple(parts_list),
             heading_text=entry_dict.get("heading_raw_text", ""),
             heading_id=entry_dict.get("heading_id"),
@@ -1143,8 +1151,13 @@ class AppPipelineController(QObject):
         self.entry_modifier_model.set_persistence(self.scope_ctrl.get_persistence_model())
         self.entry_modifier_model.load_records(references)
 
-        # Populate the edit entry table view
-        self.entry_table_widget.populate_entry_modifier_display(references)
+        # Populate the edit entry table view from the *model*, not from the
+        # payload. The model is where a row becomes a record, so handing the
+        # view the payload as well would give it a second shape of the same
+        # data to understand -- and the two would drift.
+        self.entry_table_widget.populate_entry_modifier_display(
+            self.entry_modifier_model.fetch_entry_modifier_records()
+        )
         
         # Realign session logging paths natively
         project_root_dir = os.path.dirname(os.path.normpath(db_path))
@@ -1771,7 +1784,9 @@ class AppPipelineController(QObject):
             self.idx_ctrl.clear_staged_entries()
 
         self.entry_modifier_model.load_records(references)
-        self.entry_table_widget.populate_entry_modifier_display(references)
+        self.entry_table_widget.populate_entry_modifier_display(
+            self.entry_modifier_model.fetch_entry_modifier_records()
+        )
 
         self._index_commands.clear()
         self._refresh_undo_actions()
@@ -2494,8 +2509,8 @@ class AppPipelineController(QObject):
             # Closer shares the opener's heading_id — look it up via range_partner_id
             partner_id = entry_dict["range_partner_id"]
             if partner_id is not None:
-                partner_record = self.entry_modifier_ctrl.model._records.get(partner_id)
-                entry_dict["heading_id"] = partner_record.get("heading_id") if partner_record else None
+                partner_record = self.entry_modifier_ctrl.model.get_record(partner_id)
+                entry_dict["heading_id"] = partner_record.heading_id if partner_record else None
             else:
                 entry_dict["heading_id"] = None
         else:
@@ -2569,12 +2584,12 @@ class AppPipelineController(QObject):
         duplicated_count = 0
         skipped_count = 0
         for entry_id in entry_ids:
-            original = self.entry_modifier_ctrl.model._records.get(entry_id)
-            if not original or original.get("is_range_closer"):
+            original = self.entry_modifier_ctrl.model.get_record(entry_id)
+            if not original or original.is_range_closer:
                 skipped_count += 1
                 continue
 
-            partner_id = original.get("range_partner_id")
+            partner_id = original.range_partner_id
             if partner_id is not None:
                 ok = self._duplicate_range_pair(original, partner_id, persistence)
             else:
@@ -2596,11 +2611,11 @@ class AppPipelineController(QObject):
         elif skipped_count:
             self.window.status_bar.showMessage("Could not duplicate the selected reference(s).", 4000)
 
-    def _duplicate_standalone_entry(self, original: dict, persistence) -> bool:
+    def _duplicate_standalone_entry(self, original, persistence) -> bool:
         """Duplicates a single, non-range entry. Returns True on success."""
-        file_path = original.get("file_path")
-        abs_pos = original.get("absolute_position")
-        abs_end = original.get("absolute_end")
+        file_path = original.container
+        abs_pos = position_of(original)
+        abs_end = end_of(original)
         if not file_path or abs_pos is None or abs_end is None:
             return False
 
@@ -2626,15 +2641,15 @@ class AppPipelineController(QObject):
         via range_partner_id exactly like a live range insert. Returns
         True on success.
         """
-        closer = self.entry_modifier_ctrl.model._records.get(partner_id)
+        closer = self.entry_modifier_ctrl.model.get_record(partner_id)
         if not closer:
             return False
 
-        file_path = opener.get("file_path")
-        opener_pos = opener.get("absolute_position")
-        opener_end = opener.get("absolute_end")
-        closer_pos = closer.get("absolute_position")
-        closer_end = closer.get("absolute_end")
+        file_path = opener.container
+        opener_pos = position_of(opener)
+        opener_end = end_of(opener)
+        closer_pos = position_of(closer)
+        closer_end = end_of(closer)
         if not file_path or None in (opener_pos, opener_end, closer_pos, closer_end):
             return False
 
@@ -2653,9 +2668,9 @@ class AppPipelineController(QObject):
         for shifted_id in shifted:
             self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
 
-        closer_now = self.entry_modifier_ctrl.model._records.get(partner_id)
-        closer_pos_now = closer_now.get("absolute_position")
-        closer_end_now = closer_now.get("absolute_end")
+        closer_now = self.entry_modifier_ctrl.model.get_record(partner_id)
+        closer_pos_now = position_of(closer_now)
+        closer_end_now = end_of(closer_now)
 
         new_closer_coords = self.doc_io.insert_macro_at_position(file_path, closer_end_now, closer_text)
         if new_closer_coords is None:
@@ -2684,23 +2699,23 @@ class AppPipelineController(QObject):
     @staticmethod
     def _build_duplicate_entry_dict(original: dict, coords: dict, new_id: int) -> dict:
         """Builds a fresh entry_dict copying original's content fields onto a new ID/location."""
-        file_path = original.get("file_path", "")
+        file_path = original.container
         return {
             "unique_id_number":   new_id,
-            "heading_raw_text":   original.get("heading_raw_text", ""),
+            "heading_raw_text":   original.heading_raw,
             "file_path":          file_path,
             "line_number":        coords["line_number"],
             "column_offset":      coords["column_offset"],
             "absolute_position":  coords["absolute_position"],
             "absolute_end":       coords["absolute_end"],
-            "encap":              original.get("encap", "standard"),
+            "encap":              row_from_reference(original)["encap"],
             "uid":                f"{file_path}:{coords['line_number']}:{coords['column_offset']}",
-            "see_references":     original.get("see_references"),
-            "seealso_references": original.get("seealso_references"),
-            "has_references":     original.get("has_references", True),
+            "see_references":     original.extra.get("see_references"),
+            "seealso_references": original.extra.get("seealso_references"),
+            "has_references":     original.extra.get("has_references", True),
             "range_partner_id":   None,
             "is_range_closer":    False,
-            "macro_command":      original.get("macro_command", "index"),
+            "macro_command":      command_of(original),
         }
 
     def _resolve_and_register_new_entry(

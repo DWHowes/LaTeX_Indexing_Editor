@@ -275,7 +275,7 @@ class TestOrphanCleanupAfterDeletion:
 
         persistence = FileTreePersistence(db_path=str(tmp_path / "db.sqlite"))
         heading_id = persistence.resolve_or_insert_heading("Main", "Main", depth=0)
-        entry_model._records[uid]["heading_id"] = heading_id
+        entry_model.get_record(uid).heading_id = heading_id
         entry_model.set_persistence(persistence)
 
         return controller, entry_model, persistence, uid, heading_id, file_path

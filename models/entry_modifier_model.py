@@ -1,9 +1,20 @@
-import json
 import os
 from PySide6.QtCore import QObject, Signal
 
-from models import index_tag_grammar as grammar
 from bookindexcore.model.journal import DELETE, INSERT, UPDATE, PendingChangesJournal
+from bookindexcore.model.records import IndexReference
+from models.latex_dialect import LATEX_DIALECT as dialect
+from models.latex_record_mapping import (
+    column_of,
+    command_of,
+    end_of,
+    line_of,
+    moved_to,
+    position_of,
+    reference_from_row,
+    row_from_reference,
+    shifted_by,
+)
 
 class EntryModifierModel(QObject):
     """
@@ -17,7 +28,10 @@ class EntryModifierModel(QObject):
         super().__init__()
         self._persistence = persistence  # FileTreePersistence ref
         self._staging_model = staging_model  # IndexEditStagingModel ref — shared with IndexEditController
-        self._records: dict[int, dict] = {}  # In-memory cache keyed by unique_id_number
+        # Keyed by entry id. Holds the shared IndexReference record, not a
+        # dict: a row becomes a record on the way in and a row again on the
+        # way out, and nothing in between deals in column names.
+        self._records: dict[int, IndexReference] = {}
         self._display_ids: set[int] = set()
 
         # What still needs writing to project_references at save time.
@@ -38,9 +52,26 @@ class EntryModifierModel(QObject):
         """
         return set(self._journal.entity_ids())
 
+    def get_record(self, entry_id: int) -> IndexReference | None:
+        """
+        The record for this entry, or None.
+
+        The supported way to reach one. Four controllers used to index
+        ``_records`` directly, which is how a private cache ends up with a
+        public shape that cannot be changed.
+        """
+        return self._records.get(entry_id)
+
+    def all_records(self) -> list[IndexReference]:
+        """Every cached record, closers included."""
+        return list(self._records.values())
+
+    def has_record(self, entry_id: int) -> bool:
+        return entry_id in self._records
+
     def get_heading_text(self, entry_id: int) -> str:
         record = self._records.get(entry_id)
-        return record.get("heading_raw_text", "") if record else ""
+        return record.heading_raw if record else ""
 
     def get_display_label(self, entry_id: int) -> str:
         """
@@ -56,8 +87,10 @@ class EntryModifierModel(QObject):
         than falling back to showing the raw "sortkey@" text -- which is
         what the tree has always shown for the same heading.
         """
-        tag = grammar.parse_body(self.get_heading_text(entry_id))
-        return " > ".join(part for part in tag.display_levels if part)
+        levels = dialect.split_levels_clean(self.get_heading_text(entry_id))
+        return " > ".join(
+            display for display in (dialect.display_of(level) for level in levels) if display
+        )
     
     # ------------------------------------------------------------------
     # Cache management
@@ -75,17 +108,18 @@ class EntryModifierModel(QObject):
         the first real edit to any entry never hits stage_edit's
         auto-register/warning fallback.
         """
-        self._records = {ref["unique_id_number"]: ref for ref in references}
+        records = [
+            ref if isinstance(ref, IndexReference) else reference_from_row(ref)
+            for ref in references
+        ]
+        self._records = {record.entry_id: record for record in records}
         self._display_ids: set[int] = {
-            ref["unique_id_number"] for ref in references
-            if not ref.get("is_range_closer", False)
+            record.entry_id for record in records if not record.is_range_closer
         }
 
         if self._staging_model is not None:
-            for ref in references:
-                self._staging_model.register_original(
-                    ref["unique_id_number"], ref.get("heading_raw_text", "")
-                )
+            for record in records:
+                self._staging_model.register_original(record.entry_id, record.heading_raw)
         else:
             print("[MODEL WARNING] load_records: no staging_model bound — entries will "
                   "auto-register with a warning on their first edit instead.")
@@ -124,14 +158,16 @@ class EntryModifierModel(QObject):
         Also seeds the staging model's baseline for this entry, so its
         first edit doesn't hit stage_edit's auto-register/warning path.
         """
-        unique_id = entry_dict["unique_id_number"]
-        self._records[unique_id] = entry_dict
+        record = (
+            entry_dict if isinstance(entry_dict, IndexReference)
+            else reference_from_row(entry_dict)
+        )
+        unique_id = record.entry_id
+        self._records[unique_id] = record
         self._pending_delete_meta.pop(unique_id, None)
 
         if self._staging_model is not None:
-            self._staging_model.register_original(
-                unique_id, entry_dict.get("heading_raw_text", "")
-            )
+            self._staging_model.register_original(unique_id, record.heading_raw)
 
         self._journal.mark_insert(unique_id)
         self.entry_modifier_updated.emit(unique_id, True)
@@ -180,23 +216,25 @@ class EntryModifierModel(QObject):
         norm_target = os.path.normpath(file_path)
         shifted_ids: list[int] = []
 
-        for uid, record in self._records.items():
-            rec_path = record.get("file_path", "")
-            if not rec_path:
+        for uid, record in list(self._records.items()):
+            if not record.container:
                 continue
-            if os.path.normpath(rec_path) != norm_target:
+            if os.path.normpath(record.container) != norm_target:
                 continue
 
-            pos = record.get("absolute_position")
+            pos = position_of(record)
             if pos is None or pos <= after_position:
                 continue
 
-            record["absolute_position"] = pos + delta
-
-            end = record.get("absolute_end")
-            if end is not None:
-                record["absolute_end"] = end + delta
-
+            # In place, not replaced. Callers hold the record they got from
+            # get_record and go on using it after asking for a shift, so
+            # rebinding the cache to a new object would leave them mutating an
+            # orphan. That the locator is frozen and the record is not is
+            # exactly what makes this work.
+            record.locator = record.locator.with_hint(
+                absolute_position=pos + delta,
+                absolute_end=None if (end := end_of(record)) is None else end + delta,
+            )
             shifted_ids.append(uid)
 
         if shifted_ids:
@@ -228,8 +266,9 @@ class EntryModifierModel(QObject):
             print(f"[MODEL WARNING] update_entry_coordinates: ID {entry_id} not in cache")
             return
 
-        record["absolute_position"] = absolute_position
-        record["absolute_end"] = absolute_end
+        record.locator = record.locator.with_hint(
+            absolute_position=absolute_position, absolute_end=absolute_end
+        )
 
     # ------------------------------------------------------------------
     # Dirty tracking
@@ -336,33 +375,22 @@ class EntryModifierModel(QObject):
         """
         record = self._records.get(entry_id)
         if record is not None:
-            return os.path.normpath(record.get("file_path", "") or "")
+            return os.path.normpath(record.container or "")
         meta = self._pending_delete_meta.get(entry_id) or {}
         return os.path.normpath(meta.get("file_path", "") or "")
 
-    @staticmethod
-    def _serialized(record: dict) -> dict:
-        """
-        In-memory records carry see_references/seealso_references as real
-        Python lists (set that way at parse time by LatexIndexParser
-        ._build_see_reference_payload, or by a prior DB read that already
-        deserialized them) -- but neither update_reference_field nor
-        insert_reference JSON-encodes on write, they expect a
-        pre-serialized string. Passing the raw list through fails the
-        sqlite bind and used to be silently swallowed as a flush failure.
-        """
-        write_record = dict(record)
-        for key in ("see_references", "seealso_references"):
-            if isinstance(write_record.get(key), list):
-                write_record[key] = json.dumps(write_record[key])
-        return write_record
+    # ``row_from_reference`` is the only place a record becomes a row, and
+    # it owns the JSON encoding of the list columns. That encoding used to
+    # live here as ``_serialized`` because callers disagreed about whether
+    # they were passing lists or pre-encoded strings; a raw list fails the
+    # sqlite bind and was swallowed as a flush failure.
 
     def _write_insert(self, entry_id: int) -> bool:
         record = self._records.get(entry_id)
         if record is None:
             print(f"[MODEL WARNING] flush: insert for ID {entry_id} has no cached record")
             return False
-        return bool(self._persistence.insert_reference(self._serialized(record)))
+        return bool(self._persistence.insert_reference(row_from_reference(record)))
 
     def _write_update(self, entry_id: int) -> bool:
         record = self._records.get(entry_id)
@@ -370,7 +398,7 @@ class EntryModifierModel(QObject):
             print(f"[MODEL WARNING] flush: update for ID {entry_id} has no cached record")
             return False
 
-        if not self._persistence.update_reference_field(entry_id, self._serialized(record)):
+        if not self._persistence.update_reference_field(entry_id, row_from_reference(record)):
             print(f"[MODEL WARNING] flush: DB write failed for ID {entry_id}")
             return False
 
@@ -380,9 +408,7 @@ class EntryModifierModel(QObject):
         # why this can't be skipped: a tree rename only ever updated each
         # reference's own heading_raw_text, never this row, so without it a
         # reopened project would rebuild its tree from the pre-rename name.
-        self._persistence.update_heading_text(
-            record.get("heading_id"), record.get("heading_raw_text", "")
-        )
+        self._persistence.update_heading_text(record.heading_id, record.heading_raw)
         return True
 
     def _write_delete(self, entry_id: int) -> bool:
@@ -393,7 +419,7 @@ class EntryModifierModel(QObject):
         norm_target = os.path.normpath(file_path) if file_path else ""
         return [
             entry_id for entry_id in self._journal.entity_ids()
-            if os.path.normpath((self._records.get(entry_id) or {}).get("file_path", "")) == norm_target
+            if self._pending_file_path(entry_id) == norm_target
         ]
 
     def pending_insert_ids_for_file(self, file_path: str) -> list[int]:
@@ -411,15 +437,15 @@ class EntryModifierModel(QObject):
         norm_target = os.path.normpath(file_path) if file_path else ""
         return [
             entry_id for entry_id in self._journal.entity_ids(INSERT)
-            if os.path.normpath((self._records.get(entry_id) or {}).get("file_path", "")) == norm_target
+            if self._pending_file_path(entry_id) == norm_target
         ]
 
     def get_dirty_file_paths(self) -> set[str]:
         """Returns the (normalized) set of file paths with at least one dirty record."""
         return {
-            os.path.normpath((self._records.get(entry_id) or {}).get("file_path", ""))
+            os.path.normpath(record.container)
             for entry_id in self._journal.entity_ids()
-            if (self._records.get(entry_id) or {}).get("file_path")
+            if (record := self._records.get(entry_id)) is not None and record.container
         }
 
     def revert_dirty_record(self, entry_id: int) -> dict | None:
@@ -449,19 +475,21 @@ class EntryModifierModel(QObject):
         if db_row is None:
             return None
 
-        record = self._records.get(entry_id)
-        if record is None:
+        if entry_id not in self._records:
             return db_row
 
-        mutable_fields = {
-            "heading_raw_text", "heading_id", "file_path", "line_number",
-            "column_offset", "absolute_position", "absolute_end", "encap",
-            "see_references", "seealso_references", "has_references",
-        }
-        for key in mutable_fields:
-            if key in db_row:
-                record[key] = db_row[key]
-
+        # Rebuilding from the row rather than copying a field list across is
+        # what removes the list: it used to name every mutable column, and a
+        # column added to the schema without being added there would revert
+        # on discard and nowhere else.
+        # Same in-place rule as the coordinate updates above: whoever is
+        # holding this record keeps holding it.
+        fresh = reference_from_row(db_row)
+        record = self._records[entry_id]
+        for field in ("heading_raw", "heading_id", "locator", "page_style",
+                      "range_role", "range_partner_id", "xref", "index_class",
+                      "user_edited", "raw", "extra"):
+            setattr(record, field, getattr(fresh, field))
         return db_row
 
     # ------------------------------------------------------------------
@@ -488,16 +516,16 @@ class EntryModifierModel(QObject):
         if record is None:
             return None
         return {
-            "file_path":          record.get("file_path"),
-            "line_number":        record.get("line_number"),
-            "column_offset":      record.get("column_offset"),
-            "absolute_position":  record.get("absolute_position"),
-            "absolute_end":       record.get("absolute_end"),
-            "encap":              record.get("encap"),
-            "heading_id":         record.get("heading_id"),
-            "see_references":     record.get("see_references"),
-            "seealso_references": record.get("seealso_references"),
-            "macro_command":      record.get("macro_command", "index"),
+            "file_path":          record.container,
+            "line_number":        line_of(record),
+            "column_offset":      column_of(record),
+            "absolute_position":  position_of(record),
+            "absolute_end":       end_of(record),
+            "encap":              row_from_reference(record)["encap"],
+            "heading_id":         record.heading_id,
+            "see_references":     record.extra.get("see_references"),
+            "seealso_references": record.extra.get("seealso_references"),
+            "macro_command":      command_of(record),
         }
     
     # ------------------------------------------------------------------
@@ -526,7 +554,7 @@ class EntryModifierModel(QObject):
         # it which file it belonged to. Keep just enough to answer that,
         # for the per-file flush scoping.
         if record is not None:
-            self._pending_delete_meta[entry_id] = {"file_path": record.get("file_path", "")}
+            self._pending_delete_meta[entry_id] = {"file_path": record.container}
 
         # mark_delete rather than deleting now. If this row was itself
         # created since the last save the journal cancels the pair outright
@@ -557,7 +585,7 @@ class EntryModifierModel(QObject):
             print(f"[MODEL WARNING] relink_range_partner: ID {entry_id} not in cache")
             return
 
-        record["range_partner_id"] = new_partner_id
+        record.range_partner_id = new_partner_id
         self._journal.mark_update(entry_id)
 
     # Heading rows are no longer this model's concern: identity and

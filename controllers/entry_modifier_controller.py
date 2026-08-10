@@ -84,10 +84,18 @@ class EntryModifierController(QObject):
         # Register in model cache so get_heading_text / get_display_label work
         self.model.register_new_entry(entry_dict)
 
-        # Append a single row to the view — no full repopulation
-        # Do not append entry if it is the closer of an index range
-        if not entry_dict.get("is_range_closer", False):
-            self.view.append_entry_row(entry_dict)
+        # Append a single row to the view — no full repopulation.
+        #
+        # The *model's* record, not the dict that came in: the view reads
+        # records now, and the model is where a row becomes one. Handing the
+        # view the raw payload instead would give it a second record shape to
+        # understand, which is the whole thing this migration removes.
+        record = self.model.get_record(
+            entry_dict.entry_id if hasattr(entry_dict, "entry_id")
+            else entry_dict["unique_id_number"]
+        )
+        if record is not None and not record.is_range_closer:
+            self.view.append_entry_row(record)
 
     # ------------------------------------------------------------------
     # Per-cell edit -> stage

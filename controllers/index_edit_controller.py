@@ -5,8 +5,13 @@ from PySide6.QtWidgets import QMessageBox
 
 from models import index_tag_grammar as grammar
 from models.latex_dialect import LATEX_DIALECT as dialect
+from models.latex_record_mapping import (
+    command_of, end_of, position_of, row_from_reference,
+)
+from bookindexcore.model.records import IndexReference
 from bookindexcore.model.commands import (
     EntrySnapshot,
+    copy_record,
     HeadingChange,
     MacroEdit,
     deletion_command,
@@ -14,6 +19,21 @@ from bookindexcore.model.commands import (
 )
 from views.index_tree_view import IndexTreeView
 from controllers.document_io_controller import DocumentIOController
+
+
+
+def _ref_entry_id(ref) -> int:
+    """
+    The entry id of a reference payload stored on a tree node.
+
+    Tolerant of both shapes on purpose. The entry *table* is fed records by
+    the pipeline, but the tree's ``UserRole+1`` ref-lists are still built
+    from the raw load payload, so a node can be carrying either. Phase 4
+    moves the tree, and this helper goes with it.
+    """
+    if isinstance(ref, IndexReference):
+        return int(ref.entry_id or 0)
+    return int(ref.get("unique_id_number") or ref.get("id") or 0)
 
 
 class IndexEditController(QObject):
@@ -391,8 +411,8 @@ class IndexEditController(QObject):
         if new_heading == current_heading:
             return False
 
-        record = self._entry_model._records.get(uid)
-        command_name = record.get("macro_command", "index") if record else "index"
+        record = self._entry_model.get_record(uid)
+        command_name = command_of(record) if record else "index"
 
         # Record the intended value before attempting the .tex write, so the
         # staging model reflects "what the controller currently believes
@@ -434,7 +454,7 @@ class IndexEditController(QObject):
         self._entry_model.mark_dirty(uid)
 
         if record:
-            record["heading_raw_text"] = new_heading
+            record.heading_raw = new_heading
 
         if delta != 0:
             shifted_ids = self._entry_model.shift_coordinates_after(file_path, abs_pos, delta)
@@ -592,8 +612,8 @@ class IndexEditController(QObject):
         than a reason to fail the whole edit, since by the time this
         runs the primary entry's own rewrite has already succeeded.
         """
-        record = self._entry_model._records.get(entry_id)
-        partner_id = record.get("range_partner_id") if record else None
+        record = self._entry_model.get_record(entry_id)
+        partner_id = record.range_partner_id if record else None
         if not partner_id:
             return True
 
@@ -609,8 +629,8 @@ class IndexEditController(QObject):
             print(f"[CONTROLLER WARNING] _sync_range_partner: incomplete coordinates for partner {partner_id}")
             return False
 
-        partner_record = self._entry_model._records.get(partner_id)
-        partner_command = partner_record.get("macro_command", "index") if partner_record else "index"
+        partner_record = self._entry_model.get_record(partner_id)
+        partner_command = command_of(partner_record) if partner_record else "index"
 
         current_partner_macro = self._doc_io.read_macro_span(partner_file, partner_pos, partner_end)
         # Where the body starts depends on whether the macro carries an
@@ -669,7 +689,7 @@ class IndexEditController(QObject):
         self._entry_model.mark_dirty(partner_id)
 
         if partner_record:
-            partner_record["heading_raw_text"] = new_heading_no_encap
+            partner_record.heading_raw = new_heading_no_encap
 
         if delta != 0:
             shifted_ids = self._entry_model.shift_coordinates_after(partner_file, partner_pos, delta)
@@ -705,8 +725,8 @@ class IndexEditController(QObject):
         if new_canonical_heading == old_heading:
             return True
 
-        record = self._entry_model._records.get(entry_id)
-        command_name = record.get("macro_command", "index") if record else "index"
+        record = self._entry_model.get_record(entry_id)
+        command_name = command_of(record) if record else "index"
 
         old_macro = self._doc_io.read_macro_span(file_path, abs_pos, abs_end) or ""
 
@@ -731,7 +751,7 @@ class IndexEditController(QObject):
         self._entry_model.mark_dirty(entry_id)                     # NEW
 
         if record:
-            record["heading_raw_text"] = new_canonical_heading
+            record.heading_raw = new_canonical_heading
 
         if delta != 0:
             shifted_ids = self._entry_model.shift_coordinates_after(file_path, abs_pos, delta)
@@ -785,8 +805,8 @@ class IndexEditController(QObject):
 
         heading_text = self._entry_model.get_heading_text(entry_id)
 
-        record = self._entry_model._records.get(entry_id)
-        command_name = record.get("macro_command", "index") if record else "index"
+        record = self._entry_model.get_record(entry_id)
+        command_name = command_of(record) if record else "index"
 
         # Snapshot before the write: the record, its heading and its tree
         # path are all about to be torn down, and undo has to put every
@@ -819,18 +839,18 @@ class IndexEditController(QObject):
         record, the tree path it sits under, and its heading identity.
         Returns None if the entry isn't in the cache.
         """
-        record = self._entry_model._records.get(entry_id)
+        record = self._entry_model.get_record(entry_id)
         if record is None:
             return None
 
-        heading_text = record.get("heading_raw_text", "")
+        heading_text = record.heading_raw
         return EntrySnapshot(
             entry_id=entry_id,
             record=record,
             parts_list=tuple(dialect.level_path(heading_text)),
             heading_text=heading_text,
-            heading_id=record.get("heading_id"),
-            is_range_closer=bool(record.get("is_range_closer")),
+            heading_id=record.heading_id,
+            is_range_closer=record.is_range_closer,
         )
 
     def count_refs_under_node(self, target_item: QStandardItem) -> int:
@@ -858,8 +878,8 @@ class IndexEditController(QObject):
             seen.add(uid)
             entry_ids.append(uid)
 
-            record = self._entry_model._records.get(uid)
-            partner_id = record.get("range_partner_id") if record else None
+            record = self._entry_model.get_record(uid)
+            partner_id = record.range_partner_id if record else None
             if partner_id and partner_id not in seen:
                 seen.add(partner_id)
                 entry_ids.append(partner_id)
@@ -1056,8 +1076,8 @@ class IndexEditController(QObject):
         dirty_ids = self._entry_model.get_dirty_ids_for_file(file_path)
         for entry_id in dirty_ids:
             old_heading = self._entry_model.get_heading_text(entry_id)
-            record = self._entry_model._records.get(entry_id) or {}
-            is_closer = bool(record.get("is_range_closer"))
+            record = self._entry_model.get_record(entry_id) or {}
+            is_closer = record.is_range_closer
 
             db_row = self._entry_model.revert_dirty_record(entry_id)
             if db_row is None:
@@ -1200,20 +1220,22 @@ class IndexEditController(QObject):
         re-inserted -- so the restored record takes the resolved id, not
         the remembered one.
         """
-        record = dict(snapshot.record)
+        record = copy_record(snapshot.record)
 
         # Coordinates come from the edit that just re-wrote this entry's
         # macro, not from the snapshot: everything around it may have
         # moved between the deletion and this restore.
         for edit in command.edits:
             if edit.entry_id == snapshot.entry_id and edit.after_text:
-                record["absolute_position"] = edit.absolute_position
-                record["absolute_end"] = edit.absolute_end
+                record.locator = record.locator.with_hint(
+                    absolute_position=edit.absolute_position,
+                    absolute_end=edit.absolute_end,
+                )
                 break
 
         heading_id = self._resolve_heading_for_restore(snapshot)
         if heading_id is not None:
-            record["heading_id"] = heading_id
+            record.heading_id = heading_id
 
         self._entry_model.register_new_entry(record)
 
@@ -1254,11 +1276,11 @@ class IndexEditController(QObject):
         cache, the staging baseline and the tree. The macro text itself
         was already rewritten by this command's edits.
         """
-        record = self._entry_model._records.get(change.entry_id)
+        record = self._entry_model.get_record(change.entry_id)
         if record is None:
             return
 
-        record["heading_raw_text"] = change.after_heading
+        record.heading_raw = change.after_heading
         self._staging_model.register_original(change.entry_id, change.after_heading)
         self._entry_model.mark_dirty(change.entry_id)
         self._reconcile_heading_node(
@@ -1287,8 +1309,8 @@ class IndexEditController(QObject):
 
             if heading_id is not None:
                 remaining = [
-                    r for r in self._entry_model._records.values()
-                    if r.get("heading_id") == heading_id
+                    r for r in self._entry_model.all_records()
+                    if r.heading_id == heading_id
                 ]
                 if not remaining:
                     self._remove_orphaned_heading(self._tree.engine, heading_id, heading_text)
@@ -1329,7 +1351,7 @@ class IndexEditController(QObject):
         detach side — closes that gap.
         """
         engine = self._tree.engine
-        record = self._entry_model._records.get(entry_id)
+        record = self._entry_model.get_record(entry_id)
 
         # Both old_heading and new_heading may carry a "|encap" suffix
         # (new_heading always does when EntryModifierController
@@ -1374,18 +1396,23 @@ class IndexEditController(QObject):
             # re-attached after a rename or a discard revert, not inserted
             # for the first time) -- see append_entry's docstring for why
             # this must not stage a duplicate "new entry" DB transaction.
-            self._tree.append_entry(parts, [record], suppress_transaction=True)
+            # The tree still stores raw payload dicts on its nodes, so it is
+            # handed a row rather than the record. Phase 4 moves the tree and
+            # this conversion goes with it.
+            self._tree.append_entry(
+                parts, [row_from_reference(record)], suppress_transaction=True
+            )
 
         # Update the reference record's heading_id in the model cache
         if record:
-            record["heading_id"] = new_heading_id
+            record.heading_id = new_heading_id
 
         # --- Check whether old heading is now orphaned ---
         old_heading_id = self._find_heading_id_by_text(engine, old_heading_clean)
         if old_heading_id is not None:
             remaining = [
-                r for r in self._entry_model._records.values()
-                if r.get("heading_id") == old_heading_id
+                r for r in self._entry_model.all_records()
+                if r.heading_id == old_heading_id
             ]
             if not remaining:
                 self._remove_orphaned_heading(engine, old_heading_id, old_heading_clean)
@@ -1416,7 +1443,7 @@ class IndexEditController(QObject):
         skipping this reassignment for closers entirely.
         """
         engine = self._tree.engine
-        record = self._entry_model._records.get(entry_id)
+        record = self._entry_model.get_record(entry_id)
         if record is None:
             return
 
@@ -1426,13 +1453,13 @@ class IndexEditController(QObject):
         new_heading_id = self._find_heading_id_by_text(engine, new_heading_clean)
         if new_heading_id is None:
             new_heading_id = self._create_heading_in_engine(engine, new_heading_clean)
-        record["heading_id"] = new_heading_id
+        record.heading_id = new_heading_id
 
         old_heading_id = self._find_heading_id_by_text(engine, old_heading_clean)
         if old_heading_id is not None:
             remaining = [
-                r for r in self._entry_model._records.values()
-                if r.get("heading_id") == old_heading_id
+                r for r in self._entry_model.all_records()
+                if r.heading_id == old_heading_id
             ]
             if not remaining:
                 self._remove_orphaned_heading(engine, old_heading_id, old_heading_clean)
@@ -1518,11 +1545,11 @@ class IndexEditController(QObject):
 
         remaining = [
             r for r in stored
-            if int(r.get("unique_id_number") or r.get("id") or 0) != entry_id
+            if _ref_entry_id(r) != entry_id
         ]
         sibling_col1.setData(remaining, role_uid)
         sibling_col1.setText(
-            " ".join(f"[{r['unique_id_number']}]" for r in remaining) if remaining else ""
+            " ".join(f"[{_ref_entry_id(r)}]" for r in remaining) if remaining else ""
         )
 
     def _find_tree_node_by_path(self, parts: list[str]) -> QStandardItem | None:

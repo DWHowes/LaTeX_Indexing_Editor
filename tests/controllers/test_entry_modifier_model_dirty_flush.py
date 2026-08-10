@@ -140,4 +140,4 @@ def test_register_new_entry_keeps_the_in_memory_cache_as_a_real_list(fresh_persi
 
     model.register_new_entry(_record(uid=1, see=["Alpha"]))
 
-    assert model._records[1]["see_references"] == ["Alpha"]
+    assert model.get_record(1).extra["see_references"] == ["Alpha"]

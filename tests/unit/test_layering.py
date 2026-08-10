@@ -48,6 +48,9 @@ QT_FREE_MODULES = (
     # backend and the InDesign adapter both test without a display. A Qt
     # import here would be invisible locally, where Qt is always installed.
     "models/latex_dialect.py",
+    # The record mapping is the boundary between the shared IndexReference
+    # and this application's columns. Everything that crosses it is data.
+    "models/latex_record_mapping.py",
 )
 
 

@@ -8,6 +8,11 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem
 from models import index_syntax_check as syntax
 from models import index_tag_grammar as grammar
 from models.latex_dialect import LATEX_DIALECT as dialect
+from models.latex_record_mapping import (
+    column_of, command_of, end_of, line_of, position_of, reference_from_row,
+    row_from_reference,
+)
+from bookindexcore.model.records import IndexReference
 from views import index_syntax_advice as advice
 from bookindexcore.ui.entry_table.table_view import EntryModifierTableView
 
@@ -47,6 +52,19 @@ _SYNTAX_ROLE_BY_COLUMN = {
 # per-project setting. Same bare-QSettings() convention used by
 # AdvancedSearchWindow for its own view-local UI state (geometry, splitter).
 _HIDDEN_COLUMNS_SETTINGS_KEY = "EntryModifierTable/HiddenColumns"
+
+
+def _as_record(ref):
+    """
+    One reference as an ``IndexReference``, whatever shape it arrived in.
+
+    The view is a boundary: the pipeline hands it records from the model,
+    but tests and any not-yet-migrated caller may still hand it the raw
+    payload the scanner produces. Normalising here costs one isinstance and
+    means there is exactly one record shape below this line -- the same
+    trick ``EntryModifierModel.load_records`` uses at the other boundary.
+    """
+    return ref if isinstance(ref, IndexReference) else reference_from_row(ref)
 
 
 def _parse_index_level(raw: str) -> tuple[str, str]:
@@ -541,7 +559,7 @@ class EntryModifierList(QWidget):
         if unique_id in self._location_map:
             self._location_map[unique_id]["encap"] = new_fields["encap"]
 
-    def populate_entry_modifier_display(self, references: list[dict]) -> None:
+    def populate_entry_modifier_display(self, references: list) -> None:
         """
         Populate the table from a list of reference dicts.
 
@@ -563,17 +581,18 @@ class EntryModifierList(QWidget):
             # is ever shown in the tree (matches fresh-insert behaviour
             # in _handle_manual_index_insertion, which never sends the
             # closer to append_entry).
-            if ref.get("is_range_closer"):
+            ref = _as_record(ref)
+            if ref.is_range_closer:
                 continue
             
-            unique_id = ref["unique_id_number"]
-            parsed = _parse_heading_raw_text(ref.get("heading_raw_text", ""))
+            unique_id = ref.entry_id
+            parsed = _parse_heading_raw_text(ref.heading_raw)
 
             # Prefer the encap parsed straight from heading_raw_text — it's
             # derived fresh from the source .tex on every load, whereas the
             # payload's encap field may be a stale or generic default. Fall
             # back to the payload field only when the raw text has none.
-            stored_encap = parsed["encap"] or ref.get("encap") or ""
+            stored_encap = parsed["encap"] or row_from_reference(ref)["encap"] or ""
 
             id_item = QStandardItem()
             id_item.setData(unique_id, Qt.ItemDataRole.DisplayRole)
@@ -599,16 +618,16 @@ class EntryModifierList(QWidget):
             self.base_model.appendRow(row)
 
             self._location_map[unique_id] = {
-                "file_path":          ref.get("file_path"),
-                "line_number":        ref.get("line_number"),
-                "column_offset":      ref.get("column_offset"),
-                "absolute_position":  ref.get("absolute_position"),
-                "absolute_end":       ref.get("absolute_end"),
+                "file_path":          ref.container,
+                "line_number":        line_of(ref),
+                "column_offset":      column_of(ref),
+                "absolute_position":  position_of(ref),
+                "absolute_end":       end_of(ref),
                 "encap":              stored_encap,
-                "heading_id":         ref.get("heading_id"),
-                "see_references":     ref.get("see_references"),
-                "seealso_references": ref.get("seealso_references"),
-                "macro_command":      ref.get("macro_command", "index"),
+                "heading_id":         ref.heading_id,
+                "see_references":     ref.extra.get("see_references"),
+                "seealso_references": ref.extra.get("seealso_references"),
+                "macro_command":      command_of(ref),
             }
 
             # Data loaded from the .tex source is assumed hierarchy-valid
@@ -658,7 +677,7 @@ class EntryModifierList(QWidget):
         """Return hidden coordinate and encap metadata for *entry_id*."""
         return self._location_map.get(entry_id)
 
-    def append_entry_row(self, ref: dict) -> None:
+    def append_entry_row(self, ref) -> None:
         """
         Appends a single new entry row without clearing or reloading the table.
         Safe to call after populate_entry_modifier_display has already run.
@@ -666,9 +685,10 @@ class EntryModifierList(QWidget):
         # Temporarily disconnect to suppress spurious edit signals during append
         self.base_model.dataChanged.disconnect(self._on_cell_data_changed)
 
-        unique_id = ref["unique_id_number"]
-        parsed = _parse_heading_raw_text(ref.get("heading_raw_text", ""))
-        stored_encap = parsed["encap"] or ref.get("encap") or ""
+        ref = _as_record(ref)
+        unique_id = ref.entry_id
+        parsed = _parse_heading_raw_text(ref.heading_raw)
+        stored_encap = parsed["encap"] or row_from_reference(ref)["encap"] or ""
 
         id_item = QStandardItem()
         id_item.setData(unique_id, Qt.ItemDataRole.DisplayRole)
@@ -692,16 +712,16 @@ class EntryModifierList(QWidget):
 
         # Update the location map so get_location_metadata works immediately
         self._location_map[unique_id] = {
-            "file_path":          ref.get("file_path"),
-            "line_number":        ref.get("line_number"),
-            "column_offset":      ref.get("column_offset"),
-            "absolute_position":  ref.get("absolute_position"),
-            "absolute_end":       ref.get("absolute_end"),
+            "file_path":          ref.container,
+            "line_number":        line_of(ref),
+            "column_offset":      column_of(ref),
+            "absolute_position":  position_of(ref),
+            "absolute_end":       end_of(ref),
             "encap":              stored_encap,
-            "heading_id":         ref.get("heading_id"),
-            "see_references":     ref.get("see_references"),
-            "seealso_references": ref.get("seealso_references"),
-            "macro_command":      ref.get("macro_command", "index"),
+            "heading_id":         ref.heading_id,
+            "see_references":     ref.extra.get("see_references"),
+            "seealso_references": ref.extra.get("seealso_references"),
+            "macro_command":      command_of(ref),
         }
 
         self._last_valid_row_state[unique_id] = {

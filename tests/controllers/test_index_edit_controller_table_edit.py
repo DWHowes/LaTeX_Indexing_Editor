@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QTabWidget
 
 from models.latex_index_parser import LatexIndexParser
 from models.entry_modifier_model import EntryModifierModel
+from models.latex_record_mapping import reference_from_row
 from bookindexcore.qt.staging import QtIndexEditStagingModel
 from models.index_tree_model_engine import IndexTreeModelEngine
 from bookindexcore.util.text import TextSanitizer
@@ -254,7 +255,7 @@ class TestHandleEntryTableEdit:
         other_path, other_uid_dicts = _parse_entries(tmp_path, r"\index{Existing}", "other.tex")
         other_ref = _ref_from_uid_dict(other_uid_dicts[0], other_path, "Existing")
         _add_top_level_node(tree, "Existing", [other_ref])
-        entry_model._records[other_ref["unique_id_number"]] = other_ref
+        entry_model._records[other_ref["unique_id_number"]] = reference_from_row(other_ref)
 
         controller.handle_entry_table_edit(uid, "Existing")
 

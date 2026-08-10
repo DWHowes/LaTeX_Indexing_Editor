@@ -23,6 +23,8 @@ every other cached reference in the same file, mirroring what
 _handle_duplicate_references_request already did.
 """
 import pytest
+
+from models.latex_record_mapping import end_of, position_of
 from PySide6.QtGui import QTextCursor
 
 
@@ -60,7 +62,7 @@ def _insert(pipeline_ctrl, main, sub1=""):
 
 def _find_uid(pipeline_ctrl, heading_text: str) -> int:
     for uid, rec in pipeline_ctrl.entry_modifier_ctrl.model._records.items():
-        if rec.get("heading_raw_text") == heading_text:
+        if rec.heading_raw == heading_text:
             return uid
     raise AssertionError(f"no record found for heading {heading_text!r}")
 
@@ -71,15 +73,15 @@ class TestCoordinateShiftOnLiveInsertion:
         intro_path = project_dir / "01.Intro" / "intro.tex"
         intro_uid = _find_uid(pipeline_ctrl, "Introduction")
         records = pipeline_ctrl.entry_modifier_ctrl.model._records
-        before_pos = records[intro_uid]["absolute_position"]
+        before_pos = position_of(records[intro_uid])
 
         _open_tab_at_start(pipeline_ctrl, intro_path)
         _insert(pipeline_ctrl, "BrandNew")
 
         tab = pipeline_ctrl.window.tabs.currentWidget()
         real_pos = tab.toPlainText().index(r"\index{Introduction}")
-        assert records[intro_uid]["absolute_position"] == real_pos
-        assert records[intro_uid]["absolute_position"] != before_pos  # actually moved
+        assert position_of(records[intro_uid]) == real_pos
+        assert position_of(records[intro_uid]) != before_pos  # actually moved
 
     def test_shifted_entry_is_marked_dirty_for_the_next_save(self, opened_project):
         pipeline_ctrl, project_dir = opened_project
@@ -105,11 +107,11 @@ class TestCoordinateShiftOnLiveInsertion:
 
         widgets_uid = _find_uid(pipeline_ctrl, "Widgets")
         records = pipeline_ctrl.entry_modifier_ctrl.model._records
-        before_pos = records[widgets_uid]["absolute_position"]
+        before_pos = position_of(records[widgets_uid])
 
         _insert(pipeline_ctrl, "TrailingEntry")
 
-        assert records[widgets_uid]["absolute_position"] == before_pos
+        assert position_of(records[widgets_uid]) == before_pos
 
     def test_shifted_entries_coordinates_survive_a_project_save(self, opened_project):
         pipeline_ctrl, project_dir = opened_project
