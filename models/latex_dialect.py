@@ -38,6 +38,7 @@ from typing import Iterable, Optional
 
 from bookindexcore.dialect import (
     ClassEmulation,
+    SORT_PER_LEVEL,
     Finding,
     IndexDialect,
     PageStyle,
@@ -79,7 +80,10 @@ class LatexDialect:
     #: enforcing a depth must enforce.
     max_levels = 3
 
-    supports_sort_keys = True
+    #: Per level: ``sort@display`` sits on each level of the heading.
+    #: InDesign is the same shape; Word is the outlier, with one key for
+    #: the whole entry.
+    sort_key_scope = SORT_PER_LEVEL
 
     #: A LaTeX range is a pair of entries, ``|(`` and ``|)``, which is what
     #: makes the range-consistency analyser meaningful here and meaningless
