@@ -2,6 +2,61 @@
 
 ## Unreleased
 
+### Entries in a named index now work (phase 2)
+
+`imakeidx` lets a document declare more than one index and send an entry to a
+particular one with `\index[names]{Kant, Immanuel}`. That is not an exotic
+feature: a legal volume routinely needs a Subject Index and a separate Table
+of Authorities, which are two indexes and not one index with a naming
+convention.
+
+This application **read those entries and then quietly mishandled them**:
+
+- The scanner found the entry but threw the `[names]` away, so every entry
+  landed in the default index as far as the app was concerned.
+- Worse, the write path did not know the bracket was there. Renaming a
+  heading or editing a Page cell rebuilt the macro as `\index{...}` — moving
+  the entry out of its index — and the guard that checks "does this span
+  really look like an index macro before I overwrite it" answered *no* for
+  the bracketed form, so a good many edits were refused outright with no
+  visible explanation.
+
+Both halves are fixed. The class is read, preserved through every rewrite,
+and round-trips. If you have a multi-index project, entries in a named index
+are now editable and stay where you put them.
+
+**What is still missing:** there is no user interface for this yet — nothing
+lets you *declare* the indexes or move an entry between them from inside the
+app, and the class is not yet stored in the project database. That arrives
+with the shared persistence layer. What changed now is that the application
+stops damaging what it finds.
+
+### The markup grammar moved behind a shared seam (phase 2)
+
+Every question this application asks about the structure of an index entry —
+how levels nest, where a sort key ends, whether a page style is also a range
+marker — now goes through `LatexDialect`, which implements an interface the
+Word and InDesign editors will implement for their own formats. **Nothing
+about how any of it behaves has changed**, with two exceptions worth naming:
+
+- The tree view's bold/italic rendering was parsing `\textbf{}` inside a Qt
+  paint delegate, which is why the tree could show emphasis and nothing else
+  in the application could. It is a fact about LaTeX markup now, not about
+  painting. One consequence is a small fix: the delegate used to split a
+  level at the first `@` with no regard for braces, so a level like
+  `a{b@c}d` was cut in the wrong place; it now uses the same brace-aware
+  reading as everything else.
+- Which macros mean "bold" and which mean "italic" (Preferences → General)
+  now reaches both the Entry Table and the dialect, rather than only the
+  table. Nothing reads the second copy yet; it exists so the two cannot
+  drift apart later.
+
+The syntax-advice records and the cross-reference records are now the shared
+types, so a warning about a LaTeX entry and a warning about a Word one will
+be the same kind of thing.
+
+Tests: 1,494 here and 374 in `bookindexcore`, up from 1,395 and 312.
+
 ### The shared `bookindexcore` package now exists (phase 1)
 
 About 4,800 lines have moved out of this application and into a package it

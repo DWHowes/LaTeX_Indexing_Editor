@@ -1,7 +1,7 @@
 import os
 import re
 
-from models import index_tag_grammar as grammar
+from models.latex_dialect import LATEX_DIALECT as dialect
 from bookindexcore.model.journal import DELETE, INSERT, PendingChangesJournal
 
 class IndexTreeModelEngine:
@@ -100,10 +100,10 @@ class IndexTreeModelEngine:
     @staticmethod
     def _cross_reference_target_display(raw_target: str) -> str:
         """The target's display text, sort keys resolved on every level."""
-        levels = grammar.split_levels_clean(raw_target)
+        levels = dialect.split_levels_clean(raw_target)
         if not levels:
             return raw_target.strip()
-        return grammar.join_levels(grammar.display_of(level) for level in levels)
+        return dialect.join_levels(dialect.display_of(level) for level in levels)
 
     def evaluate_node_type(self, current_token: str) -> tuple[str, bool]:
         """Runs regex patterns to detect see/seealso keywords."""
@@ -168,10 +168,10 @@ class IndexTreeModelEngine:
             raw_full = str(heading.get("heading_text") or "").strip()
             if not raw_full:
                 continue
-            raw = grammar.split_levels(raw_full)[0].strip()
+            raw = dialect.split_levels(raw_full)[0].strip()
             if not raw or raw in seen:
                 continue
-            display = grammar.display_of(raw)
+            display = dialect.display_of(raw)
             seen[raw] = display or raw
 
         return sorted(((display, raw) for raw, display in seen.items()), key=lambda pair: pair[0].lower())
@@ -213,7 +213,7 @@ class IndexTreeModelEngine:
 
     def find_heading_id(self, heading_text: str) -> int | None:
         """Returns the id of an already-known heading, or None."""
-        depth = grammar.depth_of(heading_text)
+        depth = dialect.depth_of(heading_text)
         key = self._heading_key(heading_text, depth)
         for heading in self._active_headings:
             if heading.get("id") is None:
@@ -264,7 +264,7 @@ class IndexTreeModelEngine:
             "parent_id": parent_id,
             "heading_text": heading_text,
             "name": heading_text,
-            "depth": grammar.depth_of(heading_text),
+            "depth": dialect.depth_of(heading_text),
         })
         self._heading_journal.mark_insert(new_id)
         return new_id
@@ -292,8 +292,8 @@ class IndexTreeModelEngine:
             return None
 
         parent_id = None
-        if grammar.depth_of(heading_text) > 0:
-            parent_text = grammar.parent_path(heading_text)
+        if dialect.depth_of(heading_text) > 0:
+            parent_text = dialect.parent_path(heading_text)
             if parent_text:
                 parent_id = self.resolve_heading_id(parent_text)
 

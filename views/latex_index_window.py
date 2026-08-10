@@ -20,7 +20,7 @@ from PySide6.QtCore import QEvent, Qt, Signal, QSize, Slot, QSettings
 
 from bookindexcore.ui.style import AppStyleConfiguration
 from models import index_syntax_check as syntax
-from models import index_tag_grammar as grammar
+from models.latex_dialect import LATEX_DIALECT as dialect
 from views import index_syntax_advice as advice
 from views.latex_entry_auto_completer import LatexEntryAutoCompleter
 
@@ -128,7 +128,7 @@ class SortKeyLineEdit(QLineEdit):
     r"""
     A level's sort field.
 
-    While untouched it mirrors :func:`grammar.suggested_sort_key` of its
+    While untouched it mirrors :func:`dialect.suggested_sort_key` of its
     display field, so the common case -- read the formatting out and file
     under the words -- needs no typing. The first keystroke in it hands
     ownership to the indexer: from then on nothing rewrites it, including
@@ -151,7 +151,7 @@ class SortKeyLineEdit(QLineEdit):
         if self.is_user_owned:
             return
 
-        suggestion = grammar.suggested_sort_key(display_text)
+        suggestion = dialect.suggested_sort_key(display_text)
         # Nothing to read through means nothing to suggest: echoing the
         # display text back into the field would only look like a value
         # that has to be there. Left empty, the placeholder says what the
@@ -452,7 +452,7 @@ class LatexIndexWindow(QDockWidget):
     @staticmethod
     def level_is_formatted(text: str) -> bool:
         r"""True when a level's text carries a ``\macro{...}`` wrapper."""
-        return grammar.suggested_sort_key(text) != (text or "").strip()
+        return dialect.suggested_sort_key(text) != (text or "").strip()
 
     @Slot()
     def _split_typed_sort_key(self) -> None:
@@ -485,7 +485,7 @@ class LatexIndexWindow(QDockWidget):
             if typed == self._declined_splits.get(row):
                 continue
 
-            key, display = grammar.split_sort_key(typed)
+            key, display = dialect.split_sort_key(typed)
             if not key or not display:
                 continue
 
@@ -702,7 +702,7 @@ class LatexIndexWindow(QDockWidget):
             # Was raw.split("!"), which neither dropped the encap nor
             # respected braces -- so a single-level "Main|bold" entry
             # offered "Main|bold" as a main-heading completion.
-            parts = grammar.level_path(raw)
+            parts = dialect.level_path(raw)
             if parts:
                 mains.add(parts[0].strip())
             if len(parts) > 1:

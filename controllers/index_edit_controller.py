@@ -4,6 +4,7 @@ from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import QMessageBox
 
 from models import index_tag_grammar as grammar
+from models.latex_dialect import LATEX_DIALECT as dialect
 from bookindexcore.model.commands import (
     EntrySnapshot,
     HeadingChange,
@@ -306,13 +307,13 @@ class IndexEditController(QObject):
 
         for head in engine._active_headings:
             heading_text = head.get("heading_text") or head.get("name") or ""
-            parts = grammar.split_levels_clean(heading_text)
+            parts = dialect.split_levels_clean(heading_text)
             if len(parts) < depth:
                 continue
             if [p.lower() for p in parts[:depth]] != old_prefix_norm:
                 continue
             new_parts = list(new_path_parts) + parts[depth:]
-            new_heading_text = grammar.join_levels(new_parts)
+            new_heading_text = dialect.join_levels(new_parts)
             head["heading_text"] = new_heading_text
             head["name"] = new_heading_text
 
@@ -414,7 +415,14 @@ class IndexEditController(QObject):
         # and tree reconciliation both key on the bare heading chain.
         new_macro_body = self._reattach_encap(old_macro, new_heading, command_name)
 
-        new_macro = f"\\{command_name}{{{new_macro_body}}}"
+        # The index class is outside the braces and so is not in
+        # heading_raw_text either. Same argument as the encap above, same
+        # consequence if it is dropped: a rename would move the entry out of
+        # its named index and into the default one.
+        new_macro = grammar.build_macro(
+            new_macro_body, command=command_name,
+            index_class=grammar.index_class_of(old_macro, grammar.command_pattern(command_name)),
+        )
         delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro, expected_macro_name=command_name)
         if delta is None:
             # Write did not happen — revert the staged value so it doesn't
@@ -477,10 +485,10 @@ class IndexEditController(QObject):
 
         substituted = False
         new_levels = []
-        old_sort = grammar.sort_key_of(old_token).lower()
+        old_sort = dialect.sort_key_of(old_token).lower()
 
         for level in tag.levels:
-            if not substituted and grammar.sort_key_of(level).lower() == old_sort:
+            if not substituted and dialect.sort_key_of(level).lower() == old_sort:
                 new_levels.append(new_token)
                 substituted = True
             else:
@@ -603,12 +611,16 @@ class IndexEditController(QObject):
 
         partner_record = self._entry_model._records.get(partner_id)
         partner_command = partner_record.get("macro_command", "index") if partner_record else "index"
-        partner_prefix = f"\\{partner_command}{{"
 
         current_partner_macro = self._doc_io.read_macro_span(partner_file, partner_pos, partner_end)
+        # Where the body starts depends on whether the macro carries an
+        # index class, so it is asked for rather than assumed: the fixed
+        # prefix this used to slice by is one character short of the truth
+        # for every entry in a named index.
+        body_start = grammar.macro_body_start(current_partner_macro or "", partner_command)
         if (
             current_partner_macro is None
-            or not current_partner_macro.startswith(partner_prefix)
+            or body_start == -1
             or not current_partner_macro.endswith("}")
         ):
             print(
@@ -620,7 +632,7 @@ class IndexEditController(QObject):
         new_heading_no_encap = self._strip_encap_suffix(new_heading)
         new_encap = grammar.split_encap(new_heading, strip=False)[1]
 
-        partner_inner = current_partner_macro[len(partner_prefix):-1]
+        partner_inner = current_partner_macro[body_start + 1:-1]
         partner_heading_only = self._strip_encap_suffix(partner_inner)
         partner_encap = (
             partner_inner[len(partner_heading_only) + 1:]
@@ -631,7 +643,7 @@ class IndexEditController(QObject):
         # Carry the primary's page style over to the partner, keeping the
         # partner's own marker -- see this method's docstring for why the
         # two halves are treated differently.
-        partner_role = grammar.range_role(partner_encap)
+        partner_role = dialect.range_role(partner_encap)
         primary_role, primary_command = grammar.split_range_encap(new_encap)
         if partner_role and primary_role:
             partner_encap = grammar.build_range_encap(partner_role, primary_command)
@@ -642,7 +654,12 @@ class IndexEditController(QObject):
         if new_partner_heading == partner_inner:
             return True  # already in sync — nothing to do
 
-        new_partner_macro = f"\\{partner_command}{{{new_partner_heading}}}"
+        new_partner_macro = grammar.build_macro(
+            new_partner_heading, command=partner_command,
+            index_class=grammar.index_class_of(
+                current_partner_macro, grammar.command_pattern(partner_command)
+            ),
+        )
         delta = self._doc_io.rewrite_macro_span(partner_file, partner_pos, partner_end, new_partner_macro, expected_macro_name=partner_command)
         if delta is None:
             print(f"[CONTROLLER WARNING] _sync_range_partner: rewrite rejected for partner {partner_id}")
@@ -693,7 +710,10 @@ class IndexEditController(QObject):
 
         old_macro = self._doc_io.read_macro_span(file_path, abs_pos, abs_end) or ""
 
-        new_macro = f"\\{command_name}{{{new_canonical_heading}}}"
+        new_macro = grammar.build_macro(
+            new_canonical_heading, command=command_name,
+            index_class=grammar.index_class_of(old_macro, grammar.command_pattern(command_name)),
+        )
         delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro, expected_macro_name=command_name)
         if delta is None:
             return False
@@ -807,7 +827,7 @@ class IndexEditController(QObject):
         return EntrySnapshot(
             entry_id=entry_id,
             record=record,
-            parts_list=tuple(grammar.level_path(heading_text)),
+            parts_list=tuple(dialect.level_path(heading_text)),
             heading_text=heading_text,
             heading_id=record.get("heading_id"),
             is_range_closer=bool(record.get("is_range_closer")),
@@ -975,7 +995,7 @@ class IndexEditController(QObject):
 
     def _prune_single_node(self, parts: list[str], engine) -> None:
         """Removes exactly one tree node by path plus its heading row, if any."""
-        heading_id = self._find_heading_id_by_text(engine, grammar.join_levels(parts))
+        heading_id = self._find_heading_id_by_text(engine, dialect.join_levels(parts))
         self._remove_tree_node_by_path(parts)
 
         if heading_id is not None:
@@ -1348,7 +1368,7 @@ class IndexEditController(QObject):
         # new one. append_entry (rather than calling _insert_visual_node
         # directly) also re-sorts and re-expands the tree afterward so a
         # freshly created node is immediately visible in place.
-        parts = grammar.split_levels_clean(new_heading_clean)
+        parts = dialect.split_levels_clean(new_heading_clean)
         if parts and record:
             # suppress_transaction=True: record already exists (it's being
             # re-attached after a rename or a discard revert, not inserted
@@ -1461,7 +1481,7 @@ class IndexEditController(QObject):
         ]
 
         # Remove the tree node — find it by ToolTipRole token match
-        parts = grammar.split_levels_clean(heading_text)
+        parts = dialect.split_levels_clean(heading_text)
         if parts:
             self._remove_tree_node_by_path(parts)
 
@@ -1478,7 +1498,7 @@ class IndexEditController(QObject):
         confirmed no records remain under that heading_id, via
         _remove_orphaned_heading.
         """
-        parts = grammar.split_levels_clean(heading_text)
+        parts = dialect.split_levels_clean(heading_text)
         if not parts:
             return
 

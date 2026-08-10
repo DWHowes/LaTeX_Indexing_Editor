@@ -2,6 +2,7 @@ from PySide6.QtCore import QObject, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from models import index_tag_grammar as grammar
+from models.latex_dialect import LATEX_DIALECT as dialect
 
 
 class EntryModifierController(QObject):
@@ -136,7 +137,7 @@ class EntryModifierController(QObject):
             if not disp:
                 return ""
             if sort and sort.lower() != disp.lower():
-                return grammar.build_level(sort, disp)
+                return dialect.build_level(sort, disp)
             return disp
 
         levels = [
@@ -238,7 +239,7 @@ class EntryModifierController(QObject):
             if not disp:
                 return ""
             if sort and sort.lower() != disp.lower():
-                return grammar.build_level(sort, disp)
+                return dialect.build_level(sort, disp)
             return disp
 
         attempted = 0

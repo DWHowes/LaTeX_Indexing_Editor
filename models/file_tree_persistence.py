@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 from pathlib import Path
 
 from models import index_tag_grammar as grammar
+from models.latex_dialect import LATEX_DIALECT as dialect
 
 class _TransactionConnection:
     """
@@ -1510,10 +1511,10 @@ class FileTreePersistence:
         insertion, the shared new-entry tail, and undoing a deletion --
         so the three cannot disagree about what row an entry belongs to.
         """
-        depth = grammar.depth_of(heading_text)
+        depth = dialect.depth_of(heading_text)
         parent_id = None
         if depth > 0:
-            parent_text = grammar.parent_path(heading_text)
+            parent_text = dialect.parent_path(heading_text)
             parent_id = self.resolve_or_insert_heading(
                 heading_text=parent_text, name=parent_text, depth=depth - 1, parent_id=None
             )

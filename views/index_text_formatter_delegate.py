@@ -2,10 +2,21 @@ from PySide6.QtWidgets import QStyledItemDelegate, QStyle, QApplication, QStyleO
 from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtCore import Qt, QSize
 
+from models.latex_dialect import LATEX_DIALECT
+
 class IndexTextFormatterDelegate(QStyledItemDelegate):
-    """
-    Layers on top of Column 0 to render LaTeX formatting (bold/italics)
+    r"""
+    Layers on top of Column 0 to render index-entry emphasis (bold/italics)
     while preserving tree hierarchy indentation positions.
+
+    This class used to parse ``\textbf{}`` and ``\textit{}`` itself, which
+    is why the tree could render LaTeX emphasis and nothing else in the
+    application could. Which markup means "bold" is a fact about the
+    format, not about painting, so it is the dialect's answer now
+    (``dialect.rich_text_runs``) and this class does layout only. The same
+    delegate will therefore serve Word, whose emphasis is a ``\b`` switch,
+    and InDesign, whose emphasis is a character-style reference and not
+    text at all.
     """
 
     #: Number of leading characters of the display string to italicise
@@ -14,8 +25,9 @@ class IndexTextFormatterDelegate(QStyledItemDelegate):
     #: keeps whatever formatting its own \index entry specifies.
     ITALIC_PREFIX_LENGTH_ROLE = Qt.ItemDataRole.UserRole + 31
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, dialect=LATEX_DIALECT):
         super().__init__(parent)
+        self._dialect = dialect
         self._segment_cache: dict[tuple[str, bool], list[tuple[str, bool, bool]]] = {}
 
     def clear_cache(self):
@@ -156,13 +168,15 @@ class IndexTextFormatterDelegate(QStyledItemDelegate):
 
     def _parse_latex_formatting_segments(self, text: str, strip_sort_key: bool = True) -> list[tuple[str, bool, bool]]:
         """
-        Tokenizes text blocks into styled chunks using an explicit style stack to handle nested macros.
-        
-        Supported formatting macros: \\textbf{}, \\textit{}, \\emph{}, \\texttt{}, \\textrm{}
-        Unsupported macros are stripped silently to avoid raw macro text appearing in the tree.
-        
-        The '@' sort key split is the canonical stripping location for makeindex sort parameters.
-        If no '@' exists (database reload), the clean string is processed natively.
+        The dialect's runs, as the ``(text, is_italic, is_bold)`` tuples
+        this class's painting code has always consumed.
+
+        Two things changed when the parsing moved out. The sort key is now
+        split off by the dialect, which is brace-aware, rather than by
+        ``text.split('@', 1)`` -- so a level like ``a{b@c}d`` keeps its
+        display text instead of being cut inside the braces. And the runs
+        come back as named-field records, so the italic/bold ordering that
+        this signature still carries is fixed at exactly one place: here.
         """
         if not text:
             return []
@@ -170,86 +184,9 @@ class IndexTextFormatterDelegate(QStyledItemDelegate):
         if cache_key in self._segment_cache:
             return self._segment_cache[cache_key]
 
-        # Canonical makeindex sort key stripping location.
-        # Isolates the right-hand display string from optional sort prefix (e.g. "sort@display").
-        if strip_sort_key and '@' in text:
-            parts = text.split('@', 1)
-            text = parts[1] if len(parts) > 1 else parts[0]
-
-        segments = []
-        idx = 0
-        text_len = len(text)
-
-        # Style Stack holds tracking tuples: (is_italic, is_bold)
-        style_stack = [(False, False)]
-        accumulated_chars = []
-
-        # Mapping of supported formatting macros to (is_italic, is_bold) style overrides
-        MACRO_STYLES = {
-            r"\textbf{":  (None, True),   # bold, inherit italic
-            r"\textit{":  (True, None),   # italic, inherit bold
-            r"\emph{":    (True, None),   # treated as italic
-            r"\texttt{":  (False, False), # monospace — no bold/italic override
-            r"\textrm{":  (False, False), # roman — reset to plain
-        }
-
-        # Macros to consume silently with no output
-        SILENT_MACROS = [r"\string"]
-
-        while idx < text_len:
-            current_italic, current_bold = style_stack[-1]
-
-            # Check silent macros first
-            matched_silent = False
-            for macro in SILENT_MACROS:
-                if text.startswith(macro, idx):
-                    # \string is followed by a single character it escapes (e.g. \string\{)
-                    # Advance past the macro keyword; the following character is handled normally
-                    idx += len(macro)
-                    matched_silent = True
-                    break
-            if matched_silent:
-                continue
-
-            # Check formatting macros
-            matched_macro = False
-            for macro, (italic_override, bold_override) in MACRO_STYLES.items():
-                if text.startswith(macro, idx):
-                    if accumulated_chars:
-                        segments.append(("".join(accumulated_chars), current_italic, current_bold))
-                        accumulated_chars = []
-                    new_italic = italic_override if italic_override is not None else current_italic
-                    new_bold = bold_override if bold_override is not None else current_bold
-                    style_stack.append((new_italic, new_bold))
-                    idx += len(macro)
-                    matched_macro = True
-                    break
-            if matched_macro:
-                continue
-
-            if text[idx] == '}':
-                # Only treat '}' as a formatting pop if inside an active style macro.
-                # A trailing brace with no matching macro is treated as a literal character.
-                if len(style_stack) > 1:
-                    if accumulated_chars:
-                        segments.append(("".join(accumulated_chars), current_italic, current_bold))
-                        accumulated_chars = []
-                    style_stack.pop()
-                else:
-                    accumulated_chars.append(text[idx])
-                idx += 1
-            else:
-                accumulated_chars.append(text[idx])
-                idx += 1
-
-        # Flush remaining characters onto the segments stack
-        if accumulated_chars:
-            final_italic, final_bold = style_stack[-1]
-            segments.append(("".join(accumulated_chars), final_italic, final_bold))
-
-        # Absolute fallback — return plain text if parsing produced no segments
-        if not segments and text:
-            segments.append((text, False, False))
+        display = self._dialect.display_of(text) if strip_sort_key else text
+        segments = [(run.text, run.italic, run.bold)
+                    for run in self._dialect.rich_text_runs(display)]
 
         self._segment_cache[cache_key] = segments
         return segments

@@ -50,6 +50,8 @@ import re
 from dataclasses import dataclass, replace
 from typing import Iterable, Optional
 
+from bookindexcore import dialect as _shared
+
 # --------------------------------------------------------------------------
 # Grammar constants
 # --------------------------------------------------------------------------
@@ -126,6 +128,13 @@ def build_macro_pattern(extra_command_names: Optional[Iterable[str]] = None) -> 
     Builds the regex that recognizes an indexing macro call, matching
     plain \index plus any project-adopted custom commands (e.g. \isidx).
     The matched command name, without its backslash, is always group(1).
+
+    Deliberately stops at the command name and does **not** try to absorb
+    the optional ``[name]`` argument that selects a named index. LaTeX
+    permits whitespace and comment lines between a macro and its optional
+    argument, so recognizing it is a scanning problem rather than a regex
+    one; :func:`split_index_class` and ``LatexIndexParser`` do it properly,
+    and everything that only wants to *find* macro calls is unaffected.
     """
     names = ["index"]
     for name in (extra_command_names or []):
@@ -139,6 +148,11 @@ def build_macro_pattern(extra_command_names: Optional[Iterable[str]] = None) -> 
 #: The bare-\index form, kept as a module constant since most callers
 #: never deal with custom commands.
 MACRO_PATTERN = build_macro_pattern()
+
+#: The class name meaning "the default index" -- the one an ``\index{...}``
+#: with no bracket argument goes to. imakeidx sends those to the
+#: first-declared index, which is the same thing said from the other end.
+DEFAULT_INDEX_CLASS = ""
 
 
 # --------------------------------------------------------------------------
@@ -174,6 +188,153 @@ def extract_balanced_braces(text: str, start_pos: int) -> tuple[str, int]:
         result_chars.append(char)
         current_pos += 1
     return "", -1
+
+
+# --------------------------------------------------------------------------
+# Index classes -- imakeidx's optional [name] argument
+# --------------------------------------------------------------------------
+#
+# ``\index[names]{Kant, Immanuel}`` files that entry in the index declared as
+# ``\makeindex[name=names]``; an ``\index{...}`` with no bracket goes to the
+# first-declared one. Each name is also the base filename for that index's
+# auxiliary files, so the index engine runs once per named index rather than
+# once per document.
+#
+# The class lives *outside* the braces, which is why it is not part of
+# ``IndexTag.levels`` or of the ``heading_raw_text`` column: those hold the
+# tag body. It is a separate field on the tag and, from phase 3, a separate
+# column on the three index tables.
+
+def skip_spaces_and_comments(text: str, idx: int) -> int:
+    """
+    Advances past whitespace and full comment lines, which LaTeX allows
+    between a macro and its arguments. ``\\index  % which index?\\n [names]
+    {term}`` is one macro call, and a reader that stops at the first
+    non-space character does not see the bracket.
+    """
+    length = len(text)
+    while idx < length:
+        char = text[idx]
+        if char in (" ", "\t", "\r", "\n"):
+            idx += 1
+            continue
+        if char == "%" and (idx == 0 or text[idx - 1] != "\\"):
+            while idx < length and text[idx] != "\n":
+                idx += 1
+            continue
+        break
+    return idx
+
+
+def read_index_class(text: str, pos: int) -> tuple[str, int]:
+    r"""
+    Reads the optional ``[name]`` argument beginning at or after ``pos``,
+    which should be just past the command name.
+
+    Returns ``(class_name, index_past_the_argument)``, or ``("", pos)``
+    when there is no bracket -- the default index, which is not an absence
+    to be signalled but an answer. Brackets nest, so ``[a[b]]`` is read
+    whole rather than being cut at the first ``]``.
+    """
+    scan = skip_spaces_and_comments(text, pos)
+    if scan >= len(text) or text[scan] != "[":
+        return "", pos
+
+    depth = 0
+    start = scan
+    while scan < len(text):
+        char = text[scan]
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1:scan].strip(), scan + 1
+        scan += 1
+
+    return "", pos           # unterminated -- not an optional argument
+
+
+def build_index_class(name: str) -> str:
+    """The bracket argument for ``name``, or "" for the default index."""
+    name = (name or "").strip()
+    return f"[{name}]" if name else ""
+
+
+def _macro_head(text: str, pattern: Optional[re.Pattern] = None):
+    """
+    Locates the leading index macro: ``(match, class_name, brace_pos)``,
+    or None when ``text`` does not begin with one whose braces open.
+    ``brace_pos`` is the index of the "{".
+    """
+    match = (pattern or MACRO_PATTERN).match(text)
+    if not match:
+        return None
+
+    index_class, after = read_index_class(text, match.end())
+    brace = skip_spaces_and_comments(text, after)
+    if brace >= len(text) or text[brace] != "{":
+        return None
+    return match, index_class, brace
+
+
+def command_pattern(command_name: str) -> re.Pattern:
+    r"""
+    A pattern matching *only* ``\command_name``.
+
+    Distinct from :func:`build_macro_pattern`, which always admits plain
+    ``\index`` alongside whatever else it is given -- right for scanning a
+    document, wrong for checking that the span about to be overwritten is
+    the macro the caller thinks it is.
+    """
+    return re.compile(r"\\" + re.escape((command_name or "index").lstrip("\\")) + r"\b")
+
+
+def macro_body_start(text: str, command_name: str = "index") -> int:
+    r"""
+    Where the body of a leading ``\command[class]{`` begins -- the index of
+    the ``{`` -- or -1 if ``text`` does not start with that macro.
+
+    This is what a write guard should ask, rather than testing for the
+    literal prefix ``\index{``: that test says no to
+    ``\index[names]{Kant}``, and a guard that says no aborts the rewrite,
+    so an entry in a named index becomes one that cannot be edited.
+    """
+    head = _macro_head(text or "", command_pattern(command_name))
+    return head[2] if head else -1
+
+
+def index_class_of(macro: str, pattern: Optional[re.Pattern] = None) -> str:
+    r"""
+    Which named index a whole ``\index[...]{...}`` macro files under, or ""
+    for the default one.
+
+    Takes the **macro**, not the tag body: the body is what
+    ``heading_raw_text`` stores and it cannot carry the class. Anything
+    that is not a recognizable index macro reports the default index rather
+    than raising -- this is asked about text pulled out of files.
+    """
+    head = _macro_head(macro or "", pattern)
+    return head[1] if head else DEFAULT_INDEX_CLASS
+
+
+def with_index_class(macro: str, name: str, pattern: Optional[re.Pattern] = None) -> str:
+    r"""
+    The same macro filed under index class ``name``, replacing whatever
+    class it had. ``""`` moves it to the default index, so this is also how
+    a class is removed.
+
+    Replaces rather than accumulates, and the difference matters: an
+    indexer moving a heading from the Subject Index to a Table of
+    Authorities does this twice on the same macro.
+    """
+    text = macro or ""
+    head = _macro_head(text, pattern)
+    if head is None:
+        return text
+
+    match, _existing, brace = head
+    return f"{text[:match.end()]}{build_index_class(name)}{text[brace:]}"
 
 
 def _escape_length(text: str, idx: int) -> int:
@@ -582,22 +743,13 @@ def build_level(sort_key: str, display: str) -> str:
 # Cross-references
 # --------------------------------------------------------------------------
 
-@dataclass(frozen=True)
-class XRefSpec:
-    """A parsed see/seealso encap."""
-    kind: str      # XREF_SEE | XREF_SEEALSO
-    target: str
-
-    @property
-    def is_see(self) -> bool:
-        return self.kind == XREF_SEE
-
-    @property
-    def is_seealso(self) -> bool:
-        return self.kind == XREF_SEEALSO
-
-    def to_encap(self) -> str:
-        return build_encap_xref(self.kind, self.target)
+#: The parsed form of a see/seealso pointer is the *shared* record, not one
+#: of this module's own: a cross-reference means the same thing in Word and
+#: InDesign, and the shared validators that will check one -- an orphaned
+#: target, a pointer across index classes -- must not need three record
+#: types to do it. Serializing it back is dialect work and stays here, as
+#: :func:`build_encap_xref`.
+XRefSpec = _shared.XRefSpec
 
 
 def parse_encap_xref(encap: Optional[str]) -> Optional[XRefSpec]:
@@ -760,10 +912,16 @@ class IndexTag:
     A parsed \index tag. ``levels`` holds raw level text exactly as it
     appeared (sort keys included, whitespace intact); ``encap`` is "" when
     the tag has none. :meth:`to_body` / :meth:`to_macro` serialize back.
+
+    ``index_class`` is imakeidx's optional ``[name]``, and is the one field
+    here that lives *outside* the braces -- so it survives
+    :meth:`to_macro` but has no place in :meth:`to_body`, which is what the
+    ``heading_raw_text`` column stores.
     """
     levels: tuple[str, ...]
     encap: str = ""
     command: str = "index"
+    index_class: str = DEFAULT_INDEX_CLASS
 
     # -- derived readings ------------------------------------------------
 
@@ -806,60 +964,84 @@ class IndexTag:
     def with_encap(self, encap: str) -> "IndexTag":
         return replace(self, encap=encap)
 
+    def with_index_class(self, name: str) -> "IndexTag":
+        return replace(self, index_class=(name or "").strip())
+
     # -- serialization ---------------------------------------------------
 
     def to_body(self) -> str:
-        """The text between the macro's braces."""
+        """
+        The text between the macro's braces -- and so what
+        ``heading_raw_text`` stores. Carries no index class: that sits
+        outside the braces.
+        """
         body = join_levels(self.levels)
         return f"{body}{ENCAP_SEPARATOR}{self.encap}" if self.encap else body
 
     def to_macro(self) -> str:
-        return f"\\{self.command}{{{self.to_body()}}}"
+        return f"\\{self.command}{build_index_class(self.index_class)}{{{self.to_body()}}}"
 
 
-def parse_body(body: str, command: str = "index", *, strip: bool = True) -> IndexTag:
+def parse_body(
+    body: str,
+    command: str = "index",
+    *,
+    strip: bool = True,
+    index_class: str = DEFAULT_INDEX_CLASS,
+) -> IndexTag:
     """
     Parses the text between an index macro's braces -- which is also what
     the ``heading_raw_text`` column stores, so this is the entry point
     most callers want.
+
+    ``index_class`` is passed in rather than read out, because the body
+    does not contain it. Callers holding a whole macro should use
+    :func:`parse_macro`, which reads it for them.
     """
     levels_text, encap = split_encap(body, strip=strip)
-    return IndexTag(tuple(split_levels(levels_text)), encap, command)
+    return IndexTag(tuple(split_levels(levels_text)), encap, command, (index_class or "").strip())
 
 
 def parse_macro(text: str, index_pattern: Optional[re.Pattern] = None) -> Optional[IndexTag]:
     r"""
-    Parses a complete ``\index{...}`` macro, including any custom command
-    name recognized by ``index_pattern``. Returns None if ``text`` does
-    not begin with an index macro whose braces close.
+    Parses a complete ``\index[name]{...}`` macro, including any custom
+    command name recognized by ``index_pattern`` and imakeidx's optional
+    index-class argument. Returns None if ``text`` does not begin with an
+    index macro whose braces close.
 
     Only the leading macro is parsed; trailing text is ignored.
     """
-    pattern = index_pattern or MACRO_PATTERN
-    match = pattern.match(text)
-    if not match:
+    head = _macro_head(text, index_pattern)
+    if head is None:
         return None
 
-    open_brace = text.find("{", match.end())
-    if open_brace == -1 or text[match.end():open_brace].strip():
-        return None
-
-    inner, end_pos = extract_balanced_braces(text, open_brace + 1)
+    match, index_class, brace = head
+    inner, end_pos = extract_balanced_braces(text, brace + 1)
     if end_pos == -1:
         return None
 
-    return parse_body(inner, match.group(1))
+    return parse_body(inner, match.group(1), index_class=index_class)
 
 
-def build_macro(body: str, encap: str = "", command: str = "index") -> str:
+def build_macro(
+    body: str,
+    encap: str = "",
+    command: str = "index",
+    index_class: str = DEFAULT_INDEX_CLASS,
+) -> str:
     r"""
-    Builds ``\command{body|encap}`` from an already-joined levels string.
-    Use :meth:`IndexTag.to_macro` when the levels are still a list.
+    Builds ``\command[class]{body|encap}`` from an already-joined levels
+    string. Use :meth:`IndexTag.to_macro` when the levels are still a list.
     """
     inner = f"{body}{ENCAP_SEPARATOR}{encap}" if encap else body
-    return f"\\{command}{{{inner}}}"
+    return f"\\{command}{build_index_class(index_class)}{{{inner}}}"
 
 
-def build_tag(levels: Iterable[str], encap: str = "", command: str = "index") -> str:
-    r"""Builds ``\command{a!b|encap}`` from level parts."""
-    return IndexTag(tuple(levels), encap, command).to_macro()
+def build_tag(
+    levels: Iterable[str],
+    encap: str = "",
+    command: str = "index",
+    index_class: str = DEFAULT_INDEX_CLASS,
+) -> str:
+    r"""Builds ``\command[class]{a!b|encap}`` from level parts."""
+    return IndexTag(tuple(levels), encap, command, (index_class or "").strip()).to_macro()

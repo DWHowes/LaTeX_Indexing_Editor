@@ -63,8 +63,19 @@ class LatexIndexParser:
             line_idx, col_idx = cls._compute_coordinates(absolute_index, line_offsets)
 
             start_pos = match.end()
-            start_pos = cls._skip_spaces_and_comments(working_content, start_pos)
 
+            # imakeidx's optional argument names which index the entry goes
+            # to: \index[names]{Kant, Immanuel}. This used to be skipped and
+            # thrown away, which cost nothing while the application had no
+            # notion of named indexes and would silently misfile every entry
+            # in a project that did. It is captured now; the column that
+            # stores it arrives with the shared persistence layer.
+            index_class, start_pos = grammar.read_index_class(working_content, start_pos)
+
+            # Any *further* optional groups are still skipped. \index takes
+            # only the one, so anything else is a macro this scan does not
+            # model, and stepping over it is better than stopping at it.
+            start_pos = cls._skip_spaces_and_comments(working_content, start_pos)
             if start_pos < len(working_content) and working_content[start_pos] == '[':
                 start_pos = cls._skip_optional_args(working_content, start_pos)
                 start_pos = cls._skip_spaces_and_comments(working_content, start_pos)
@@ -117,6 +128,7 @@ class LatexIndexParser:
                 "seealso": see_payload["seealso"],
                 "has_references": see_payload["has_references"],
                 "macro_command": matched_command,
+                "index_class": index_class,
             }
             
             extracted_payloads.append((parts_list, uid_dict))

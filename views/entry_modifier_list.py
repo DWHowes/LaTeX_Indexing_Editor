@@ -7,6 +7,7 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem
 
 from models import index_syntax_check as syntax
 from models import index_tag_grammar as grammar
+from models.latex_dialect import LATEX_DIALECT as dialect
 from views import index_syntax_advice as advice
 from bookindexcore.ui.entry_table.table_view import EntryModifierTableView
 
@@ -64,7 +65,7 @@ def _parse_index_level(raw: str) -> tuple[str, str]:
     Brace-aware since the grammar module took this over: a level of
     ``a{b@c}d`` is one display string, not a sort key of ``a{b``.
     """
-    return grammar.split_sort_key(raw)
+    return dialect.split_sort_key(raw)
 
 
 def _parse_heading_raw_text(heading_raw_text: str) -> dict:
@@ -148,6 +149,13 @@ def set_encap_style_values(bold_values=None, italic_values=None) -> None:
     if italic:
         _ITALIC_ENCAP_VALUES = italic
 
+    # The dialect answers the same question for everything that is not this
+    # table -- its page_style_vocabulary is what shared UI will populate a
+    # page-style control from. Two copies of "which macro means bold" that
+    # can disagree is the class of bug index_tag_grammar exists to end, so
+    # the preference lands on both or on neither.
+    dialect.set_emphasis_values(_BOLD_ENCAP_VALUES, _ITALIC_ENCAP_VALUES)
+
 
 def _page_command(value: str) -> str:
     r"""
@@ -161,7 +169,7 @@ def _page_command(value: str) -> str:
     which is what lets one Standard/Bold/Italic combo serve range rows
     and point rows alike.
     """
-    return grammar.split_range_encap(grammar.encap_from_stored(value))[1]
+    return dialect.page_style_of(value)
 
 
 def _is_bold_encap(value: str) -> bool:
@@ -215,7 +223,7 @@ def _is_range_encap(value: str) -> bool:
     literals, which is what made this view read "(textbf" as an ordinary
     (and nonsensical) page-style command.
     """
-    return grammar.range_role(grammar.encap_from_stored(value)) is not None
+    return dialect.range_role(grammar.encap_from_stored(value)) is not None
 
 
 # (label, canonical value) — order defines combo box index order
@@ -341,7 +349,7 @@ class PageStyleDelegate(QStyledItemDelegate):
         # row beneath it, so the marker has to come from the cell's
         # current value, not from whenever the editor was last loaded.
         current = str(index.data(Qt.ItemDataRole.EditRole) or "")
-        role = grammar.range_role(grammar.encap_from_stored(current))
+        role = dialect.range_role(grammar.encap_from_stored(current))
         model.setData(index, grammar.build_range_encap(role, value), Qt.ItemDataRole.EditRole)
 
     def updateEditorGeometry(self, editor: QComboBox, option: QStyleOptionViewItem, index: QModelIndex) -> None:

@@ -11,6 +11,7 @@ and a leaked value would change how an unrelated test renders.
 import pytest
 
 from models import index_tag_grammar as grammar
+from models.latex_dialect import LATEX_DIALECT
 from views import entry_modifier_list as eml
 
 
@@ -116,3 +117,43 @@ class TestSetEncapStyleValues:
 
         assert item.font().bold() is False
         assert item.font().italic() is False
+
+
+class TestTheDialectSeesTheSamePreference:
+    """
+    The Entry Table is no longer the only thing that needs to know which
+    macro means bold: ``LatexDialect.page_style_vocabulary`` is what shared
+    UI will populate a page-style control from, and shared code cannot
+    reach into this module's private frozensets to find out.
+
+    So the preference has to land on both. Two copies of "which macro means
+    bold" that can drift apart is precisely the class of bug
+    ``index_tag_grammar`` was written to end.
+    """
+
+    def _weights(self):
+        return {s.value: s for s in LATEX_DIALECT.page_style_vocabulary}
+
+    def test_the_defaults_agree(self):
+        weights = self._weights()
+        assert weights["textbf"].bold is True
+        assert weights["textit"].italic is True
+
+    def test_a_custom_bold_name_reaches_the_dialect(self):
+        eml.set_encap_style_values(["strong"], None)
+
+        assert self._weights()["strong"].bold is True
+        assert eml._is_bold_encap("strong") is True
+
+    def test_a_custom_italic_name_reaches_the_dialect(self):
+        eml.set_encap_style_values(None, ["slanted"])
+
+        assert self._weights()["slanted"].italic is True
+
+    def test_the_two_never_disagree_about_a_value(self):
+        eml.set_encap_style_values("strong, heavy", "slanted")
+        weights = self._weights()
+
+        for value in ("strong", "heavy"):
+            assert weights[value].bold is eml._is_bold_encap(value) is True
+        assert weights["slanted"].italic is eml._is_italic_encap("slanted") is True

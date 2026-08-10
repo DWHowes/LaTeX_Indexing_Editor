@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QModelIndex, QSortFilterProxyModel,
 
 from bookindexcore.ui.style import AppStyleConfiguration
 from models import index_tag_grammar as grammar
+from models.latex_dialect import LATEX_DIALECT as dialect
 from views.index_text_formatter_delegate import IndexTextFormatterDelegate
 from bookindexcore.ui.entry_table.link_delegate import IndexLinkDelegate
 
@@ -371,7 +372,7 @@ class IndexTreeView(QTreeView):
                 # grammar module. Level splitting itself is now brace-aware,
                 # so a heading like "Chapter {A!B}" stays one level.
                 clean = grammar.strip_string_macro(heading_raw).strip().replace("/", grammar.LEVEL_SEPARATOR)
-                parts = grammar.split_levels_clean(clean)
+                parts = dialect.split_levels_clean(clean)
                 if not parts: continue
 
                 h_id = head.get("id")
@@ -384,7 +385,7 @@ class IndexTreeView(QTreeView):
                 # with subsystems that have no LaTeX in them.
                 for r_dict in associated_refs:
                     if isinstance(r_dict, dict):
-                        r_dict["heading_path"] = grammar.join_levels(parts)
+                        r_dict["heading_path"] = dialect.join_levels(parts)
 
                 self._insert_visual_node(self.base_model.invisibleRootItem(), parts, associated_refs)
 
@@ -524,10 +525,10 @@ class IndexTreeView(QTreeView):
             if not source or not target:
                 continue
 
-            parts = grammar.level_path(source)
+            parts = dialect.level_path(source)
             if not parts:
                 continue
-            parts.append(grammar.build_encap_xref(xref_type, target))
+            parts.append(dialect.build_xref(xref_type, target))
 
             node = self._insert_visual_node(root, parts, [])
             if node is not None:

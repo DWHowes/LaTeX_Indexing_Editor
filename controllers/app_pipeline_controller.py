@@ -10,7 +10,7 @@ from PySide6.QtCore import (
 from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplication, QProgressDialog
 from shiboken6 import isValid
 
-from models import index_tag_grammar as grammar
+from models.latex_dialect import LATEX_DIALECT as dialect
 from bookindexcore.model.commands import (
     DEFAULT_LIMIT,
     EntrySnapshot,
@@ -2460,7 +2460,7 @@ class AppPipelineController(QObject):
     def _handle_manual_index_insertion(self, parts_list: list, metadata: dict):
         entry_dict = {
             "unique_id_number":   metadata["id"],
-            "heading_raw_text":   grammar.join_levels(parts_list),
+            "heading_raw_text":   dialect.join_levels(parts_list),
             "file_path":          metadata.get("path", ""),
             "line_number":        metadata.get("line", 0),
             "column_offset":      metadata.get("col", 0),
@@ -2720,7 +2720,7 @@ class AppPipelineController(QObject):
                 entry_dict["heading_raw_text"]
             )
 
-        parts_list = grammar.level_path(entry_dict["heading_raw_text"])
+        parts_list = dialect.level_path(entry_dict["heading_raw_text"])
 
         if add_to_tree:
             self.window.latex_index_window.add_completion_entry(parts_list)

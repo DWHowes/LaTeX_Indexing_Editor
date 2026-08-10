@@ -1,6 +1,7 @@
 import os
 from contextlib import contextmanager
 from PySide6.QtCore import QObject, Signal, Slot
+from models import index_tag_grammar as grammar
 from views.editor_tab import EditorTab
 
 class DocumentIOController(QObject):
@@ -422,9 +423,8 @@ class DocumentIOController(QObject):
         cursor.setPosition(absolute_position)
         cursor.setPosition(absolute_end, QTextCursor.MoveMode.KeepAnchor)
 
-        expected_prefix = f"\\{expected_macro_name}{{"
         existing = cursor.selectedText()
-        if not existing.startswith(expected_prefix):
+        if grammar.macro_body_start(existing, expected_macro_name) == -1:
             print(
                 f"[IO GUARD] Span at {absolute_position}:{absolute_end} "
                 f"is {existing[:30]!r} — does not look like a \\{expected_macro_name} macro, "
@@ -467,9 +467,8 @@ class DocumentIOController(QObject):
             )
             return None
 
-        expected_prefix = f"\\{expected_macro_name}{{"
         existing_span = content[absolute_position:absolute_end]
-        if not existing_span.startswith(expected_prefix):
+        if grammar.macro_body_start(existing_span, expected_macro_name) == -1:
             print(
                 f"[IO GUARD] Span at {absolute_position}:{absolute_end} "
                 f"is {existing_span[:30]!r} — does not look like a \\{expected_macro_name} macro, "

@@ -43,6 +43,11 @@ QT_FREE_MODULES = (
     "models/file_tree_persistence.py",
     "models/index_tag_grammar.py",
     "models/index_syntax_check.py",
+    # The dialect is the seam shared code reaches this application's markup
+    # through, and shared code must be runnable headlessly -- the Word
+    # backend and the InDesign adapter both test without a display. A Qt
+    # import here would be invisible locally, where Qt is always installed.
+    "models/latex_dialect.py",
 )
 
 

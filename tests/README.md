@@ -83,12 +83,47 @@ one behaviour rather than a whole module, and each is named for the behaviour:
 have their subject in `views/`, not `models/`, but are pure logic and belong
 to this layer). Their subsections name them explicitly.
 
+### `latex_dialect.py`
+
+`test_latex_dialect.py` runs `bookindexcore.testing.dialect_conformance` — the
+same battery the Word and InDesign dialects will answer to — against
+`LatexDialect`, plus the LaTeX-specific behaviour the battery cannot state.
+
+What is here rather than in the shared package is the **corpus**. The laws are
+shared; the samples cannot be, because `Kant!early works` is two levels in this
+format and one level containing an exclamation mark in Word. When adding a
+sample, prefer one that has broken something: the corpus already carries
+`Kant, Immanuel|(textbf` (a styled range, which was read as a page style named
+`(textbf` until [`index_tag_grammar.py`](#index_tag_grammarpy) fixed it) and
+`Bang"! Goes the theory` (a quoted separator).
+
+Three things the battery cannot know and this file pins:
+
+- **The stored/markup boundary.** The Page column stores `"standard"` for a
+  reference with no page style; the markup spells that as nothing at all.
+  `TestStoredEncapBoundary` is that boundary. Getting it wrong does not fail
+  loudly — the stored word is simply written into the `.tex` file and the
+  document acquires a `\standard` that no package defines.
+- **`rich_text_runs`**, lifted out of `IndexTextFormatterDelegate`, where it
+  could only ever serve one widget. Note
+  `test_an_unknown_macro_passes_through_verbatim`: the delegate's *docstring*
+  claimed unsupported macros were stripped and its code did the opposite. The
+  code is what shipped, so the code is what moved — but it disagrees with
+  `suggested_sort_key`, which reads through any `\name{...}`. Worth resolving
+  on its own, not inside an extraction phase.
+- **That the dialect and the grammar never disagree.** Almost every dialect
+  method forwards to `index_tag_grammar`, and the scanner and the write path
+  still call that module directly. A dialect that quietly re-implemented a
+  reading would put two implementations of the grammar back into the
+  application, which is the exact failure `index_tag_grammar` was written to
+  end.
+
 ### `index_tag_grammar.py`
 
 The single parser/serializer for `\index` tag structure: levels, encap, sort
-keys, see/seealso, range markers, heading depth/parent paths, and whole-tag
-`parse_body`/`parse_macro`/`IndexTag.to_macro`. Everything downstream trusts
-it about brace nesting, escapes and separator precedence, so
+keys, see/seealso, range markers, index classes, heading depth/parent paths,
+and whole-tag `parse_body`/`parse_macro`/`IndexTag.to_macro`. Everything
+downstream trusts it about brace nesting, escapes and separator precedence, so
 `test_index_tag_grammar.py` is the deepest layer-1 file after
 `test_latex_index_parser.py`, and for the same reason. Two things are worth
 knowing before editing either file:
@@ -117,6 +152,28 @@ of `EntryModifierController._assemble_canonical_heading` and the likeliest
 pair to drift into another round-trip corruption; and
 `IndexEditController._substitute_token_in_heading` silently dropped a
 trailing `!` and used `.split("@")[0]`, which returns `"a{b"` for `a{b@c}d`.
+
+**The index class (`\index[names]{...}`).** `imakeidx`'s optional argument
+selects which of a project's named indexes an entry goes to, and it lives
+*outside* the braces — so it is a field on `IndexTag`, never part of
+`to_body()`, and therefore never part of `heading_raw_text`. That separation is
+what `TestIndexClasses::test_the_class_is_not_part_of_the_body` protects: the
+same term filed in two indexes must not look like two different headings.
+
+`TestIndexClasses` covers reading, writing and — the one that matters —
+`test_refiling_replaces_rather_than_accumulates`. Filing is not a prefix
+operation. An indexer moving a heading from the Subject Index to a Table of
+Authorities does it twice on the same macro, and an implementation that
+accumulated would corrupt it the second time.
+
+`TestMacroBodyStart` covers the write guard. It used to be asked as
+`startswith("\\index{")`, which answers *no* for every entry in a named index —
+and a guard that answers no aborts the rewrite, so those entries silently could
+not be edited at all. Note `test_a_custom_command_is_not_admitted_by_default`:
+unlike `build_macro_pattern`, which always admits plain `\index` alongside
+whatever else it is given, this one matches exactly the command it was asked
+about. Overwriting an `\isidx` span with an `\index` macro is the confusion the
+guard exists to prevent.
 
 **A range marker and a page style in one encap.** `makeindex` writes a styled
 range marker-first — `|(textbf` … `|)textbf` — so the encap is two independent
@@ -258,6 +315,14 @@ InDesign backends run headlessly.
 module. The bold/italic encap name lists behind the Entry Table's Page column
 became a user preference (Preferences → General) because a project styling its
 page numbers with its own macro silently got a plain, mis-styled cell for it.
+
+`TestTheDialectSeesTheSamePreference` covers the second consumer. The Entry
+Table is no longer the only thing that needs to know which macro means bold —
+`LatexDialect.page_style_vocabulary` is what shared UI will populate a
+page-style control from, and shared code cannot reach into this module's
+private frozensets. The preference therefore lands on both or on neither; two
+copies that can drift apart is the class of bug `index_tag_grammar` exists to
+end.
 
 The *defaults* those lists start from live on `index_tag_grammar`, not here:
 which markup means bold is a fact about the format. They used to sit in

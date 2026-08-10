@@ -162,11 +162,56 @@ class TestCoordinates:
 
 
 class TestOptionalArgsAndComments:
-    def test_optional_argument_is_skipped(self, tmp_path):
-        path = _write_tex(tmp_path, r"\index[opt]{Widgets}")
+    def test_the_optional_argument_is_captured_as_the_index_class(self, tmp_path):
+        r"""
+        It used to be skipped and discarded. ``\index[names]{...}`` is
+        imakeidx selecting which of a project's named indexes the entry
+        goes to, so discarding it misfiles the entry -- silently, and in a
+        way nothing downstream could detect.
+        """
+        path = _write_tex(tmp_path, r"\index[names]{Widgets}")
         payloads, _ = LatexIndexParser.parse_file(path)
-        parts, _ = payloads[0]
+        parts, uid_dict = payloads[0]
         assert parts == ["Widgets"]
+        assert uid_dict["index_class"] == "names"
+
+    def test_no_optional_argument_is_the_default_index(self, tmp_path):
+        path = _write_tex(tmp_path, r"\index{Widgets}")
+        payloads, _ = LatexIndexParser.parse_file(path)
+        _, uid_dict = payloads[0]
+        assert uid_dict["index_class"] == ""
+
+    def test_a_second_optional_group_is_still_skipped(self, tmp_path):
+        r"""
+        ``\index`` takes one optional argument. Anything further belongs to
+        a macro this scanner does not model, and stepping over it beats
+        stopping at it.
+        """
+        path = _write_tex(tmp_path, r"\index[names][extra]{Widgets}")
+        payloads, _ = LatexIndexParser.parse_file(path)
+        parts, uid_dict = payloads[0]
+        assert parts == ["Widgets"]
+        assert uid_dict["index_class"] == "names"
+
+    def test_comment_between_macro_and_optional_argument(self, tmp_path):
+        path = _write_tex(tmp_path, "\\index% which index?\n[names]{Widgets}")
+        payloads, _ = LatexIndexParser.parse_file(path)
+        parts, uid_dict = payloads[0]
+        assert parts == ["Widgets"]
+        assert uid_dict["index_class"] == "names"
+
+    def test_coordinates_span_the_whole_macro_including_the_class(self, tmp_path):
+        r"""
+        absolute_index/end_absolute_index bracket the text a rewrite will
+        replace. If they started after ``[names]`` the rewrite would leave
+        an orphaned bracket behind.
+        """
+        source = r"\index[names]{Widgets}"
+        path = _write_tex(tmp_path, source)
+        payloads, _ = LatexIndexParser.parse_file(path)
+        _, uid_dict = payloads[0]
+        start, end = uid_dict["absolute_index"], uid_dict["end_absolute_index"]
+        assert source[start:end + 1] == source
 
     def test_comment_between_macro_and_brace_is_skipped(self, tmp_path):
         path = _write_tex(tmp_path, "\\index% a comment\n{Widgets}")

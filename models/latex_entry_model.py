@@ -6,7 +6,7 @@ class ReferenceCarrier:
 from dataclasses import dataclass
 from typing import Optional, List
 
-from models import index_tag_grammar as grammar
+from models.latex_dialect import LATEX_DIALECT as dialect
 
 @dataclass
 class IndexEntryModel:
@@ -19,7 +19,7 @@ class IndexEntryModel:
     the macros, which files "\textit{The Quality of Mercy}" under T and
     "RMS \textit{Titanic}" under R -- both wrong, and both invisible,
     since the generated key never appeared anywhere the indexer could see
-    it. The window offers grammar.suggested_sort_key as a starting point
+    it. The window offers dialect.suggested_sort_key as a starting point
     in a field that can be edited or emptied, and only what is in that
     field is written.
     """
@@ -57,12 +57,12 @@ class IndexEntryModel:
             return display
         if key.lower() == display.lower():
             return display
-        if grammar.split_sort_key(display)[0]:
+        if dialect.split_sort_key(display)[0]:
             # Display already carries its own key. Honour the explicit
             # field rather than producing a level with two "@" halves.
-            display = grammar.split_sort_key(display)[1]
+            display = dialect.split_sort_key(display)[1]
 
-        return grammar.build_level(key, display)
+        return dialect.build_level(key, display)
 
     def normalized_parts(self) -> List[str]:
         parts = []
@@ -77,7 +77,7 @@ class IndexEntryModel:
         return parts
 
     def chain(self) -> str:
-        return grammar.join_levels(self.normalized_parts())
+        return dialect.join_levels(self.normalized_parts())
 
     def metadata(self, assigned_id: int, path: str, line: int, col: int) -> dict:
         """
