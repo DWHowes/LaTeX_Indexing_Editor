@@ -1,9 +1,34 @@
-import os
-from PySide6.QtCore import QObject, Signal
+r"""
+The entry store, bound to this application's record mapping — and holding
+the one thing that could not move with it.
 
-from bookindexcore.model.journal import DELETE, INSERT, UPDATE, PendingChangesJournal
+``bookindexcore.qt.entry_store.QtEntryStore`` owns the cache, the journal,
+the dirty tracking and the save drain, none of which depend on what an entry
+says or where it sits. What is left here is **coordinate arithmetic**, and it
+stays for a stated reason rather than an accidental one.
+
+A LaTeX index entry is a span of characters, so an edit that changes one
+span's length moves every later entry in that file. Word re-resolves from a
+bookmark and InDesign's marker travels with its text; neither has anything to
+shift. Design §4.2 is explicit that this arithmetic must not be hoisted into
+the shared model and stubbed out by two backends — the shared model is meant
+to call ``DocumentBackend.relocate_after`` and apply whatever
+``LocatorUpdate``s come back.
+
+**That conversion is owed.** ``LatexTextBackend`` already computes exactly
+these relocations and passes the conformance battery on them; nothing in the
+edit pipeline routes through it yet. When it does, the three methods below
+collapse into an ``apply_relocations`` on the shared store, and this file
+becomes the codec binding and nothing else.
+"""
+
+import os
+
 from bookindexcore.model.records import IndexReference
-from models.latex_dialect import LATEX_DIALECT as dialect
+from bookindexcore.qt.entry_store import QtEntryStore
+
+from models.latex_dialect import LATEX_DIALECT
+from models import latex_record_mapping as codec
 from models.latex_record_mapping import (
     column_of,
     command_of,
@@ -11,169 +36,39 @@ from models.latex_record_mapping import (
     line_of,
     moved_to,
     position_of,
-    reference_from_row,
     row_from_reference,
     shifted_by,
 )
 
-class EntryModifierModel(QObject):
+
+class _LatexCodec:
     """
-    Core Model Layer matching View and Controller structural design patterns.
-    Manages raw LaTeX indexing records independent of any UI presentation.
+    The row-to-record mapping, as the shared store's ``codec`` collaborator.
+
+    A two-method adapter rather than passing the module, so the store's
+    contract is a named thing that a second application can satisfy without
+    matching a module's shape.
     """
-    entry_modifier_reloaded = Signal(list)   # Emits fresh records list [dict, ...]
-    entry_modifier_updated = Signal(int, bool)  # entry_id, success_status
+
+    @staticmethod
+    def from_row(row):
+        return codec.reference_from_row(row)
+
+    @staticmethod
+    def to_row(record):
+        return codec.row_from_reference(record)
+
+
+class EntryModifierModel(QtEntryStore):
+    """The shared entry store, speaking this application's schema."""
 
     def __init__(self, persistence=None, staging_model=None):
-        super().__init__()
-        self._persistence = persistence  # FileTreePersistence ref
-        self._staging_model = staging_model  # IndexEditStagingModel ref — shared with IndexEditController
-        # Keyed by entry id. Holds the shared IndexReference record, not a
-        # dict: a row becomes a record on the way in and a row again on the
-        # way out, and nothing in between deals in column names.
-        self._records: dict[int, IndexReference] = {}
-        self._display_ids: set[int] = set()
-
-        # What still needs writing to project_references at save time.
-        # Entity-keyed rather than a plain dirty set, so that insert and
-        # delete can join update here as the remaining immediate writes
-        # are deferred -- see models/pending_changes_journal.py.
-        self._journal = PendingChangesJournal("reference")
-        # file_path of entries deleted since the last save, kept only
-        # so the per-file flush scoping can still place them.
-        self._pending_delete_meta: dict[int, dict] = {}
-
-    @property
-    def _dirty_ids(self) -> set[int]:
-        """
-        Read-only view of the journal, kept because callers and tests
-        check membership. Mutate through mark_dirty/clear_dirty, never
-        through this.
-        """
-        return set(self._journal.entity_ids())
-
-    def get_record(self, entry_id: int) -> IndexReference | None:
-        """
-        The record for this entry, or None.
-
-        The supported way to reach one. Four controllers used to index
-        ``_records`` directly, which is how a private cache ends up with a
-        public shape that cannot be changed.
-        """
-        return self._records.get(entry_id)
-
-    def all_records(self) -> list[IndexReference]:
-        """Every cached record, closers included."""
-        return list(self._records.values())
-
-    def has_record(self, entry_id: int) -> bool:
-        return entry_id in self._records
-
-    def get_heading_text(self, entry_id: int) -> str:
-        record = self._records.get(entry_id)
-        return record.heading_raw if record else ""
-
-    def get_display_label(self, entry_id: int) -> str:
-        """
-        Returns a human-readable label stripped of sort-key and encap
-        syntax.
-
-        Previously hand-split on "|" and "!" and partitioned on "@", none
-        of which respected brace nesting: a heading like
-        "Chapter {A|B}!Sub" lost everything from the brace onward. Two
-        behaviour changes come with the grammar module, both deliberate:
-        braced separators are now left alone (the bug), and a level whose
-        display half is empty ("sortkey@") now contributes nothing rather
-        than falling back to showing the raw "sortkey@" text -- which is
-        what the tree has always shown for the same heading.
-        """
-        levels = dialect.split_levels_clean(self.get_heading_text(entry_id))
-        return " > ".join(
-            display for display in (dialect.display_of(level) for level in levels) if display
+        super().__init__(
+            persistence, staging_model, codec=_LatexCodec(), dialect=LATEX_DIALECT
         )
-    
-    # ------------------------------------------------------------------
-    # Cache management
-    # ------------------------------------------------------------------
-
-    def load_records(self, references: list[dict]) -> None:
-        """
-        Populates the in-memory cache from the project load payload.
-        Closers are retained in full cache for coordinate operations but
-        excluded from the display cache so views never see them.
-
-        Also seeds the staging model's baseline for every entry (including
-        closers — they're still real \\index macros with their own
-        coordinates and can still go through the rewrite pipeline) so that
-        the first real edit to any entry never hits stage_edit's
-        auto-register/warning fallback.
-        """
-        records = [
-            ref if isinstance(ref, IndexReference) else reference_from_row(ref)
-            for ref in references
-        ]
-        self._records = {record.entry_id: record for record in records}
-        self._display_ids: set[int] = {
-            record.entry_id for record in records if not record.is_range_closer
-        }
-
-        if self._staging_model is not None:
-            for record in records:
-                self._staging_model.register_original(record.entry_id, record.heading_raw)
-        else:
-            print("[MODEL WARNING] load_records: no staging_model bound — entries will "
-                  "auto-register with a warning on their first edit instead.")
-
-    def fetch_entry_modifier_records(self) -> list[dict]:
-        """Returns only display-eligible records for view population."""
-        return [r for uid, r in self._records.items() if uid in self._display_ids]
-    
-    def set_persistence(self, persistence) -> None:
-        """Binds the active FileTreePersistence instance after project load."""
-        self._persistence = persistence
-
-    def set_staging_model(self, staging_model) -> None:
-        """
-        Binds the shared IndexEditStagingModel instance. Must be the same
-        instance handed to IndexEditController — this model and that
-        controller both read/write staging state for the same
-        unique_id_numbers, so a single shared instance is required for
-        cross-view sync to mean anything.
-        """
-        self._staging_model = staging_model
-
-    def register_new_entry(self, entry_dict: dict) -> None:
-        """
-        Adds a single new entry to the in-memory cache and marks its row
-        for creation at the next save. Called after the .tex file has
-        already been written; entry_dict arrives fully populated including
-        uid and heading_id.
-
-        The row used to be inserted here and then. Deferring it is what
-        removes the need for the insertion-rollback bookkeeping that grew
-        up around it: an entry created and discarded before any save now
-        cancels out in the journal instead of having to be deleted back
-        out of the database.
-
-        Also seeds the staging model's baseline for this entry, so its
-        first edit doesn't hit stage_edit's auto-register/warning path.
-        """
-        record = (
-            entry_dict if isinstance(entry_dict, IndexReference)
-            else reference_from_row(entry_dict)
-        )
-        unique_id = record.entry_id
-        self._records[unique_id] = record
-        self._pending_delete_meta.pop(unique_id, None)
-
-        if self._staging_model is not None:
-            self._staging_model.register_original(unique_id, record.heading_raw)
-
-        self._journal.mark_insert(unique_id)
-        self.entry_modifier_updated.emit(unique_id, True)
 
     # ------------------------------------------------------------------
-    # Coordinate maintenance — called after any macro rewrite
+    # Coordinate maintenance — LaTeX's alone; see the module docstring
     # ------------------------------------------------------------------
 
     def shift_coordinates_after(
@@ -270,240 +165,6 @@ class EntryModifierModel(QObject):
             absolute_position=absolute_position, absolute_end=absolute_end
         )
 
-    # ------------------------------------------------------------------
-    # Dirty tracking
-    # ------------------------------------------------------------------
-
-    def mark_dirty(self, entry_id: int) -> None:
-        """
-        Marks a single record as dirty so it will be included in the
-        next flush_dirty_to_db call.
-
-        Called by IndexEditController after every successful rewrite —
-        both for the directly edited entry and for all shifted entries
-        returned by shift_coordinates_after.
-        """
-        self._journal.mark_update(entry_id)
-
-    def clear_dirty(self) -> None:
-        """Clears the journal after a successful flush."""
-        self._journal.clear()
-
-    def has_dirty_records(self) -> bool:
-        """Returns True if any records are pending a DB flush."""
-        return bool(self._journal)
-
-    def flush_dirty_to_db(self, file_path: str | None = None) -> tuple[int, int]:
-        """
-        Writes dirty records to the DB via update_reference_field.
-
-        file_path: if given, only flushes dirty records whose cached
-        file_path matches (normalized) — used when a single file's .tex
-        buffer was just durably saved (single-tab Save, or the tab-switch
-        auto-sync flush) so records belonging to OTHER, still-unsaved tabs
-        aren't pushed to the DB ahead of their own .tex write. Doing so
-        would desync the DB from disk if that other tab is later discarded
-        instead of saved — the DB would show a rename that was never
-        actually kept. Pass None only when every open tab's buffer has
-        just been saved together (see AppPipelineController.
-        execute_project_save_workflow), where every dirty record is
-        guaranteed to already match what's on disk.
-
-        Returns (success_count, failure_count). Flushed (or unrecoverable)
-        ids are removed from the dirty set regardless of individual
-        success, so a broken record doesn't block future saves; ids
-        outside file_path's scope are left untouched for a later flush.
-        """
-        if not self._journal:
-            return 0, 0
-
-        if self._persistence is None:
-            print("[MODEL STUB] No persistence layer — skipping flush")
-            return 0, len(self._journal)
-
-        norm_target = os.path.normpath(file_path) if file_path else None
-
-        targets = [
-            (entry_id, op) for entry_id, op in self._journal.items()
-            if norm_target is None or self._pending_file_path(entry_id) == norm_target
-        ]
-
-        # Inserts before updates before deletes: a row has to exist before
-        # anything updates it, and removing it last keeps the drain valid
-        # if it is interrupted partway.
-        _ORDER = {INSERT: 0, UPDATE: 1, DELETE: 2}
-        targets.sort(key=lambda pair: _ORDER.get(pair[1], 1))
-
-        success_count = 0
-        failure_count = 0
-        resolved: list[int] = []
-
-        for entry_id, op in targets:
-            if op == DELETE:
-                ok = self._write_delete(entry_id)
-            elif op == INSERT:
-                ok = self._write_insert(entry_id)
-            else:
-                ok = self._write_update(entry_id)
-
-            if ok:
-                success_count += 1
-            else:
-                failure_count += 1
-            # Resolved either way, so one broken record can't block every
-            # future save -- the pre-existing behaviour for updates.
-            resolved.append(entry_id)
-
-        self._journal.resolve(resolved)
-        for entry_id in resolved:
-            self._pending_delete_meta.pop(entry_id, None)
-
-        print(
-            f"[MODEL] Flushed pending changes"
-            f"{'' if norm_target is None else f' for {os.path.basename(norm_target)}'}: "
-            f"{success_count} succeeded, {failure_count} failed"
-        )
-        return success_count, failure_count
-
-    # -- per-operation writers -------------------------------------------
-
-    def _pending_file_path(self, entry_id: int) -> str:
-        """
-        The file a pending change belongs to. Reads the live record where
-        there is one, and falls back to the metadata captured at deletion
-        time -- a pending delete has no record left to ask.
-        """
-        record = self._records.get(entry_id)
-        if record is not None:
-            return os.path.normpath(record.container or "")
-        meta = self._pending_delete_meta.get(entry_id) or {}
-        return os.path.normpath(meta.get("file_path", "") or "")
-
-    # ``row_from_reference`` is the only place a record becomes a row, and
-    # it owns the JSON encoding of the list columns. That encoding used to
-    # live here as ``_serialized`` because callers disagreed about whether
-    # they were passing lists or pre-encoded strings; a raw list fails the
-    # sqlite bind and was swallowed as a flush failure.
-
-    def _write_insert(self, entry_id: int) -> bool:
-        record = self._records.get(entry_id)
-        if record is None:
-            print(f"[MODEL WARNING] flush: insert for ID {entry_id} has no cached record")
-            return False
-        return bool(self._persistence.insert_reference(row_from_reference(record)))
-
-    def _write_update(self, entry_id: int) -> bool:
-        record = self._records.get(entry_id)
-        if record is None:
-            print(f"[MODEL WARNING] flush: update for ID {entry_id} has no cached record")
-            return False
-
-        if not self._persistence.update_reference_field(entry_id, row_from_reference(record)):
-            print(f"[MODEL WARNING] flush: DB write failed for ID {entry_id}")
-            return False
-
-        # Keeps the shared project_headings row's own text in sync with
-        # whatever this now-durably-saved reference's heading path actually
-        # is -- see FileTreePersistence.update_heading_text's docstring for
-        # why this can't be skipped: a tree rename only ever updated each
-        # reference's own heading_raw_text, never this row, so without it a
-        # reopened project would rebuild its tree from the pre-rename name.
-        self._persistence.update_heading_text(record.heading_id, record.heading_raw)
-        return True
-
-    def _write_delete(self, entry_id: int) -> bool:
-        return bool(self._persistence.delete_reference(entry_id))
-
-    def get_dirty_ids_for_file(self, file_path: str) -> list[int]:
-        """Returns dirty entry_ids whose cached record belongs to file_path (normalized)."""
-        norm_target = os.path.normpath(file_path) if file_path else ""
-        return [
-            entry_id for entry_id in self._journal.entity_ids()
-            if self._pending_file_path(entry_id) == norm_target
-        ]
-
-    def pending_insert_ids_for_file(self, file_path: str) -> list[int]:
-        """
-        Entries in file_path whose row has not been written yet.
-
-        This is what a discard needs to roll back: an entry created since
-        the last save has no database row, but it does have an in-memory
-        record and tree/table rows, and its .tex macro is about to vanish
-        when the file is restored from its session backup.
-
-        The journal answers this directly, which is why the pipeline no
-        longer keeps a parallel _pending_insertions_by_file map.
-        """
-        norm_target = os.path.normpath(file_path) if file_path else ""
-        return [
-            entry_id for entry_id in self._journal.entity_ids(INSERT)
-            if self._pending_file_path(entry_id) == norm_target
-        ]
-
-    def get_dirty_file_paths(self) -> set[str]:
-        """Returns the (normalized) set of file paths with at least one dirty record."""
-        return {
-            os.path.normpath(record.container)
-            for entry_id in self._journal.entity_ids()
-            if (record := self._records.get(entry_id)) is not None and record.container
-        }
-
-    def revert_dirty_record(self, entry_id: int) -> dict | None:
-        """
-        Overwrites this entry's cached mutable fields with the DB's current
-        row and drops it from the dirty set — used when the user discards a
-        tab whose rename(s) were marked dirty but never reached
-        flush_dirty_to_db, so the in-memory cache (and the tree/table views
-        that read from it) don't keep showing a rename that was discarded
-        everywhere else (the .tex buffer is restored from its session
-        backup, and the DB row was never touched).
-
-        Since a dirty-but-unflushed record is by definition never written
-        to the DB, the DB row is still exactly the pre-edit baseline —
-        no separate snapshot bookkeeping is needed, just read it back.
-
-        Returns the DB row dict (so the caller can refresh the tree/table
-        display), or None if there's no persistence layer or no matching
-        row (e.g. the entry was deleted through some other path).
-        """
-        self._journal.resolve([entry_id])
-
-        if self._persistence is None:
-            return None
-
-        db_row = self._persistence.fetch_reference_row(entry_id)
-        if db_row is None:
-            return None
-
-        if entry_id not in self._records:
-            return db_row
-
-        # Rebuilding from the row rather than copying a field list across is
-        # what removes the list: it used to name every mutable column, and a
-        # column added to the schema without being added there would revert
-        # on discard and nowhere else.
-        # Same in-place rule as the coordinate updates above: whoever is
-        # holding this record keeps holding it.
-        fresh = reference_from_row(db_row)
-        record = self._records[entry_id]
-        for field in ("heading_raw", "heading_id", "locator", "page_style",
-                      "range_role", "range_partner_id", "xref", "index_class",
-                      "user_edited", "raw", "extra"):
-            setattr(record, field, getattr(fresh, field))
-        return db_row
-
-    # ------------------------------------------------------------------
-    # Persistence stubs — delegate to FileTreePersistence via scope controller
-    # ------------------------------------------------------------------
-
-    def _persist_record(self, entry_id: int, record: dict) -> None:
-        if self._persistence is None:
-            print(f"[MODEL STUB] No persistence layer attached — skipping write for ID {entry_id}")
-            return
-        success = self._persistence.update_reference_field(entry_id, record)
-        if not success:
-            print(f"[MODEL WARNING] Persistence layer rejected write for ID {entry_id}")
-
     def get_location_metadata(self, entry_id: int) -> dict | None:
         """
         Returns coordinate and encap metadata for entry_id from the
@@ -527,71 +188,3 @@ class EntryModifierModel(QObject):
             "seealso_references": record.extra.get("seealso_references"),
             "macro_command":      command_of(record),
         }
-    
-    # ------------------------------------------------------------------
-    # Deletion
-    # ------------------------------------------------------------------
-
-    def delete_record(self, entry_id: int) -> None:
-        """
-        Removes entry_id from the in-memory cache and display set, and
-        drops any pending dirty-flag for it — an update to a row that's
-        about to be deleted is meaningless and would otherwise cause
-        flush_dirty_to_db to try writing a heading string for a row
-        that's already gone from the .tex source.
-
-        Unlike mark_dirty/flush_dirty_to_db (deferred to project save),
-        the delete is persisted immediately via delete_reference, mirroring
-        register_new_entry's immediate insert_reference call — the .tex
-        write this follows has already happened synchronously by the time
-        this is called (see IndexEditController.handle_entry_deletion), so
-        there's no reason to defer the corresponding DB row's removal.
-        """
-        record = self._records.pop(entry_id, None)
-        self._display_ids.discard(entry_id)
-
-        # The record is gone from the cache, so the drain can no longer ask
-        # it which file it belonged to. Keep just enough to answer that,
-        # for the per-file flush scoping.
-        if record is not None:
-            self._pending_delete_meta[entry_id] = {"file_path": record.container}
-
-        # mark_delete rather than deleting now. If this row was itself
-        # created since the last save the journal cancels the pair outright
-        # -- it never existed in the database, so neither an insert nor a
-        # delete should ever be written for it.
-        self._journal.mark_delete(entry_id)
-        if not self._journal.has(entry_id):
-            self._pending_delete_meta.pop(entry_id, None)
-
-        self.entry_modifier_updated.emit(entry_id, True)
-
-    def relink_range_partner(self, entry_id: int, new_partner_id: int | None) -> None:
-        """
-        Re-points entry_id's range_partner_id to new_partner_id, in the
-        cache and immediately in the DB -- used by the range-consistency
-        checker's "overlapping ranges" merge fix, where the old partner
-        (the interior opener/closer being deleted) is replaced by the
-        surviving entry at the other end of the newly merged range.
-
-        Journalled rather than written immediately, like every other index
-        edit. It stays consistent with the .tex deletions the caller makes
-        in the same operation because those are journalled too -- the whole
-        correction now lands together at save, instead of this half being
-        written ahead of the rest.
-        """
-        record = self._records.get(entry_id)
-        if record is None:
-            print(f"[MODEL WARNING] relink_range_partner: ID {entry_id} not in cache")
-            return
-
-        record.range_partner_id = new_partner_id
-        self._journal.mark_update(entry_id)
-
-    # Heading rows are no longer this model's concern: identity and
-    # pending state both live on IndexTreeModelEngine, which owns
-    # _active_headings. IndexEditController marks an orphaned heading
-    # there directly (engine.mark_heading_deleted) and the save drain
-    # writes it, after the references that pointed at it are gone.
-
-        

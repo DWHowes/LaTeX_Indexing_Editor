@@ -56,6 +56,11 @@ QT_FREE_MODULES = (
     # is where the tab and buffer knowledge stays. Shared code holds a
     # backend, and shared code has to run headless.
     "controllers/latex_text_backend.py",
+    # index_tree_model_engine and entry_modifier_model are NOT here: both are
+    # now thin application-bound subclasses of shared classes, and the shared
+    # halves are covered by bookindexcore's own test_no_third_party_in_core,
+    # which does it better -- it also imports each module with Qt blocked at
+    # the finder. A module that has actually moved leaves this list.
 )
 
 
