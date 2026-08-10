@@ -211,7 +211,11 @@ class TestHandleContextMenuDeleteRequest:
         content = open(file_path, encoding="utf-8").read()
         assert r"\index{Main}" not in content
         assert uid not in entry_model._records
-        assert view.get_location_metadata(uid) is None
+        # The row itself is gone from the table. This used to assert that the
+        # view's own copy of the entry's coordinates had been cleaned up --
+        # but that copy was a duplicate of the model's that nothing ever read,
+        # so what it really protected was the row's removal.
+        assert view.get_row_field_values(uid) is None
 
     def test_declined_delete_leaves_everything_unchanged(self, tmp_path, qtbot, monkeypatch):
         controller, view, _tree, entry_model, _staging, _idx, file_path, refs = _build_stack(

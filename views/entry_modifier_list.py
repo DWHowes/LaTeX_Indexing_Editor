@@ -10,10 +10,7 @@ from models import index_tag_grammar as grammar
 from bookindexcore.model.entry_table import layout_for, level_name
 from models.latex_dialect import LATEX_DIALECT
 from models.latex_dialect import LATEX_DIALECT as dialect
-from models.latex_record_mapping import (
-    column_of, command_of, end_of, line_of, position_of, reference_from_row,
-    row_from_reference,
-)
+from models.latex_record_mapping import reference_from_row, row_from_reference
 from bookindexcore.model.records import IndexReference
 from views import index_syntax_advice as advice
 from bookindexcore.ui.entry_table.table_view import EntryModifierTableView
@@ -591,8 +588,6 @@ class EntryModifierList(QWidget):
             self.base_model.dataChanged.connect(self._on_cell_data_changed)
 
         self._last_valid_row_state[unique_id] = new_fields
-        if unique_id in self._location_map:
-            self._location_map[unique_id]["encap"] = new_fields["encap"]
 
     def populate_entry_modifier_display(self, references: list) -> None:
         """
@@ -600,15 +595,13 @@ class EntryModifierList(QWidget):
 
         Each dict must supply at minimum ``unique_id_number`` and
         ``heading_raw_text``; coordinate/encap fields are stashed in
-        ``_location_map`` for controller lookup via
-        :meth:`get_location_metadata`.
+        the table's row model.
         """
         self.base_model.dataChanged.disconnect(self._on_cell_data_changed)
         self.proxy_model.setDynamicSortFilter(False)
 
         self.base_model.clear()
         self.base_model.setHorizontalHeaderLabels(_HEADERS)
-        self._location_map: dict[int, dict] = {}
         self._last_valid_row_state: dict[int, dict] = {}
 
         for ref in references:
@@ -647,18 +640,6 @@ class EntryModifierList(QWidget):
             _advise_row(row)
             self.base_model.appendRow(row)
 
-            self._location_map[unique_id] = {
-                "file_path":          ref.container,
-                "line_number":        line_of(ref),
-                "column_offset":      column_of(ref),
-                "absolute_position":  position_of(ref),
-                "absolute_end":       end_of(ref),
-                "encap":              stored_encap,
-                "heading_id":         ref.heading_id,
-                "see_references":     ref.extra.get("see_references"),
-                "seealso_references": ref.extra.get("seealso_references"),
-                "macro_command":      command_of(ref),
-            }
 
             # Data loaded from the .tex source is assumed hierarchy-valid
             # (it was already a well-formed \index macro) — seed the
@@ -701,10 +682,6 @@ class EntryModifierList(QWidget):
         for row in range(self.base_model.rowCount()):
             self._open_persistent_encap_editor(row)
 
-    def get_location_metadata(self, entry_id: int) -> dict | None:
-        """Return hidden coordinate and encap metadata for *entry_id*."""
-        return self._location_map.get(entry_id)
-
     def append_entry_row(self, ref) -> None:
         """
         Appends a single new entry row without clearing or reloading the table.
@@ -733,19 +710,6 @@ class EntryModifierList(QWidget):
         _advise_row(new_row_items)
         self.base_model.appendRow(new_row_items)
 
-        # Update the location map so get_location_metadata works immediately
-        self._location_map[unique_id] = {
-            "file_path":          ref.container,
-            "line_number":        line_of(ref),
-            "column_offset":      column_of(ref),
-            "absolute_position":  position_of(ref),
-            "absolute_end":       end_of(ref),
-            "encap":              stored_encap,
-            "heading_id":         ref.heading_id,
-            "see_references":     ref.extra.get("see_references"),
-            "seealso_references": ref.extra.get("seealso_references"),
-            "macro_command":      command_of(ref),
-        }
 
         self._last_valid_row_state[unique_id] = {
             "levels": list(parsed["levels"]),
@@ -771,7 +735,6 @@ class EntryModifierList(QWidget):
         if row is None:
             return
         self.base_model.removeRow(row)
-        self._location_map.pop(unique_id, None)
         self._last_valid_row_state.pop(unique_id, None)        
 
     def get_row_field_values(self, unique_id: int) -> dict | None:
