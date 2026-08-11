@@ -6,7 +6,9 @@ reset_to_default_state.
 """
 import sqlite3
 
-from models.file_tree_persistence import FileTreePersistence
+from bookindexcore.persistence import CORE_SCHEMA_VERSION, HOST_VERSION_KEY
+
+from models.file_tree_persistence import LATEX_MIGRATIONS, FileTreePersistence
 
 EXPECTED_TABLES = {
     "project_metadata",
@@ -51,9 +53,18 @@ def test_init_with_empty_db_path_creates_no_file(tmp_path):
 def test_default_metadata_seeded(fresh_persistence):
     row_keys = set(fresh_persistence.get_all_project_metadata().keys())
     assert DEFAULT_METADATA_KEYS <= row_keys
-    assert fresh_persistence.get_metadata_value("schema_version") == "1.0.0"
     assert fresh_persistence.get_metadata_value("root_tex_file") == ""
     assert fresh_persistence.get_metadata_value("output_directory") == "build"
+
+
+def test_a_new_project_is_stamped_at_the_current_schema_version(fresh_persistence):
+    """
+    schema_version used to be seeded once with INSERT OR IGNORE and read by
+    nothing, so it said "1.0.0" through five schema changes. It is now written
+    by the migration runner, and a brand-new database has run every migration.
+    """
+    assert fresh_persistence.get_metadata_value("schema_version") == CORE_SCHEMA_VERSION
+    assert fresh_persistence.get_metadata_value(HOST_VERSION_KEY) == LATEX_MIGRATIONS[-1].version
 
 
 def test_initialize_schema_is_idempotent_and_preserves_existing_metadata(fresh_persistence):

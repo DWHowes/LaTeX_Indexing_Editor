@@ -292,3 +292,121 @@ class TestProjectPersistence:
 
         assert model._data.fmt_page_delimiter == "; "
         assert "pref_ist_page_delimiter" not in fresh_persistence.get_all_project_metadata()
+
+
+class TestPerIndexSettings:
+    """
+    The three \\makeindex[...] keys belong to one index, not to the document,
+    so they live in the project's index-definitions list rather than in the
+    flat pref_ namespace (design §4.5, extraction phase 5).
+
+    The other two imakeidx fields -- noautomatic and nonewpage -- are
+    \\usepackage options and stay flat, because they apply once however many
+    indexes a project declares.
+    """
+
+    def test_per_index_fields_go_to_the_definition_not_the_pref_namespace(self, fresh_persistence):
+        model = IndexPrefsConfigModel()
+        model.update_data({"imakeidx_title": "Subject Index", "imakeidx_columns": 3,
+                           "imakeidx_intoc": True})
+
+        model.persist_to_project(fresh_persistence)
+
+        definition = fresh_persistence.get_index_definitions()[0]
+        assert definition.title == "Subject Index"
+        assert definition.options["columns"] == "3"
+        assert definition.options["intoc"] == "True"
+
+        meta = fresh_persistence.get_all_project_metadata()
+        assert "pref_imakeidx_title" not in meta
+        assert "pref_imakeidx_columns" not in meta
+
+    def test_the_document_level_imakeidx_options_stay_flat(self, fresh_persistence):
+        model = IndexPrefsConfigModel()
+        model.update_data({"imakeidx_noautomatic": False, "imakeidx_nonewpage": False})
+
+        model.persist_to_project(fresh_persistence)
+
+        meta = fresh_persistence.get_all_project_metadata()
+        assert meta["pref_imakeidx_noautomatic"] == "False"
+        assert meta["pref_imakeidx_nonewpage"] == "False"
+
+    def test_per_index_fields_round_trip(self, fresh_persistence):
+        original = IndexPrefsConfigModel()
+        original.update_data({"imakeidx_title": "Table of Authorities", "imakeidx_columns": 1})
+        original.persist_to_project(fresh_persistence)
+
+        loaded = IndexPrefsConfigModel()
+        loaded.load_from_project(fresh_persistence)
+
+        assert loaded._data.imakeidx_title == "Table of Authorities"
+        assert loaded._data.imakeidx_columns == 1
+
+    def test_saving_the_default_index_leaves_a_second_index_alone(self, fresh_persistence):
+        """
+        The dialog can only see one index today, so its save has to be a
+        read-modify-write. A wholesale replace would delete a Table of
+        Authorities the project had already declared.
+        """
+        from bookindexcore.persistence import IndexDefinition
+
+        fresh_persistence.set_index_definitions([
+            IndexDefinition(name="", title="Subject Index"),
+            IndexDefinition(name="authorities", title="Table of Authorities"),
+        ])
+
+        model = IndexPrefsConfigModel()
+        model.update_data({"imakeidx_title": "Renamed"})
+        model.persist_to_project(fresh_persistence)
+
+        definitions = fresh_persistence.get_index_definitions()
+        assert [d.name for d in definitions] == ["", "authorities"]
+        assert definitions[0].title == "Renamed"
+        assert definitions[1].title == "Table of Authorities"
+
+    def test_seeding_fills_a_blank_definition_from_the_globals(self, fresh_persistence):
+        model = IndexPrefsConfigModel()
+
+        model.seed_project_from_globals(
+            {"imakeidx_title": "Global Title", "imakeidx_columns": 2}, fresh_persistence
+        )
+
+        definition = fresh_persistence.get_index_definitions()[0]
+        assert definition.title == "Global Title"
+        assert definition.options["columns"] == "2"
+
+    def test_seeding_never_renames_an_index_the_project_already_named(self, fresh_persistence):
+        model = IndexPrefsConfigModel()
+        model.seed_project_from_globals({"imakeidx_title": "Global Title"}, fresh_persistence)
+
+        model.seed_project_from_globals({"imakeidx_title": "CHANGED"}, fresh_persistence)
+
+        assert fresh_persistence.get_index_definitions()[0].title == "Global Title"
+
+    def test_a_migrated_project_keeps_the_title_its_indexer_chose(self, tmp_path):
+        """
+        The end-to-end version of the schema migration: a project database
+        written before the definitions list existed opens with its old
+        per-index values in the new place, and the preferences model reads
+        them from there.
+        """
+        import sqlite3
+        from models.file_tree_persistence import FileTreePersistence
+
+        db_path = str(tmp_path / "legacy_prefs.db")
+        FileTreePersistence(db_path=db_path)
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("DELETE FROM project_metadata WHERE key = 'index_definitions'")
+            conn.execute("UPDATE project_metadata SET value = '1.0.0' WHERE key = 'schema_version'")
+            conn.executemany(
+                "INSERT OR REPLACE INTO project_metadata (key, value) VALUES (?, ?)",
+                [("pref_imakeidx_title", "Index of Cases"), ("pref_imakeidx_columns", "1")],
+            )
+            conn.commit()
+
+        reopened = FileTreePersistence(db_path=db_path)
+        model = IndexPrefsConfigModel()
+        model.load_from_project(reopened)
+
+        assert model._data.imakeidx_title == "Index of Cases"
+        assert model._data.imakeidx_columns == 1

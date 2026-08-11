@@ -1,60 +1,118 @@
+r"""
+This application's project database.
+
+The index half -- metadata, headings, references, cross-references, the save
+transaction and the schema migration runner -- moved to
+``bookindexcore.persistence.IndexRepository`` in extraction phase 5. What is
+left here is everything about **files**, and it is left here on purpose: a
+LaTeX project is a folder of ``.tex`` files that this application walks,
+prunes and checksums, while a Word project is one ``.docx`` and an InDesign
+book is a set of stories inside a document. "Which file is this entry in" is a
+question all three ask; "what is a file" is one they answer differently.
+
+So three tables stay:
+
+``project_files``
+    which ``.tex`` files the project tracks, and which are pruned.
+``project_file_sync_state``
+    per-file content checksums, for detecting edits made while the
+    application was not running.
+``project_custom_commands``
+    the project's own indexing commands, copied from the global registry.
+
+They migrate on their own ordered list under their own version key, so this
+application can add a table without touching the core's numbering.
+"""
+
 import os
 import sqlite3
-from contextlib import contextmanager
 
-from typing import List, Dict, Any
 from pathlib import Path
+from typing import List, Dict, Any
 
-from models import index_tag_grammar as grammar
-from models.latex_dialect import LATEX_DIALECT as dialect
+from bookindexcore.persistence import IndexRepository, Migration
 
-class _TransactionConnection:
-    """
-    Stands in for a sqlite3 connection while a transaction is open.
-
-    Forwards real work (execute, cursor, attribute reads and writes) to
-    the transaction's connection, but makes __enter__/__exit__, commit()
-    and close() no-ops so a `with self._get_connection() as conn:` block
-    inside the transaction cannot end it early. The transaction's own
-    context manager is what commits or rolls back.
-    """
-
-    def __init__(self, conn):
-        object.__setattr__(self, "_conn", conn)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc_info):
-        return False        # never suppress; never commit
-
-    def commit(self):
-        pass                # the enclosing transaction commits
-
-    def close(self):
-        pass                # ...and closes
-
-    def __getattr__(self, name):
-        return getattr(object.__getattribute__(self, "_conn"), name)
-
-    def __setattr__(self, name, value):
-        setattr(object.__getattribute__(self, "_conn"), name, value)
+from models.latex_dialect import LATEX_DIALECT
 
 
-class FileTreePersistence:
+def _host_baseline(conn: sqlite3.Connection) -> None:
+    """This application's own tables, at their current shape."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS project_files (
+            absolute_path TEXT PRIMARY KEY NOT NULL,
+            file_name TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            last_indexed TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+    # Recorded whenever project_headings/project_references are known to
+    # genuinely match a file's current content (fresh scan, manual resync, or
+    # auto-heal after an external edit). Compared against each file's live
+    # checksum on project load to detect drift accumulated while the app was
+    # not running -- see AppPipelineController._check_for_external_drift_and_prompt.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS project_file_sync_state (
+            file_path TEXT PRIMARY KEY NOT NULL,
+            checksum TEXT NOT NULL,
+            synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+    # Custom LaTeX commands added to this project from the global command
+    # registry (see LatexCommandRegistryModel / QSettings). Stores an
+    # independent name+body snapshot at add-time, decoupled from the global
+    # registry entry it was copied from.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS project_custom_commands (
+            name TEXT PRIMARY KEY NOT NULL,
+            body TEXT NOT NULL,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+
+#: This application's schema history. Numbered independently of the core's --
+#: see bookindexcore.persistence.migrations for why the core starts at 2.0.0
+#: and why a host list needs its own key rather than sharing that one.
+LATEX_MIGRATIONS: tuple[Migration, ...] = (
+    Migration("1.0.0", "project file, sync-state and custom-command tables", _host_baseline),
+)
+
+
+class FileTreePersistence(IndexRepository):
     # This repository deals in paths, never in view indices. The item-data
     # roles the workspace tree stores its nodes under, and the two accessors
     # that read them, live on FileTreeView -- they were here, which meant a
     # database module imported QModelIndex.
 
+    default_project_name = "Untitled LaTeX Project"
+
     def __init__(self, db_path: str):
-        self.db_path = db_path
         # The base default naming format extension if none is assigned
         self.default_db_suffix = "index_manifest.db"
-        # Temporary internal variable to track the project name during creation
-        self._pending_project_name: str = "Untitled LaTeX Project"
+        super().__init__(db_path, dialect=LATEX_DIALECT)
 
-        self.initialize_database_schema()
+    def host_migrations(self):
+        return LATEX_MIGRATIONS
+
+    def host_metadata_defaults(self) -> list[tuple[str, str]]:
+        """
+        The structural metadata rows a LaTeX project needs from creation.
+
+        ``compiler_executable`` and ``index_maker_executable`` are here rather
+        than in the generic ``pref_`` namespace because they are absolute,
+        machine-specific tool locations rather than stylistic preferences --
+        see models/index_prefs_config_model.PROJECT_STRUCTURAL_KEY_MAP.
+        """
+        return [
+            ("root_tex_file", ""),
+            ("compiler_executable", ""),
+            ("index_maker_executable", ""),
+            ("output_directory", "build"),
+        ]
+
+    # -- database path resolution -------------------------------------------
 
     @staticmethod
     def get_system_home_directory() -> str:
@@ -68,279 +126,60 @@ class FileTreePersistence:
 
     def configure_project_database_path(self, target_directory: str, validated_project_name: str) -> str:
         """
-        Binds the absolute targeting path context exactly once at the model level 
+        Binds the absolute targeting path context exactly once at the model level
         and bubbles the finalized, correct path string back up the stack.
         """
         self._pending_project_name: str = validated_project_name
-        
+
         # Strip any accidental trailing .db from the suffix property if present
         suffix_clean: str = str(self.default_db_suffix).replace(".db", "").strip()
-        
+
         # Build the filename structure precisely once
         composed_filename: str = f"{validated_project_name}_{suffix_clean}.db"
         self.db_path: str = os.path.normpath(os.path.join(target_directory, composed_filename))
 
-        return self.db_path    
-    
-    def get_active_database_path(self) -> str:
-        """Public Model Contract. Returns the valid pre-calculated database path."""
         return self.db_path
-    
+
     def get_active_model(self):
         """Public contract for the model engine. FileTreePersistence is its own model."""
-        return self        
-    
-    #: The open transaction's connection, or None. Declared on the class
-    #: so it exists before __init__'s own schema work calls
-    #: _get_connection.
-    _tx_conn: "sqlite3.Connection | None" = None
+        return self
 
-    @contextmanager
-    def transaction(self):
+    def discover_existing_project_name(self, target_directory: str) -> str | None:
         """
-        Runs everything inside the block against one connection, committed
-        once at the end and rolled back whole if anything raises.
-
-        Used by the save drain so a save is all-or-nothing: heading
-        inserts, reference inserts/updates/deletes and heading deletes
-        either all land or none do. Without it each write committed on its
-        own connection, so an interrupted save could leave references
-        pointing at headings that were never written.
-
-        Re-entrant: a nested call joins the transaction already open
-        rather than starting a second one.
+        Scans the target directory for an existing database matching the naming schema.
+        Returns the saved project name from metadata if found, otherwise returns None.
         """
-        if self._tx_conn is not None:
-            yield self._tx_conn
-            return
+        if not os.path.exists(target_directory):
+            return None
 
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        # Instance attribute only -- assigning on the class would make two
-        # FileTreePersistence instances share transaction state.
-        self._tx_conn = conn
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._tx_conn = None
-            conn.close()
+        # Look for any files ending with your default database suffix configuration
+        for file_name in os.listdir(target_directory):
+            # Match the suffix variable directly without adding a duplicate .db
+            # extension or an underscore
+            if file_name.endswith(self.default_db_suffix):
+                possible_db_path = os.path.join(target_directory, file_name)
 
-    def _get_connection(self):
-        """
-        A connection for one operation, or a proxy joining the open
-        transaction.
+                # Connect to the discovered file out-of-band to inspect its metadata table
+                try:
+                    conn = sqlite3.connect(possible_db_path)
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT value FROM project_metadata WHERE key = 'project_name';"
+                    )
+                    row = cursor.fetchone()
+                    cursor.close()
+                    conn.close()
 
-        Every method here uses `with self._get_connection() as conn:` and
-        most then call conn.commit() -- both of which would end a shared
-        transaction early. Inside one, this hands back a proxy that
-        forwards real work but makes enter/exit/commit/close no-ops, so
-        all of those methods join the transaction unchanged instead of
-        needing 23 call sites rewritten.
-        """
-        if self._tx_conn is not None:
-            return _TransactionConnection(self._tx_conn)
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+                    if row:
+                        # Success: Return the exact custom name stored in the database payload
+                        print(f"[MODEL PERSISTENCE] Validated existing project metadata: {row[0]}")
+                        return row[0]
+                except sqlite3.Error:
+                    continue  # Bypass corrupted or locked databases safely
 
-    @staticmethod
-    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl_type: str) -> bool:
-        """
-        Additive schema migration: adds `column` to `table` if it isn't
-        already there. Existing rows backfill via ddl_type's DEFAULT.
-        Table/column names are only ever passed as string literals from
-        this file, never user input, so f-string interpolation here is safe.
+        return None
 
-        Returns True if the column was just added, so a caller needing a
-        computed backfill (rather than a constant DEFAULT) can run it once.
-        """
-        existing_columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-        if column in existing_columns:
-            return False
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
-        return True
-
-    @staticmethod
-    def _cross_reference_flag(encap) -> int:
-        """
-        The stored form of "this reference is a cross-reference", derived
-        from its encap by the grammar -- the only thing in the application
-        entitled to an opinion on what a cross-reference looks like.
-        """
-        return 1 if grammar.is_xref_encap(encap) else 0
-
-    @classmethod
-    def _backfill_cross_reference_flags(cls, conn: sqlite3.Connection) -> int:
-        """
-        Sets is_cross_reference on every existing row from its encap. Run
-        once, when the column is first added to an older project database.
-        Returns the number of rows flagged, for the trace log.
-        """
-        rows = conn.execute(
-            "SELECT unique_id_number, encap FROM project_references"
-        ).fetchall()
-
-        flagged = [
-            (row[0],) for row in rows if cls._cross_reference_flag(row[1])
-        ]
-        if flagged:
-            conn.executemany(
-                "UPDATE project_references SET is_cross_reference = 1 "
-                "WHERE unique_id_number = ?",
-                flagged,
-            )
-        print(f"[DB TRACE] is_cross_reference backfilled: {len(flagged)} of {len(rows)} row(s).")
-        return len(flagged)
-
-    def initialize_database_schema(self) -> None:
-        """Enforces relational integrity constraints matching the worker keys at cold boot."""
-        if not self.db_path:
-            return
-
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            # Partition 1: Project Metadata configuration
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS project_metadata (
-                    key TEXT PRIMARY KEY NOT NULL,
-                    value TEXT NOT NULL,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-
-            # Partition 2: Project Files Index
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS project_files (
-                    absolute_path TEXT PRIMARY KEY NOT NULL,
-                    file_name TEXT NOT NULL,
-                    is_active INTEGER DEFAULT 1,
-                    last_indexed TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-
-            # Partition 3: Structural Headings (Updated to store hierarchy meta)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS project_headings (
-                    id INTEGER PRIMARY KEY NOT NULL,
-                    parent_id INTEGER,
-                    heading_text TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    depth INTEGER NOT NULL
-                );
-            """)
-
-            # Partition 4: Relational Multi-References (Completely normalized to worker keys)
-            # Removed AUTOINCREMENT from id
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS project_references (
-                    id INTEGER PRIMARY KEY,
-                    heading_id INTEGER,
-                    heading_raw_text TEXT NOT NULL,
-                    uid TEXT UNIQUE NOT NULL,
-                    unique_id_number INTEGER NOT NULL,
-                    file_path TEXT NOT NULL,
-                    line_number INTEGER NOT NULL,
-                    column_offset INTEGER NOT NULL,
-                    absolute_position INTEGER,
-                    absolute_end INTEGER,
-                    encap TEXT DEFAULT 'standard',
-                    see_references TEXT,
-                    seealso_references TEXT,
-                    has_references INTEGER DEFAULT 0,
-                    range_partner_id INTEGER DEFAULT NULL,
-                    is_range_closer INTEGER DEFAULT 0,
-                    is_cross_reference INTEGER NOT NULL DEFAULT 0,
-                    macro_command TEXT NOT NULL DEFAULT 'index',
-                    FOREIGN KEY(heading_id) REFERENCES project_headings(id) ON DELETE SET NULL
-                );
-            """)
-
-            # Self-heals project DB files created before macro_command existed --
-            # CREATE TABLE IF NOT EXISTS above only affects brand-new tables, so
-            # any pre-existing project_references table needs the column added
-            # explicitly. Runs every time this method does (project open/switch),
-            # so it's a one-time no-op after the first open post-upgrade.
-            self._ensure_column(conn, "project_references", "macro_command", "TEXT NOT NULL DEFAULT 'index'")
-
-            # Same self-heal for is_cross_reference, but the backfill is a
-            # computed one rather than a constant DEFAULT: whether a row is a
-            # cross-reference is a fact about its encap, and every existing
-            # row already has one.
-            #
-            # This column exists so the queries below can ask "is this a
-            # cross-reference?" without SQL having to know what a
-            # cross-reference looks like in LaTeX. Three of them used to
-            # interpolate a `(encap LIKE 'see{%' OR encap LIKE 'seealso{%')`
-            # fragment, which put markup inside the database layer and gave
-            # the schema a second, looser opinion on xref-ness than
-            # index_tag_grammar's -- looser because a LIKE prefix accepts an
-            # unterminated `see{Target` that the grammar rejects. The stored
-            # flag is written from the grammar, so there is now one answer.
-            if self._ensure_column(conn, "project_references", "is_cross_reference",
-                                   "INTEGER NOT NULL DEFAULT 0"):
-                self._backfill_cross_reference_flags(conn)
-
-            # Partition 5: Per-file content checksums, recorded whenever
-            # project_headings/project_references are known to genuinely
-            # match a file's current content (fresh scan, manual resync, or
-            # auto-heal after an external edit). Compared against each
-            # file's live checksum on project load to detect drift
-            # accumulated while the app wasn't running -- see
-            # AppPipelineController._check_for_external_drift_and_prompt.
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS project_file_sync_state (
-                    file_path TEXT PRIMARY KEY NOT NULL,
-                    checksum TEXT NOT NULL,
-                    synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-
-            # Partition 6: Custom LaTeX commands added to this project from the
-            # global command registry (see LatexCommandRegistryModel / QSettings).
-            # Stores an independent name+body snapshot at add-time, decoupled
-            # from the global registry entry it was copied from.
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS project_custom_commands (
-                    name TEXT PRIMARY KEY NOT NULL,
-                    body TEXT NOT NULL,
-                    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-
-            # Partition 7: Cross-references managed by the "Cross-References"
-            # Edit Entries sub-tab. This table is the authoritative source
-            # for cross_refs.tex -- that file is fully regenerated from these
-            # rows on every add/edit/remove, never hand-parsed back in. See
-            # CrossReferenceController.
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS project_cross_references (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    source_heading TEXT NOT NULL,
-                    xref_type TEXT NOT NULL DEFAULT 'see',
-                    target_heading TEXT NOT NULL,
-                    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-
-            default_metadata = [
-                ("schema_version", "1.0.0"),
-                ("project_name", self._pending_project_name),
-                ("root_tex_file", ""),
-                ("compiler_executable", ""),
-                ("index_maker_executable", ""),
-                ("output_directory", "build"),
-            ]
-            
-            cursor.executemany(
-                "INSERT OR IGNORE INTO project_metadata (key, value) VALUES (?, ?)", 
-                default_metadata
-            )
-            conn.commit()
+    # -- tracked project files ----------------------------------------------
 
     def fetch_all_project_files(self) -> List[Dict[str, Any]]:
         """
@@ -445,7 +284,173 @@ class FileTreePersistence:
         except Exception as db_err:
             print(f"[DB CRITICAL FAILURE] Failed to execute un-prune update statement: {db_err}")
             return False
-    
+
+    def upsert_project_files(self, initial_records: list[dict]) -> None:
+        """
+        Executes high-performance atomic database staging writes for discovered file systems.
+        Streamlined: Focuses exclusively on high-speed row inserts.
+        """
+        if not self.db_path:
+            return
+
+        sanitized_batch = self._sanitize_file_records(initial_records)
+        if not sanitized_batch:
+            print("[DB TRACE] upsert_project_files: no valid records to insert")
+            return
+
+        try:
+            with self._get_connection() as conn:
+                conn.executemany(
+                    """
+                    INSERT INTO project_files (absolute_path, file_name, is_active)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(absolute_path) DO UPDATE SET
+                        file_name = excluded.file_name,
+                        last_indexed = CURRENT_TIMESTAMP
+                    """,
+                    sanitized_batch
+                )
+                conn.commit()
+        except sqlite3.Error as err:
+            print(f"[DATABASE ERROR] Upsert batch processing execution failed: {err}")
+
+    def resync_project_files(self, scanned_records: list[dict]) -> None:
+        """
+        Explicit, user-triggered rebuild of project_files to match a fresh
+        directory scan exactly: every scanned .tex file is upserted with
+        is_active reset to 1 (undoing any prior prune), and any existing row
+        whose path is absent from this scan (deleted/moved since last
+        tracked) is removed outright. This is the deliberate escape hatch
+        back to "everything on disk is included" -- unlike upsert_project_files,
+        which preserves is_active on conflict so a normal project (re)open
+        can never silently resurrect a pruned file.
+        """
+        if not self.db_path:
+            return
+
+        sanitized_batch = self._sanitize_file_records(scanned_records)
+        scanned_paths = {row[0] for row in sanitized_batch}
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                if sanitized_batch:
+                    cursor.executemany(
+                        """
+                        INSERT INTO project_files (absolute_path, file_name, is_active)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(absolute_path) DO UPDATE SET
+                            file_name = excluded.file_name,
+                            is_active = 1,
+                            last_indexed = CURRENT_TIMESTAMP
+                        """,
+                        sanitized_batch
+                    )
+
+                existing_paths = [
+                    row["absolute_path"]
+                    for row in cursor.execute("SELECT absolute_path FROM project_files").fetchall()
+                ]
+                stale_paths = [p for p in existing_paths if p not in scanned_paths]
+                if stale_paths:
+                    cursor.executemany(
+                        "DELETE FROM project_files WHERE absolute_path = ?",
+                        [(p,) for p in stale_paths]
+                    )
+
+                print(f"[DB TRACE] resync_project_files: {len(sanitized_batch)} file(s) tracked, "
+                      f"{len(stale_paths)} stale row(s) removed.")
+        except sqlite3.Error as err:
+            print(f"[DATABASE ERROR] resync_project_files failed: {err}")
+
+    @staticmethod
+    def _sanitize_file_records(records: list[dict]) -> list[tuple]:
+        """
+        Turns scanner payloads into ``(absolute_path, file_name, is_active)``
+        rows, dropping anything that is not a ``.tex`` file.
+
+        The suffix check is a safety net rather than the real filter --
+        ProjectScopeController has already decided what belongs in the project
+        -- but both write paths need it, and having one copy is what keeps
+        upsert and resync from drifting apart on what counts as a file.
+        """
+        rows: list[tuple] = []
+        for record in records:
+            # Accept common path keys: 'absolute_path', 'file_path', or 'path'
+            abs_path = record.get("absolute_path") or record.get("file_path") or record.get("path")
+            if not abs_path:
+                continue
+            if Path(str(abs_path)).suffix.lower() != ".tex":
+                continue
+
+            abs_path = os.path.normpath(str(abs_path))
+            file_name = record.get("file_name") or os.path.basename(abs_path)
+            rows.append((abs_path, str(file_name), 1))
+        return rows
+
+    # -- per-file content checksums -----------------------------------------
+
+    def get_file_sync_checksums(self) -> dict[str, str]:
+        """Returns {file_path: checksum} for every row in project_file_sync_state."""
+        if not self.db_path:
+            return {}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute("SELECT file_path, checksum FROM project_file_sync_state")
+                return {row["file_path"]: row["checksum"] for row in cursor.fetchall()}
+        except sqlite3.Error as err:
+            print(f"[DB ERROR] Failed to read project_file_sync_state: {err}")
+            return {}
+
+    def replace_file_sync_checksums(self, checksums: dict[str, str]) -> None:
+        """
+        Full wipe-and-rebuild of project_file_sync_state, mirroring
+        serialize_scraped_index_manifest's pattern -- called whenever a
+        fresh scan/resync means the DB is now known to match every
+        currently-tracked file's actual content.
+        """
+        if not self.db_path:
+            return
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM project_file_sync_state;")
+                if checksums:
+                    cursor.executemany(
+                        "INSERT INTO project_file_sync_state (file_path, checksum) VALUES (?, ?);",
+                        list(checksums.items())
+                    )
+                conn.commit()
+        except sqlite3.Error as err:
+            print(f"[DB ERROR] Failed to write project_file_sync_state: {err}")
+
+    def upsert_file_sync_checksums(self, checksums: dict[str, str]) -> None:
+        """
+        Partial counterpart to replace_file_sync_checksums: updates only the
+        named files' rows and leaves every other row untouched. Used on save,
+        where only the files this app actually wrote -- and whose DB records
+        are still known to match them -- may be re-stamped; any other file's
+        stored checksum has to survive so a genuine external edit is still
+        detected on the next project load.
+        """
+        if not self.db_path or not checksums:
+            return
+        try:
+            with self._get_connection() as conn:
+                conn.executemany(
+                    "INSERT INTO project_file_sync_state (file_path, checksum, synced_at) "
+                    "VALUES (?, ?, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT(file_path) DO UPDATE SET "
+                    "checksum = excluded.checksum, synced_at = CURRENT_TIMESTAMP;",
+                    list(checksums.items())
+                )
+                conn.commit()
+        except sqlite3.Error as err:
+            print(f"[DB ERROR] Failed to update project_file_sync_state: {err}")
+
+    # -- project custom commands --------------------------------------------
+
     def fetch_project_custom_commands(self) -> List[Dict[str, str]]:
         """Returns every custom LaTeX command added to this project, name-sorted."""
         if not self.db_path:
@@ -467,9 +472,8 @@ class FileTreePersistence:
             return
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
+            with self._get_connection() as conn:
+                conn.execute(
                     """
                     INSERT INTO project_custom_commands (name, body)
                     VALUES (?, ?)
@@ -503,1081 +507,3 @@ class FileTreePersistence:
         except Exception as db_err:
             print(f"[DB CRITICAL FAILURE] Failed to execute deletion statement: {db_err}")
             return False
-
-    def fetch_project_cross_references(self) -> List[Dict[str, Any]]:
-        """Returns every cross-reference in this project, source-then-target sorted."""
-        if not self.db_path:
-            return []
-
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.execute(
-                    "SELECT id, source_heading, xref_type, target_heading "
-                    "FROM project_cross_references "
-                    "ORDER BY source_heading COLLATE NOCASE, target_heading COLLATE NOCASE"
-                )
-                return [dict(row) for row in cursor.fetchall()]
-        except sqlite3.Error as e:
-            print(f"[DB ERROR] Failed to read project cross-references: {e}")
-            return []
-
-    def add_project_cross_reference(self, source_heading: str, xref_type: str, target_heading: str) -> int | None:
-        """Inserts a new cross-reference row and returns its assigned id, or None on failure."""
-        if not self.db_path:
-            return None
-
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT INTO project_cross_references (source_heading, xref_type, target_heading) "
-                    "VALUES (?, ?, ?)",
-                    (source_heading, xref_type, target_heading)
-                )
-                conn.commit()
-                return cursor.lastrowid
-        except sqlite3.Error as e:
-            print(f"[DB ERROR] Failed to add cross-reference '{source_heading}': {e}")
-            return None
-
-    def update_project_cross_reference(self, entry_id: int, source_heading: str, xref_type: str, target_heading: str) -> bool:
-        """Overwrites an existing cross-reference row's fields. Returns True if a row was updated."""
-        if not self.db_path:
-            return False
-
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "UPDATE project_cross_references "
-                    "SET source_heading = ?, xref_type = ?, target_heading = ? "
-                    "WHERE id = ?",
-                    (source_heading, xref_type, target_heading, entry_id)
-                )
-                conn.commit()
-                return cursor.rowcount > 0
-        except sqlite3.Error as e:
-            print(f"[DB ERROR] Failed to update cross-reference id {entry_id}: {e}")
-            return False
-
-    def remove_project_cross_reference(self, entry_id: int) -> bool:
-        """Deletes a cross-reference row by id. Returns True if a row was removed."""
-        if not self.db_path:
-            return False
-
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM project_cross_references WHERE id = ?", (entry_id,))
-                conn.commit()
-                return cursor.rowcount > 0
-        except sqlite3.Error as e:
-            print(f"[DB ERROR] Failed to remove cross-reference id {entry_id}: {e}")
-            return False
-
-    def fetch_legacy_cross_reference_candidates(self) -> List[Dict[str, Any]]:
-        """
-        Raw rows for the "Migrate Legacy Cross-References..." tool
-        (CrossReferenceController.run_migration_scan): every
-        project_references row whose encap is a see/seealso pipe-modifier
-        (the term written directly on an ordinary \\index macro somewhere in
-        the project, from before the Cross-References tab existed), rather
-        than a row already managed via project_cross_references. Same
-        is_cross_reference flag that fetch_index_statistics
-        and fetch_range_consistency_candidates already use to recognize a
-        cross-reference row.
-        """
-        if not self.db_path:
-            return []
-
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.execute(
-                    "SELECT unique_id_number, heading_raw_text, file_path, line_number, encap "
-                    "FROM project_references "
-                    "WHERE is_cross_reference = 1 "
-                    "ORDER BY heading_raw_text COLLATE NOCASE"
-                )
-                return [dict(row) for row in cursor.fetchall()]
-        except sqlite3.Error as e:
-            print(f"[DB ERROR] Failed to read legacy cross-reference candidates: {e}")
-            return []
-
-    def update_active_database_connection(self, new_db_path: str) -> None:
-        """
-        Updates the system state pointing to the underlying SQLite database partition.
-        Strict MVC: Re-binds configuration variables cleanly without mutating UI layers.
-        """
-        import os
-        self.db_path = str(new_db_path)
-        
-        # Auto-initialize schemas immediately on structural target mutation
-        self.initialize_database_schema()
-
-    def get_metadata_value(self, key: str) -> str | None:
-        if not self.db_path:
-            return None
-
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.execute(
-                    "SELECT value FROM project_metadata WHERE key = ?",
-                    (key,)
-                )
-                row = cursor.fetchone()
-                return row["value"] if row else None
-        except sqlite3.Error as e:
-            print(f"[DB ERROR] Failed to read metadata for key '{key}': {e}")
-            return None
-
-    def get_all_project_metadata(self) -> dict:
-        """Return all project metadata as a dict[key -> value]."""
-        if not self.db_path:
-            return {}
-
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.execute("SELECT key, value FROM project_metadata")
-                return {row["key"]: row["value"] for row in cursor.fetchall()}
-        except sqlite3.Error as e:
-            print(f"[DB ERROR] Failed to read project metadata: {e}")
-            return {}
-
-    def set_metadata_value(self, key: str, value: str) -> None:
-        """Atomic upsert transaction to modify project state flags."""
-        if not self.db_path:
-            return
-
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO project_metadata (key, value, updated_at)
-                    VALUES (?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(key) DO UPDATE SET
-                        value = excluded.value,
-                        updated_at = CURRENT_TIMESTAMP
-                    """,
-                    (key, value)
-                )
-                conn.commit()
-        except sqlite3.Error as e:
-            print(f"[DB ERROR] Failed to set metadata value for key '%s': %s" % (key, e))
-            
-    def discover_existing_project_name(self, target_directory: str) -> str | None:
-        """
-        Scans the target directory for an existing database matching the naming schema.
-        Returns the saved project name from metadata if found, otherwise returns None.
-        """
-        if not os.path.exists(target_directory):
-            return None
-
-        # Look for any files ending with your default database suffix configuration
-        for file_name in os.listdir(target_directory):
-            # FIX: Match the suffix variable directly without adding a duplicate .db extension or an underscore
-            if file_name.endswith(self.default_db_suffix):
-                possible_db_path = os.path.join(target_directory, file_name)
-                
-                # Connect to the discovered file out-of-band to inspect its metadata table
-                try:
-                    conn = sqlite3.connect(possible_db_path)
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT value FROM project_metadata WHERE key = 'project_name';"
-                    )
-                    row = cursor.fetchone()
-                    cursor.close()
-                    conn.close()
-                    
-                    if row:
-                        # Success: Return the exact custom name stored in the database payload
-                        print(f"[MODEL PERSISTENCE] Validated existing project metadata: {row[0]}")
-                        return row[0]
-                except sqlite3.Error:
-                    continue # Bypass corrupted or locked databases safely
-                    
-        return None
-
-    def upsert_project_metadata(self, payload: dict) -> None:
-        """Upsert multiple metadata key/value pairs into project_metadata."""
-        if not self.db_path or not payload:
-            return
-
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            items = [(str(k), str(v)) for k, v in payload.items()]
-            cursor.executemany(
-                """
-                INSERT INTO project_metadata (key, value)
-                VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                items
-            )
-            conn.commit()
-        except sqlite3.Error as err:
-            print(f"[MODEL PERSISTENCE] upsert_project_metadata failed: {err}")
-
-    def rename_metadata_keys(self, key_pairs: dict) -> None:
-        """
-        One-time-migration helper: for each old_key -> new_key pair, if
-        old_key exists in project_metadata, copies its value across to
-        new_key (without clobbering new_key if it's already present) and
-        removes the old_key row. Used when a preference field is renamed
-        (e.g. pref_ist_* -> pref_fmt_* once the Index Formatting Rules
-        fields became engine-neutral for makeindex/xindy) so a project's
-        saved value doesn't end up duplicated under both names.
-        """
-        if not self.db_path or not key_pairs:
-            return
-
-        try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            renamed = 0
-            for old_key, new_key in key_pairs.items():
-                row = cursor.execute(
-                    "SELECT value FROM project_metadata WHERE key = ?", (old_key,)
-                ).fetchone()
-                if row is None:
-                    continue
-
-                exists_new = cursor.execute(
-                    "SELECT 1 FROM project_metadata WHERE key = ?", (new_key,)
-                ).fetchone()
-                if not exists_new:
-                    cursor.execute(
-                        """
-                        INSERT INTO project_metadata (key, value)
-                        VALUES (?, ?)
-                        ON CONFLICT(key) DO UPDATE SET
-                            value = excluded.value,
-                            updated_at = CURRENT_TIMESTAMP
-                        """,
-                        (new_key, row["value"])
-                    )
-                    renamed += 1
-
-                cursor.execute("DELETE FROM project_metadata WHERE key = ?", (old_key,))
-
-            conn.commit()
-            if renamed:
-                print(f"[MODEL PERSISTENCE] Renamed {renamed} legacy project_metadata key(s).")
-        except sqlite3.Error as err:
-            print(f"[MODEL PERSISTENCE] rename_metadata_keys failed: {err}")
-        finally:
-            try:
-                cursor.close()
-            except Exception:
-                pass
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-    def upsert_project_files(self, initial_records: list[dict]) -> None:
-        """
-        Executes high-performance atomic database staging writes for discovered file systems.
-        Streamlined: Focuses exclusively on high-speed row inserts.
-        """
-        if not self.db_path:
-            return
-
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        try:
-            sanitized_batch = []
-            for record in initial_records:
-                # Accept common path keys: 'absolute_path', 'file_path', or 'path'
-                abs_path = record.get("absolute_path") or record.get("file_path") or record.get("path")
-                if not abs_path:
-                    continue
-                # Safety check so only .tex files are added to the db table
-                # This is checked in the project scope controller so the input should
-                # be clean, but being safe.
-                path_obj = Path(str(abs_path))
-                if path_obj.suffix.lower() != ".tex":
-                    continue
-
-                abs_path = os.path.normpath(str(abs_path))
-                file_name = record.get("file_name") or os.path.basename(abs_path)
-                sanitized_batch.append((abs_path, str(file_name), 1))
-
-            if not sanitized_batch:
-                print("[DB TRACE] upsert_project_files: no valid records to insert")
-                return
-
-            cursor.executemany(
-                """
-                INSERT INTO project_files (absolute_path, file_name, is_active)
-                VALUES (?, ?, ?)
-                ON CONFLICT(absolute_path) DO UPDATE SET
-                    file_name = excluded.file_name,
-                    last_indexed = CURRENT_TIMESTAMP
-                """,
-                sanitized_batch
-            )
-            conn.commit()
-        except sqlite3.Error as err:
-            print(f"[DATABASE ERROR] Upsert batch processing execution failed: {err}")
-        finally:
-            cursor.close()
-            conn.close()
-
-    def resync_project_files(self, scanned_records: list[dict]) -> None:
-        """
-        Explicit, user-triggered rebuild of project_files to match a fresh
-        directory scan exactly: every scanned .tex file is upserted with
-        is_active reset to 1 (undoing any prior prune), and any existing row
-        whose path is absent from this scan (deleted/moved since last
-        tracked) is removed outright. This is the deliberate escape hatch
-        back to "everything on disk is included" -- unlike upsert_project_files,
-        which preserves is_active on conflict so a normal project (re)open
-        can never silently resurrect a pruned file.
-        """
-        if not self.db_path:
-            return
-
-        sanitized_batch = []
-        scanned_paths: set[str] = set()
-        for record in scanned_records:
-            abs_path = record.get("absolute_path") or record.get("file_path") or record.get("path")
-            if not abs_path:
-                continue
-            path_obj = Path(str(abs_path))
-            if path_obj.suffix.lower() != ".tex":
-                continue
-
-            abs_path = os.path.normpath(str(abs_path))
-            file_name = record.get("file_name") or os.path.basename(abs_path)
-            sanitized_batch.append((abs_path, str(file_name), 1))
-            scanned_paths.add(abs_path)
-
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-
-                if sanitized_batch:
-                    cursor.executemany(
-                        """
-                        INSERT INTO project_files (absolute_path, file_name, is_active)
-                        VALUES (?, ?, ?)
-                        ON CONFLICT(absolute_path) DO UPDATE SET
-                            file_name = excluded.file_name,
-                            is_active = 1,
-                            last_indexed = CURRENT_TIMESTAMP
-                        """,
-                        sanitized_batch
-                    )
-
-                existing_paths = [
-                    row["absolute_path"] for row in cursor.execute("SELECT absolute_path FROM project_files").fetchall()
-                ]
-                stale_paths = [p for p in existing_paths if p not in scanned_paths]
-                if stale_paths:
-                    cursor.executemany(
-                        "DELETE FROM project_files WHERE absolute_path = ?",
-                        [(p,) for p in stale_paths]
-                    )
-
-                print(f"[DB TRACE] resync_project_files: {len(sanitized_batch)} file(s) tracked, {len(stale_paths)} stale row(s) removed.")
-        except sqlite3.Error as err:
-            print(f"[DATABASE ERROR] resync_project_files failed: {err}")
-
-    def serialize_scraped_index_manifest(self, headings: list[dict], references: list[dict]) -> None:
-        """
-        Public Model Endpoint.
-        Serializes multi-reference scraped index topologies with perfect key alignment.
-        """
-        if not self.db_path:
-            return
-
-        import json
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                # Wipe old records to enable a clean transaction write phase
-                cursor.execute("DELETE FROM project_headings;")
-                cursor.execute("DELETE FROM project_references;")
-                
-                # 1. Bulk commit the structural Headings payload
-                if headings:
-                    headings_batch = [
-                        (
-                            int(h.get("id")),
-                            h.get("parent_id"), # None or int
-                            str(h.get("heading_text", "")),
-                            str(h.get("name", "")),
-                            int(h.get("depth", 0))
-                        )
-                        for h in headings
-                    ]
-                    cursor.executemany("""
-                        INSERT INTO project_headings (id, parent_id, heading_text, name, depth)
-                        VALUES (?, ?, ?, ?, ?);
-                    """, headings_batch)
-
-                # 2. Bulk commit the un-stripped multi-reference records payload
-                if references:
-                    references_batch = [
-                        (
-                            r.get("heading_id"),
-                            str(r.get("heading_raw_text", "")),
-                            str(r.get("uid", "")),
-                            int(r.get("unique_id_number", 0)),
-                            str(r.get("file_path", "")),
-                            int(r.get("line_number", 1)),
-                            int(r.get("column_offset", 0)),
-                            r.get("absolute_position"), # Int or None
-                            r.get("absolute_end"),
-                            str(r.get("encap", "standard")),
-                            json.dumps(r.get("see_references")) if isinstance(r.get("see_references"), list) else None,
-                            json.dumps(r.get("seealso_references")) if isinstance(r.get("seealso_references"), list) else None,
-                            1 if r.get("has_references") else 0,
-                            r.get("range_partner_id"), # Int or None
-                            1 if r.get("is_range_closer") else 0,
-                            # Derived here, never taken from the caller's dict:
-                            # xref-ness is a function of the encap, and a
-                            # second copy of it in the payload could disagree.
-                            self._cross_reference_flag(r.get("encap")),
-                            str(r.get("macro_command") or "index")
-                        )
-                        for r in references
-                    ]
-
-                    cursor.executemany("""
-                        INSERT INTO project_references (
-                            heading_id, heading_raw_text, uid, unique_id_number,
-                            file_path, line_number, column_offset, absolute_position, absolute_end,
-                            encap, see_references, seealso_references, has_references,
-                            range_partner_id, is_range_closer, is_cross_reference, macro_command
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                    """, references_batch)
-                    
-                conn.commit()
-                print(f"[MODEL PERSISTENCE] Cleanly serialized {len(headings)} schema headings and {len(references)} references.")
-                
-        except sqlite3.Error as err:
-            print(f"[MODEL PERSISTENCE CRITICAL FAILURE] Serialization failed: {err}")
-
-    def get_file_sync_checksums(self) -> dict[str, str]:
-        """Returns {file_path: checksum} for every row in project_file_sync_state."""
-        if not self.db_path:
-            return {}
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.execute("SELECT file_path, checksum FROM project_file_sync_state")
-                return {row["file_path"]: row["checksum"] for row in cursor.fetchall()}
-        except sqlite3.Error as err:
-            print(f"[DB ERROR] Failed to read project_file_sync_state: {err}")
-            return {}
-
-    def replace_file_sync_checksums(self, checksums: dict[str, str]) -> None:
-        """
-        Full wipe-and-rebuild of project_file_sync_state, mirroring
-        serialize_scraped_index_manifest's pattern -- called whenever a
-        fresh scan/resync means the DB is now known to match every
-        currently-tracked file's actual content.
-        """
-        if not self.db_path:
-            return
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM project_file_sync_state;")
-                if checksums:
-                    cursor.executemany(
-                        "INSERT INTO project_file_sync_state (file_path, checksum) VALUES (?, ?);",
-                        list(checksums.items())
-                    )
-                conn.commit()
-        except sqlite3.Error as err:
-            print(f"[DB ERROR] Failed to write project_file_sync_state: {err}")
-
-    def upsert_file_sync_checksums(self, checksums: dict[str, str]) -> None:
-        """
-        Partial counterpart to replace_file_sync_checksums: updates only the
-        named files' rows and leaves every other row untouched. Used on save,
-        where only the files this app actually wrote -- and whose DB records
-        are still known to match them -- may be re-stamped; any other file's
-        stored checksum has to survive so a genuine external edit is still
-        detected on the next project load.
-        """
-        if not self.db_path or not checksums:
-            return
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.executemany(
-                    "INSERT INTO project_file_sync_state (file_path, checksum, synced_at) "
-                    "VALUES (?, ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(file_path) DO UPDATE SET "
-                    "checksum = excluded.checksum, synced_at = CURRENT_TIMESTAMP;",
-                    list(checksums.items())
-                )
-                conn.commit()
-        except sqlite3.Error as err:
-            print(f"[DB ERROR] Failed to update project_file_sync_state: {err}")
-
-    def fetch_index_manifest(self) -> tuple[list[dict], list[dict]]:
-        """
-        Thread-safe read of project_headings and project_references.
-        Opens and closes its own connection, safe to call from a worker thread.
-        """
-        import json
-        headings, references = [], []
-        try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='project_headings'")
-            if not cursor.fetchone():
-                conn.close()
-                return headings, references
-
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='project_references'")
-            if not cursor.fetchone():
-                conn.close()
-                return headings, references
-
-            headings = [dict(r) for r in cursor.execute("SELECT * FROM project_headings").fetchall()]
-
-            for row in cursor.execute("SELECT * FROM project_references").fetchall():
-                r = dict(row)
-                try:
-                    r["see_references"] = json.loads(r["see_references"]) if r["see_references"] else None
-                except Exception:
-                    r["see_references"] = None
-                try:
-                    r["seealso_references"] = json.loads(r["seealso_references"]) if r["seealso_references"] else None
-                except Exception:
-                    r["seealso_references"] = None
-                r["has_references"] = bool(r["has_references"])
-                r["is_range_closer"] = bool(r.get("is_range_closer"))
-                references.append(r)
-
-            conn.close()
-        except sqlite3.Error as e:
-            print(f"[FileTreePersistence] fetch_index_manifest error: {e}")
-        return headings, references
-
-    def fetch_index_statistics(self) -> dict:
-        """
-        Aggregate counts for the "Index Statistics" dialog: main/sub1/sub2
-        heading counts (project_headings.depth, 0-indexed) and total
-        reference / cross-reference counts from project_references.
-
-        Still deliberately does NOT use the has_references column, even
-        though both write sites (_handle_manual_index_insertion and
-        LatexIndexParser._build_see_reference_payload) were fixed
-        2026-07-13 to agree on "True means a real page reference, not an
-        xref-only pointer" (IndexEntryModel.metadata()'s original
-        semantic). Any project DB populated before that fix still holds
-        has_references values written under the old, contradictory
-        conventions, and won't self-heal until its next full resync --
-        so encap remains the query's signal until a migration/backfill
-        makes has_references trustworthy across every existing project.
-
-        Also does NOT use see_references/seealso_references directly --
-        index_tag_grammar.extract_see_modifiers populates those from the
-        standard imakeidx pipe-modifier syntax too (\\index{term|see
-        {Target}} / \\index{term|seealso{Target}}, no backslash -- LaTeX
-        prepends one internally when expanding the pipe), not just the
-        rarer backslash-prefixed \\see{...}/\\seealso{...} form embedded
-        in display text. But that pipe syntax is captured into the encap
-        column regardless (LatexIndexParser via index_tag_grammar.
-        split_encap, and CrossReferenceController via
-        cross_reference_model.build_xref_index_macro for a cross-reference
-        created through the Cross-References tab), so the is_cross_reference
-        flag derived from that encap -- see _cross_reference_flag -- remains
-        the simplest signal both entry-creation paths agree on regardless of
-        DB vintage. Range closers are excluded from both counts --
-        they're the second half of one logical range entry, not an
-        independent reference; the range's opener already accounts for it.
-        """
-        stats = {
-            "main_headings": 0,
-            "sub1_headings": 0,
-            "sub2_headings": 0,
-            "total_references": 0,
-            "total_cross_references": 0,
-        }
-        if not self.db_path:
-            return stats
-
-        try:
-            with self._get_connection() as conn:
-                for depth, key in ((0, "main_headings"), (1, "sub1_headings"), (2, "sub2_headings")):
-                    row = conn.execute(
-                        "SELECT COUNT(*) AS c FROM project_headings WHERE depth = ?", (depth,)
-                    ).fetchone()
-                    stats[key] = row["c"] if row else 0
-
-                row = conn.execute(
-                    "SELECT COUNT(*) AS c FROM project_references "
-                    "WHERE is_range_closer = 0 AND is_cross_reference = 0"
-                ).fetchone()
-                stats["total_references"] = row["c"] if row else 0
-
-                row = conn.execute(
-                    "SELECT COUNT(*) AS c FROM project_references "
-                    "WHERE is_range_closer = 0 AND is_cross_reference = 1"
-                ).fetchone()
-                stats["total_cross_references"] = row["c"] if row else 0
-        except sqlite3.Error as e:
-            print(f"[DB ERROR] fetch_index_statistics failed: {e}")
-
-        return stats
-
-    def fetch_range_consistency_candidates(self) -> list:
-        """
-        Raw rows for the Range Consistency Check tool (RangeConsistencyController
-        / models/range_consistency_model.py): every project_references row
-        that could participate in a range-pairing problem -- i.e.
-        everything except cross-references (encap "see{...}"/"seealso{...}"),
-        which carry no page number and so can't meaningfully overlap or
-        enclose a page range.
-
-        Reads directly from the DB rather than the in-memory
-        EntryModifierModel cache, matching fetch_index_statistics's own
-        DB-direct approach. Same caveat applies: a rename made this session
-        but not yet saved can shift absolute_position/line_number in the
-        live cache before it's flushed to the DB (see EntryModifierModel.
-        flush_dirty_to_db), so this can lag a few positions behind the
-        in-memory truth for anything after a mid-session rename. It never
-        lags on which rows exist, though -- inserts and deletes both write
-        through to the DB immediately (see EntryModifierModel.
-        register_new_entry / delete_record), only renames are deferred.
-        Whatever issues this produces are re-validated against the live
-        cache anyway at fix-apply time (IndexEditController.
-        handle_entry_deletion always reads current coordinates from
-        EntryModifierModel, never from this query), so a stale position
-        here can at worst misjudge which of two ranges opened first, not
-        corrupt the actual .tex rewrite.
-
-        Returns a list of dicts with unique_id_number, heading_id,
-        file_path, line_number, column_offset, absolute_position, and
-        encap -- exactly the fields find_range_consistency_issues needs.
-        """
-        if not self.db_path:
-            return []
-
-        rows: list = []
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.execute(
-                    "SELECT unique_id_number, heading_id, file_path, line_number, "
-                    "column_offset, absolute_position, encap FROM project_references "
-                    "WHERE is_cross_reference = 0 "
-                    "ORDER BY file_path, heading_id, absolute_position"
-                )
-                rows = [dict(row) for row in cursor.fetchall()]
-        except sqlite3.Error as e:
-            print(f"[DB ERROR] fetch_range_consistency_candidates failed: {e}")
-
-        return rows
-
-    def reset_to_default_state(self) -> None:
-        """
-        Public Model Contract.
-        Resets all active project properties, clears path variables, and restores 
-        baseline internal state indicators to prevent cross-contamination across sessions.
-        """
-        # Sever the active database pathway connection string completely
-        self.db_path = ""
-
-        # Revert internal state variables back to standard startup values
-        self._pending_project_name = "Untitled LaTeX Project"
-        
-        # Print a structural confirmation trace directly to the stream 
-        # This allows the decoupled SessionLogger to track database unlinking actions
-        print("[MODEL PERSISTENCE] Database connections severed. State reset to baseline defaults.")
-
-    def fetch_reference_row(self, entry_id: int) -> dict | None:
-        """
-        Reads a single project_references row back from disk, keyed by
-        unique_id_number. Mirrors fetch_index_manifest's per-row JSON
-        deserialization for see_references/seealso_references.
-
-        Used to revert a dirty (edited-but-never-flushed) in-memory record
-        to the DB's still-current truth when the user discards a tab's
-        unsaved renames — see EntryModifierModel.discard_dirty_records.
-        Returns None if the row doesn't exist or on any DB error.
-        """
-        import json
-        if not self.db_path:
-            return None
-        try:
-            with self._get_connection() as conn:
-                row = conn.execute(
-                    "SELECT * FROM project_references WHERE unique_id_number = ?;",
-                    (entry_id,)
-                ).fetchone()
-            if row is None:
-                return None
-            r = dict(row)
-            try:
-                r["see_references"] = json.loads(r["see_references"]) if r["see_references"] else None
-            except Exception:
-                r["see_references"] = None
-            try:
-                r["seealso_references"] = json.loads(r["seealso_references"]) if r["seealso_references"] else None
-            except Exception:
-                r["seealso_references"] = None
-            r["has_references"] = bool(r["has_references"])
-            r["is_range_closer"] = bool(r.get("is_range_closer"))
-            return r
-        except sqlite3.Error as e:
-            print(f"[FileTreePersistence] fetch_reference_row error for ID {entry_id}: {e}")
-            return None
-
-    def update_reference_field(self, entry_id: int, record: dict) -> bool:
-        """
-        Persists a single reference record update keyed by unique_id_number.
-        Updates heading_raw_text from the canonical 'main!sub1!sub2' string,
-        plus any coordinate or encap fields present in the record dict.
-        Returns True on success, False on failure.
-        """
-        if not self.db_path:
-            return False
-
-        # MUTABLE_COLUMNS acts as an explicit allowlist — the f-string SET clause is built only from keys present in both the 
-        # record dict and that set, so no arbitrary key from the model cache can ever reach the SQL. uid and unique_id_number 
-        # are deliberately excluded since they're identity fields that should never drift after initial write.
-        MUTABLE_COLUMNS = {
-            "heading_raw_text", "heading_id",
-            "file_path", "line_number", "column_offset",
-            "absolute_position", "absolute_end", "encap",
-            "see_references", "seealso_references", "has_references",
-            "range_partner_id",
-        }
-
-        fields_to_write = {k: v for k, v in record.items() if k in MUTABLE_COLUMNS}
-        if not fields_to_write:
-            print(f"[DB TRACE] update_reference_field: no mutable fields in payload for ID {entry_id}")
-            return False
-
-        # is_cross_reference is derived, not mutable: it rides along with any
-        # write that changes the encap it is derived from, and is not
-        # settable on its own. Editing a "see{X}" encap into a page style
-        # (or the reverse) would otherwise leave the flag behind, and every
-        # cross-reference query reads the flag.
-        if "encap" in fields_to_write:
-            fields_to_write["is_cross_reference"] = self._cross_reference_flag(
-                fields_to_write["encap"]
-            )
-
-        set_clause = ", ".join(f"{col} = ?" for col in fields_to_write)
-        values = list(fields_to_write.values())
-        values.append(entry_id)  # WHERE clause bind value
-
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    f"UPDATE project_references SET {set_clause} WHERE unique_id_number = ?;",
-                    values
-                )
-                # The rowcount == 0 check catches the case where the in-memory cache and the database have diverged 
-                # (e.g. a close/reopen race), which would otherwise silently succeed.        
-                if cursor.rowcount == 0:
-                    print(f"[DB TRACE] update_reference_field: no row matched unique_id_number={entry_id}")
-                    return False
-                conn.commit()
-                print(f"[DB TRACE] update_reference_field: committed {len(fields_to_write)} field(s) for ID {entry_id}")
-                return True
-        except sqlite3.Error as err:
-            print(f"[DB ERROR] update_reference_field failed for ID {entry_id}: {err}")
-            return False
-        
-    def delete_reference(self, entry_id: int) -> bool:
-        """
-        Permanently removes a single reference row keyed by
-        unique_id_number. Called by EntryModifierModel.delete_record,
-        immediately after the corresponding .tex macro span has already
-        been rewritten to empty — mirrors insert_reference's "write
-        immediately, don't defer to project save" contract, just for the
-        opposite direction.
-
-        Returns True on success, False on failure. As with
-        update_reference_field, a rowcount of 0 means the in-memory cache
-        and the database have already diverged (e.g. a close/reopen race
-        or a double-delete) — that's reported as failure rather than
-        silently succeeding, so the caller's warning log reflects reality.
-        """
-        if not self.db_path:
-            return False
-
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "DELETE FROM project_references WHERE unique_id_number = ?;",
-                    (entry_id,)
-                )
-                if cursor.rowcount == 0:
-                    print(f"[DB TRACE] delete_reference: no row matched unique_id_number={entry_id}")
-                    return False
-                conn.commit()
-                print(f"[DB TRACE] delete_reference: removed row for ID {entry_id}")
-                return True
-        except sqlite3.Error as err:
-            print(f"[DB ERROR] delete_reference failed for ID {entry_id}: {err}")
-            return False
-
-    def update_heading_text(self, heading_id: int | None, heading_text: str) -> bool:
-        """
-        Syncs a project_headings row's heading_text/name columns to match
-        the current canonical path shared by every reference under
-        heading_id. Called from EntryModifierModel.flush_dirty_to_db
-        alongside update_reference_field, once a reference's rename has
-        actually reached disk (a tab Save) — never for a rename that ends
-        up discarded, since discarded renames never flush a dirty record
-        at all.
-
-        Without this, a tree-side heading rename (IndexEditController.
-        _process_heading_rename) updated every reference's own
-        heading_raw_text but left this shared heading row's own text
-        exactly as it was at the last full project (re)scan. Per this
-        project's convention that the DB, not the .tex files, is the
-        source of truth for everything after initial creation/an explicit
-        resync, a project reopened without a resync would then rebuild
-        its tree from that stale row and show the pre-rename name again
-        — silently disagreeing with what's actually in the .tex source
-        and in every project_references row under it.
-
-        No-ops (returns False) if heading_id is None (references without
-        a resolved heading, or a malformed cache entry) or heading_text is
-        empty. Idempotent: writing the same text twice is harmless, so
-        callers don't need to first check whether the text actually
-        changed.
-        """
-        if not self.db_path or heading_id is None or not heading_text:
-            return False
-
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "UPDATE project_headings SET heading_text = ?, name = ? WHERE id = ?;",
-                    (heading_text, heading_text, heading_id),
-                )
-                if cursor.rowcount == 0:
-                    print(f"[DB TRACE] update_heading_text: no heading row matched id={heading_id}")
-                    return False
-                conn.commit()
-                print(f"[DB TRACE] update_heading_text: synced heading id={heading_id} -> {heading_text!r}")
-                return True
-        except sqlite3.Error as err:
-            print(f"[DB ERROR] update_heading_text failed for heading_id={heading_id}: {err}")
-            return False
-
-    def delete_heading_if_orphaned(self, heading_id: int) -> bool:
-        """
-        Removes a project_headings row if (and only if) no project_references
-        row still points to it. Called by EntryModifierModel after
-        IndexEditController's in-memory orphan check has already determined
-        the heading has zero remaining references — this just brings the DB
-        row in line with that decision so orphaned headings don't accumulate
-        as dead rows across sessions. Guarded by its own COUNT check (rather
-        than trusting the caller) since the DB is a separate source of truth
-        from the in-memory _active_headings cache, and a race between the
-        two should fail safe (leave the row) rather than delete something
-        still referenced.
-
-        Returns True if a row was deleted, False if the heading still had
-        references, didn't exist, or the delete failed.
-        """
-        if not self.db_path:
-            return False
-
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                row = cursor.execute(
-                    "SELECT COUNT(*) AS cnt FROM project_references WHERE heading_id = ?;",
-                    (heading_id,)
-                ).fetchone()
-                if row and row["cnt"] > 0:
-                    print(
-                        f"[DB TRACE] delete_heading_if_orphaned: heading_id={heading_id} "
-                        f"still has {row['cnt']} reference(s) — leaving in place"
-                    )
-                    return False
-
-                cursor.execute(
-                    "DELETE FROM project_headings WHERE id = ?;",
-                    (heading_id,)
-                )
-                if cursor.rowcount == 0:
-                    print(f"[DB TRACE] delete_heading_if_orphaned: no heading row matched id={heading_id}")
-                    return False
-                conn.commit()
-                print(f"[DB TRACE] delete_heading_if_orphaned: removed heading id={heading_id}")
-                return True
-        except sqlite3.Error as err:
-            print(f"[DB ERROR] delete_heading_if_orphaned failed for heading_id={heading_id}: {err}")
-            return False   
-
-    def insert_reference(self, entry_dict: dict) -> bool:
-        """Inserts a brand-new reference row. Called only from register_new_entry."""
-        import uuid
-        try:
-            with self._get_connection() as conn:
-                conn.execute("""
-                    INSERT INTO project_references (
-                        unique_id_number, heading_raw_text, uid,
-                        file_path, line_number, column_offset,
-                        absolute_position, absolute_end,
-                        encap, heading_id,
-                        see_references, seealso_references, has_references,
-                        range_partner_id, is_range_closer, is_cross_reference,
-                        macro_command
-                    ) VALUES (
-                        :unique_id_number, :heading_raw_text, :uid,
-                        :file_path, :line_number, :column_offset,
-                        :absolute_position, :absolute_end,
-                        :encap, :heading_id,
-                        :see_references, :seealso_references, :has_references,
-                        :range_partner_id, :is_range_closer, :is_cross_reference,
-                        :macro_command
-                    )
-                """, {
-                    **entry_dict,
-                    "uid": entry_dict.get("uid") or str(uuid.uuid4()),
-                    "heading_id": entry_dict.get("heading_id"),  # None — no parser node yet
-                    "has_references": 1 if entry_dict.get("has_references", True) else 0,
-                    "range_partner_id": entry_dict.get("range_partner_id"),
-                    "is_range_closer": 1 if entry_dict.get("is_range_closer", False) else 0,
-                    "is_cross_reference": self._cross_reference_flag(entry_dict.get("encap")),
-                    "macro_command": entry_dict.get("macro_command") or "index",
-                })
-            return True
-        except Exception as e:
-            print(f"[DB ERROR] insert_reference failed for ID {entry_dict.get('unique_id_number')}: {e}")
-            return False
-
-    def insert_heading_with_id(self, heading: dict) -> bool:
-        """
-        Writes a heading row using the id it already carries, rather than
-        letting SQLite assign one.
-
-        Heading ids are allocated in memory (IndexTreeModelEngine
-        .resolve_heading_id) so a heading can exist before its row does.
-        The bulk project write has always inserted explicit ids this way;
-        this is the single-row equivalent for live insertion.
-
-        INSERT OR IGNORE so re-writing an already-written heading is a
-        no-op rather than a primary-key error -- the save drain may see
-        the same pending heading twice if a save is interrupted.
-        """
-        if not self.db_path or heading.get("id") is None:
-            return False
-        try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    "INSERT OR IGNORE INTO project_headings "
-                    "(id, parent_id, heading_text, name, depth) VALUES (?, ?, ?, ?, ?);",
-                    (
-                        int(heading["id"]),
-                        heading.get("parent_id"),
-                        str(heading.get("heading_text", "")),
-                        str(heading.get("name", heading.get("heading_text", ""))),
-                        int(heading.get("depth", 0)),
-                    ),
-                )
-                conn.commit()
-            return True
-        except sqlite3.Error as e:
-            print(f"[DB ERROR] insert_heading_with_id failed for id={heading.get('id')}: {e}")
-            return False
-
-    def resolve_heading_path(self, heading_text: str) -> int | None:
-        """
-        Resolves (creating if needed) the heading row for heading_text
-        together with its parent chain, and returns its id.
-
-        Depth and parent text come from index_tag_grammar, so an encap or
-        a braced "!" never inflates the depth. Every caller that needs a
-        heading_id for an entry goes through here -- a fresh live
-        insertion, the shared new-entry tail, and undoing a deletion --
-        so the three cannot disagree about what row an entry belongs to.
-        """
-        depth = dialect.depth_of(heading_text)
-        parent_id = None
-        if depth > 0:
-            parent_text = dialect.parent_path(heading_text)
-            parent_id = self.resolve_or_insert_heading(
-                heading_text=parent_text, name=parent_text, depth=depth - 1, parent_id=None
-            )
-        return self.resolve_or_insert_heading(
-            heading_text=heading_text, name=heading_text, depth=depth, parent_id=parent_id
-        )
-
-    def resolve_or_insert_heading(self, heading_text: str, name: str, depth: int, parent_id: int | None = None) -> int | None:
-        """Returns the id of an existing matching heading, or inserts and returns a new one."""
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                row = cursor.execute(
-                    "SELECT id FROM project_headings WHERE heading_text = ? AND depth = ?",
-                    (heading_text, depth)
-                ).fetchone()
-                if row:
-                    return row["id"]
-                cursor.execute(
-                    "INSERT INTO project_headings (parent_id, heading_text, name, depth) VALUES (?, ?, ?, ?)",
-                    (parent_id, heading_text, name, depth)
-                )
-                conn.commit()
-                return cursor.lastrowid
-        except sqlite3.Error as e:
-            print(f"[DB ERROR] resolve_or_insert_heading failed: {e}")
-            return None
-
-    def save_batch_index_manifest(self, entries: list[dict]) -> bool:
-        """
-        Persists a batch of reference edits to project_references.
-        Each entry must contain 'unique_id_number' plus one or more mutable fields.
-        Delegates to update_reference_field per entry; returns True if all succeed.
-
-        Currently called only by its own tests: its previous caller was the
-        tree engine's staged-entry list, which the pending-changes journal
-        replaced. Kept rather than deleted because the journal drain is due
-        to become a single transaction, and a batch writer is exactly what
-        that needs -- delete it if that lands some other way.
-        """
-        if not entries:
-            return False
-
-        all_successful = True
-        for entry in entries:
-            entry_id = entry.get("unique_id_number")
-            if entry_id is None:
-                print(f"[DB TRACE] save_batch_index_manifest: skipping entry missing unique_id_number")
-                all_successful = False
-                continue
-            success = self.update_reference_field(entry_id, entry)
-            if not success:
-                all_successful = False
-
-        return all_successful            
-    
-    def get_max_unique_id(self) -> int:
-        """Return the highest unique_id_number in the references table, or 0 if empty."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            row = cursor.execute(
-                "SELECT MAX(unique_id_number) FROM project_references"
-            ).fetchone()
-            
-            return row[0] if row and row[0] is not None else 0
-        

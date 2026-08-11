@@ -468,6 +468,16 @@ needed) and the synchronous, non-threaded parts of `ProjectLoadWorker`
 `compute_file_checksums`). Use the `fresh_persistence` and
 `sample_project_dir` fixtures from the root `conftest.py`.
 
+**Half of what this layer tests now lives in `bookindexcore.persistence`.**
+`FileTreePersistence` is a subclass of `IndexRepository` and keeps only the
+three tables about *files* — `project_files`, `project_file_sync_state`,
+`project_custom_commands`. The index tables, the transaction and the migration
+runner are shared, and `bookindexcore/tests/persistence/` covers them against
+the paper dialect, which is the better test: it is what shows that no query
+here knows what a cross-reference looks like in LaTeX. These tests stay
+because they exercise the two halves *together*, through the class the
+application actually holds.
+
 Split by concern rather than by class: `test_schema_and_setup.py`,
 `test_reference_crud.py`, `test_project_files.py`,
 `test_metadata_and_commands.py`, `test_index_manifest.py`,
@@ -487,6 +497,33 @@ migration, not a repair pass. Note that the flag is stricter than the `LIKE`
 prefix it replaced, since it is computed by `grammar.is_xref_encap`; an
 unterminated `see{Target` is no longer a cross-reference, which is the point —
 the database now holds the same opinion as the rest of the application.
+
+It also covers the **schema version stamp**. That field existed from the
+beginning and was inert: seeded once with `INSERT OR IGNORE` and read by
+nothing, so it said `1.0.0` through five schema changes. It is written by the
+shared migration runner now, and
+`test_a_new_project_is_stamped_at_the_current_schema_version` pins that a
+freshly created database reports the current core version *and* this
+application's own host version — the two are numbered separately, so adding a
+LaTeX-only table never has to touch the core's numbering.
+
+### Per-index settings (`test_index_prefs_config_model.py::TestPerIndexSettings`)
+
+The three `\makeindex[...]` keys — title, columns, intoc — describe **one
+index** and now live in the project's index-definitions list rather than in
+the flat `pref_` namespace. `imakeidx_noautomatic` and `imakeidx_nonewpage`
+are `\usepackage` options and deliberately stay flat: they apply once however
+many indexes a project declares, and folding a document-wide setting into one
+index's definition would make it look per-index the moment a project has two.
+
+The test worth reading is
+`test_saving_the_default_index_leaves_a_second_index_alone`. The preferences
+dialog can only see one index today, so its save has to be a read-modify-write
+of the list; a wholesale replace would silently delete a Table of Authorities
+the project had already declared. `test_a_migrated_project_keeps_the_title_its_indexer_chose`
+is the end-to-end version: an older database opens, the schema migration folds
+its old flat values into definition zero, and the model reads them from the
+new place.
 
 `test_project_load_worker.py` also pins that a **styled** range written by
 hand — `\index{term|(textbf}` … `\index{term|)textbf}`, valid `makeindex` that

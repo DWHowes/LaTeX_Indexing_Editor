@@ -93,6 +93,23 @@ PROJECT_STRUCTURAL_KEY_MAP: Dict[str, str] = {
     "index_binary_path": "index_maker_executable",
 }
 
+# Fields that describe ONE index rather than the document, and so belong to an
+# entry in the project's index-definitions list rather than to the flat pref_
+# namespace (design §4.5, landed in extraction phase 5). They are the three
+# keys of \makeindex[...]; imakeidx_noautomatic and imakeidx_nonewpage are
+# \usepackage options and stay flat, because they apply once however many
+# indexes a project declares.
+#
+# Only the *default* index's values are surfaced on IndexPrefsData, because
+# the preferences dialog has one set of fields. A project with a Subject Index
+# and a separate Table of Authorities can already hold both in the list; the
+# per-index UI that lets a user edit the second is per-application and later.
+PER_INDEX_FIELD_MAP: Dict[str, str] = {
+    "imakeidx_title": "title",
+    "imakeidx_columns": "columns",
+    "imakeidx_intoc": "intoc",
+}
+
 class IndexPrefsConfigModel:
     def __init__(self) -> None:
         self._data = IndexPrefsData()
@@ -133,7 +150,8 @@ class IndexPrefsConfigModel:
         PROJECT_STRUCTURAL_KEY_MAP fields, which are seeded into their own
         pre-existing structural columns instead.
         """
-        known_keys = set(asdict(IndexPrefsData()).keys()) - set(PROJECT_STRUCTURAL_KEY_MAP)
+        known_keys = (set(asdict(IndexPrefsData()).keys())
+                      - set(PROJECT_STRUCTURAL_KEY_MAP) - set(PER_INDEX_FIELD_MAP))
         existing = file_persistence.get_all_project_metadata()  # keys already have pref_ if seeded
 
         missing = {
@@ -141,6 +159,12 @@ class IndexPrefsConfigModel:
             for k, v in global_data.items()
             if k in known_keys and f"{_PREF_PREFIX}{k}" not in existing
         }
+
+        # The per-index fields are seeded into the default index's definition
+        # instead, and only while that definition is still untouched -- a
+        # project that has named its index must not have that name replaced by
+        # whatever the global default happens to be.
+        self._seed_default_index_from_globals(global_data, file_persistence)
 
         # Structural columns always exist (created in initialize_database_schema)
         # so they're never "missing" -- seed them from the global default only
@@ -153,6 +177,36 @@ class IndexPrefsConfigModel:
         if missing:
             file_persistence.upsert_project_metadata(missing)
             print(f"[IndexPrefsConfigModel] Seeded {len(missing)} prefs key(s) into project_metadata.")
+
+    @staticmethod
+    def _seed_default_index_from_globals(global_data: Dict[str, Any], file_persistence) -> None:
+        """
+        First-open copy of the global per-index settings into the project's
+        default index definition, if that definition is still blank.
+
+        "Blank" is no title and no options, which is what the schema migration
+        writes for a project that had nothing to fold in. A project migrated
+        from an older database arrives with its old values already in place
+        and is left alone.
+        """
+        getter = getattr(file_persistence, "get_index_definitions", None)
+        setter = getattr(file_persistence, "set_index_definitions", None)
+        if getter is None or setter is None:
+            return
+
+        definitions = getter()
+        default = definitions[0]
+        if default.title or default.options:
+            return
+
+        default.title = str(global_data.get("imakeidx_title", ""))
+        default.options = {
+            field: str(global_data[pref_key])
+            for pref_key, field in PER_INDEX_FIELD_MAP.items()
+            if field != "title" and pref_key in global_data
+        }
+        if default.title or default.options:
+            setter(definitions)
 
     def load_from_project(self, file_persistence) -> None:
         """
@@ -175,8 +229,56 @@ class IndexPrefsConfigModel:
             if db_key in all_meta:
                 prefs_data[pref_key] = all_meta[db_key]
 
+        # The default index's own settings come from the definitions list, and
+        # override any pref_ row left behind by a build that predates it --
+        # there is one answer to "what is this index called", and this is it.
+        prefs_data.update(self._default_index_fields(file_persistence))
+
         if prefs_data:
             self.update_data(prefs_data)
+
+    @staticmethod
+    def _default_index_fields(file_persistence) -> Dict[str, Any]:
+        """
+        The default index definition's fields, under their IndexPrefsData
+        names. Empty if this persistence layer has no definitions -- the
+        stubs some tests pass in are metadata stores and nothing more.
+        """
+        getter = getattr(file_persistence, "get_index_definitions", None)
+        if getter is None:
+            return {}
+
+        definition = getter()[0]
+        fields: Dict[str, Any] = {}
+        for pref_key, field in PER_INDEX_FIELD_MAP.items():
+            value = definition.title if field == "title" else definition.options.get(field)
+            if value is not None:
+                fields[pref_key] = value
+        return fields
+
+    def _persist_default_index(self, file_persistence) -> None:
+        """
+        Writes the per-index fields back into definition zero, leaving every
+        other declared index alone.
+
+        Read-modify-write rather than a wholesale replace: a project may
+        already declare a Table of Authorities that this dialog cannot see,
+        and saving the Subject Index's column count must not delete it.
+        """
+        getter = getattr(file_persistence, "get_index_definitions", None)
+        setter = getattr(file_persistence, "set_index_definitions", None)
+        if getter is None or setter is None:
+            return
+
+        definitions = getter()
+        default = definitions[0]
+        default.title = str(self._data.imakeidx_title)
+        default.options.update({
+            field: str(getattr(self._data, pref_key))
+            for pref_key, field in PER_INDEX_FIELD_MAP.items()
+            if field != "title"
+        })
+        setter(definitions)
 
     def _migrate_legacy_project_metadata_keys(self, file_persistence) -> None:
         """
@@ -199,24 +301,29 @@ class IndexPrefsConfigModel:
         """
         Serializes current state with pref_ keys for DB storage, excluding
         PROJECT_STRUCTURAL_KEY_MAP fields (those go to their own structural
-        columns -- see persist_to_project()).
+        columns -- see persist_to_project()) and PER_INDEX_FIELD_MAP fields
+        (those go to the index-definitions list, so that a project with two
+        indexes has one row per index rather than one row full stop).
         """
+        excluded = set(PROJECT_STRUCTURAL_KEY_MAP) | set(PER_INDEX_FIELD_MAP)
         return {
             f"{_PREF_PREFIX}{k}": str(v)
             for k, v in self.serialize_to_dict().items()
-            if k not in PROJECT_STRUCTURAL_KEY_MAP
+            if k not in excluded
         }
 
     def persist_to_project(self, file_persistence) -> None:
         """
         Writes current model state to project_metadata using pref_ keys, plus
         pdflatex_path/index_binary_path to their own structural columns
-        (compiler_executable/index_maker_executable).
+        (compiler_executable/index_maker_executable) and the per-index fields
+        to the default index's definition.
         """
         payload = self._prefixed_payload()
         for pref_key, db_key in PROJECT_STRUCTURAL_KEY_MAP.items():
             payload[db_key] = str(getattr(self._data, pref_key))
         file_persistence.upsert_project_metadata(payload)
+        self._persist_default_index(file_persistence)
 
     def generate_ist_content(self) -> str:
         lines = [

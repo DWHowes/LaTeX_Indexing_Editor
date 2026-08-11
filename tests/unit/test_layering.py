@@ -40,6 +40,11 @@ FORBIDDEN_IMPORTS = {
 #: takes over — and does it better, adding a runtime check with Qt blocked at
 #: the import finder. Phase 1 removed six entries that way.
 QT_FREE_MODULES = (
+    # Half of this moved in phase 5 -- the index tables are
+    # bookindexcore.persistence.IndexRepository now, and this is its subclass
+    # holding the file-scope tables. It stays on the list rather than leaving
+    # it: what remains is still real code, and a Qt import in a subclass would
+    # make the shared base untestable headlessly just as surely.
     "models/file_tree_persistence.py",
     "models/index_tag_grammar.py",
     "models/index_syntax_check.py",

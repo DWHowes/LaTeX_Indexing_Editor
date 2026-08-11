@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Internal: the project database moves, and starts recording its own version (phase 5)
+
+**Nothing about using the application changes, but this one touches your
+project files, so it is worth saying what happens.** The half of the project
+database that holds the index — your headings, references, cross-references
+and project settings — is now shared code. The half that tracks which `.tex`
+files belong to the project stayed here, because that is the part that means
+something different in each of the three editors.
+
+**What happens the first time you open an existing project.** The database is
+brought up to date and, for the first time, stamped with the schema version it
+actually has. No data is rewritten and nothing is removed; three new columns
+appear, all of them empty. There is nothing to do and nothing to notice.
+
+The stamp is the point. The database has carried a `schema_version` field
+since the beginning, and it has read `1.0.0` through every change ever made to
+it, because nothing ever wrote to it after the project was created. It is now
+written by the thing that performs the changes, one step at a time, and the
+whole update happens in a single transaction — so an interrupted upgrade (a
+crash, a power cut) leaves the project exactly as it was rather than half
+converted with no record of it.
+
+Two things this makes possible, neither of them visible yet:
+
+- **Every entry now records which index it belongs to.** A project can hold a
+  Subject Index and a separate Table of Authorities — two genuinely different
+  indexes, not one index with a naming convention. The database understands
+  that now; the screens that would let you *use* it are a later piece of work.
+  Existing entries are all in the default index, which is what they have
+  always been in.
+- **The index's own settings — its title, its column count, whether it goes
+  in the table of contents — are stored per index** rather than once for the
+  project, and your existing values are carried across unchanged. The
+  Preferences dialog is unchanged and still edits the one index you have.
+
 ### Internal: the tree and the entry table become shareable (phase 4a)
 
 **Nothing about using the application changes.** The index tree, the emphasis

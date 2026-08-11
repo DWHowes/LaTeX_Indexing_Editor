@@ -31,22 +31,22 @@ class TestFetchIndexStatistics:
     def test_all_zero_on_empty_project(self, fresh_persistence):
         stats = fresh_persistence.fetch_index_statistics()
         assert stats == {
-            "main_headings": 0,
-            "sub1_headings": 0,
-            "sub2_headings": 0,
+            "level_headings": [0, 0, 0],
             "total_references": 0,
             "total_cross_references": 0,
         }
 
     def test_counts_headings_by_depth(self, fresh_persistence):
+        """
+        One count per level, sized by the dialect rather than by three fixed
+        keys -- LaTeX caps at three, Word at three, InDesign at four.
+        """
         fresh_persistence.resolve_or_insert_heading("Main", "Main", depth=0)
         fresh_persistence.resolve_or_insert_heading("Main!Sub", "Sub", depth=1)
         fresh_persistence.resolve_or_insert_heading("Main!Sub!SubSub", "SubSub", depth=2)
 
         stats = fresh_persistence.fetch_index_statistics()
-        assert stats["main_headings"] == 1
-        assert stats["sub1_headings"] == 1
-        assert stats["sub2_headings"] == 1
+        assert stats["level_headings"] == [1, 1, 1]
 
     def test_depth_three_is_not_counted_anywhere(self, fresh_persistence):
         import sqlite3
@@ -57,9 +57,7 @@ class TestFetchIndexStatistics:
             conn.commit()
 
         stats = fresh_persistence.fetch_index_statistics()
-        assert stats["main_headings"] == 0
-        assert stats["sub1_headings"] == 0
-        assert stats["sub2_headings"] == 0
+        assert stats["level_headings"] == [0, 0, 0]
 
     def test_total_references_excludes_range_closers_and_cross_references(self, fresh_persistence):
         heading_id = fresh_persistence.resolve_or_insert_heading("Main", "Main", depth=0)

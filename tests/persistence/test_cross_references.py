@@ -6,7 +6,15 @@ def test_add_and_fetch_cross_reference(fresh_persistence):
 
     assert isinstance(new_id, int)
     rows = fresh_persistence.fetch_project_cross_references()
-    assert rows == [{"id": new_id, "source_heading": "Widgets", "xref_type": "see", "target_heading": "Gadgets"}]
+    # index_class rides along from phase 5: a managed cross-reference belongs
+    # to one index, and "" is the default one.
+    assert rows == [{
+        "id": new_id,
+        "source_heading": "Widgets",
+        "xref_type": "see",
+        "target_heading": "Gadgets",
+        "index_class": "",
+    }]
 
 
 def test_add_cross_reference_ids_increase(fresh_persistence):
