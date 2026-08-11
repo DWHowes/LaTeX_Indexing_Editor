@@ -43,6 +43,7 @@ from controllers.latex_command_controller import CreateCommandController
 from controllers.project_command_manager_controller import ProjectCommandManagerController
 from bookindexcore.ui.theme.controller import ThemeConfigController
 from controllers.entry_modifier_controller import EntryModifierController
+from controllers.bulk_repair_controller import BulkRepairController
 from controllers.index_edit_controller import IndexEditController
 from controllers.latex_text_backend import LatexTextBackend
 from controllers.range_consistency_controller import RangeConsistencyController
@@ -186,6 +187,10 @@ class AppPipelineController(QObject):
             index_edit_ctrl=self.index_edit_ctrl,
             staging_model=self.index_edit_staging_model,
             parent=self
+        )
+
+        self.bulk_repair_ctrl = BulkRepairController(
+            self.entry_modifier_model, self.index_edit_ctrl, self.doc_io,
         )
 
         self.range_consistency_ctrl = RangeConsistencyController(
@@ -342,6 +347,7 @@ class AppPipelineController(QObject):
         self.window.menu_bar.edit_menu_about_to_show.connect(self._refresh_insert_settings_menu_state)
         self.window.menu_bar.create_rtf_file_requested.connect(self._handle_create_rtf_file_request)
         self.window.menu_bar.resync_index_data_requested.connect(self._handle_manual_resync_request)
+        self.window.menu_bar.repair_entries_requested.connect(self._handle_repair_entries_request)
         self.window.menu_bar.resync_workspace_files_requested.connect(self._handle_manual_workspace_resync_request)
         self.window.menu_bar.manage_pruned_files_requested.connect(self.pruned_files_ctrl.manage_pruned_files)
 
@@ -1671,6 +1677,24 @@ class AppPipelineController(QObject):
             return
         self._resync_index_data_from_disk()
         self.window.status_bar.showMessage("Index data resynced from disk.", 3000)
+
+    def _handle_repair_entries_request(self) -> None:
+        """
+        Runs the bulk repair tool: propose, preview, apply what was approved.
+
+        Marks the project dirty only when something was actually written --
+        the tool returns how many repairs it made, and cancelling or approving
+        nothing returns zero, which must not leave a project looking modified.
+        """
+        if self.scope_ctrl.active_project_name == "Untitled Project":
+            self.window.status_bar.showMessage("No project is open.", 3000)
+            return
+
+        repaired = self.bulk_repair_ctrl.run(self.window)
+        if repaired:
+            self._tree_modified = True
+            self.window.status_bar.showMessage(
+                f"Repaired {repaired} index entries.", 4000)
 
     def _confirm_resync_over_unsaved_changes(self) -> bool:
         """

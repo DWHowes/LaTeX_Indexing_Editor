@@ -585,6 +585,39 @@ for why.
 `pytest-qt`'s `qtbot`, testing one controller at a time with hand-built
 collaborators.
 
+### Bulk tools: `test_bulk_command_at_scale.py` and `test_bulk_repair_controller.py`
+
+Two files covering the contract every tool that changes the index has to meet —
+one command, all-or-nothing, previewed.
+
+**`test_bulk_command_at_scale.py`** is about the machinery. It applies a
+command of 300 edits and asserts the file comes back **byte for byte** after
+inverting it. That comparison is the one that matters: every edit changes the
+length of what it replaces, so each shifts everything after it, and a rounding
+error anywhere accumulates across three hundred edits and surfaces as text in
+the wrong place rather than as an exception. Coordinates are checked by
+*reading the file at each cached span* and confirming it holds that entry's
+macro — not by asserting the numbers changed plausibly.
+
+Its docstring carries the **measured cost model**, `O(edits × entries)`, with
+the table. That is there so a tool author can predict the cost rather than
+discover it, and so the loose time ceiling in the file is understood as a
+guard against a change for the worse rather than a performance target.
+
+**`test_bulk_repair_controller.py`** is about the first tool built on it. The
+tests worth reading are in `TestWhatItRefusesToLose`: the encapsulation, the
+range marker and the index class all live *outside* `heading_raw`, so
+rebuilding a macro from the heading alone silently destroys them — turning
+`\index{Main|textbf}` into `\index{Main}`, dropping the `|(` that opens a page
+range, or moving an entry out of its named index. The rename path learned that
+the hard way; these pin it for the repair path.
+
+`test_a_stale_proposal_is_refused_rather_than_misapplied` covers the gap a
+preview opens: it can sit on screen while the indexer thinks, and the document
+can move underneath it. Edits are rebuilt from current coordinates at apply
+time and the backend's guard refuses any that no longer match, so the outcome
+is nothing written rather than the wrong span rewritten.
+
 ### A modal dialog is a stopped run, not a slow one
 
 `tests/conftest.py` has an autouse `_no_modal_dialogs` fixture that turns every

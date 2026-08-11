@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### New: Repair Index Entries (Tools menu)
+
+**The first tool that works on the whole index at once, and it shows you what
+it would do before it does any of it.**
+
+The editor has always been able to repair an entry mechanically — an unescaped
+`&` or `%` that the index engine will misread — but only one entry at a time,
+while you are looking at it. A project that picked up the same fault a hundred
+times had to be corrected a hundred times.
+
+**Tools → Repair Index Entries…** scans every entry, lists what it would
+change with the before and after side by side, and lets you untick anything
+you would rather handle yourself. Only what you leave ticked is written.
+
+Three things worth knowing:
+
+- **It is one Undo.** However many entries it repairs, one press of Ctrl+Z puts
+  every one of them back. If something goes wrong partway, nothing is written
+  at all.
+- **It never changes what an entry says**, only how it is written. Every repair
+  is about characters the index engine reads wrongly.
+- **It leaves alone what it cannot fix mechanically.** An unclosed brace still
+  needs you; so does a `~`, which is a legal non-breaking space rather than a
+  mistake. Nothing is guessed at.
+
 ### Internal: every index edit now goes through one door (phase 5b)
 
 **Nothing about using the application changes.** Editing a heading, renaming
