@@ -36,6 +36,20 @@ is derived from mutable state and there is one dialect instance,
 
 from typing import Iterable, Optional
 
+# Measured against TeX Live 2023 -- see documentation/e0_measurements in the
+# bookindexcore repository for the probes and the exact failure each produces.
+# They are kept as named constants rather than inlined because they are
+# properties of a *tool version* we do not control: makeindex 2.17 names its
+# own limit in the transcript ("First argument too long (max 10240)"), and a
+# future build may differ. Revisit by re-running the probe, not by reasoning.
+#
+#: makeindex 2.17: the entry is rejected outright above this, the .ind comes
+#: out empty -- and the process still exits 0, so a build script sees success.
+MAKEINDEX_MAX_ENTRY = 10_239
+#: xindy: five times tighter, and it dies with a Lisp stack overflow rather
+#: than rejecting the one entry.
+XINDY_MAX_ENTRY = 1_860
+
 from bookindexcore.dialect import (
     ClassEmulation,
     SORT_PER_LEVEL,
@@ -106,6 +120,10 @@ class LatexDialect:
     #: declaration is not an aspiration: there is already a route in.
     page_style_vocabulary_is_open = True
 
+    #: None. Both engines compare whole entries; the collision failure Word
+    #: has does not occur here. Measured -- see documentation/e0_measurements.
+    distinguishing_prefix = None
+
     def __init__(
         self,
         bold_values: Iterable[str] = grammar.DEFAULT_BOLD_ENCAP_VALUES,
@@ -146,6 +164,30 @@ class LatexDialect:
             if v not in self._bold_values
         ]
         return tuple(styles)
+
+    def max_entry_length(self, project: object = None) -> Optional[int]:
+        r"""
+        The longest ``\index`` argument this project's engine will accept.
+
+        **It depends on the engine, not on LaTeX**, and by a wide margin — so
+        this cannot be a constant. Both numbers are measured against the
+        installed TeX Live; see ``documentation/e0_measurements`` for the
+        method and for the failure each produces.
+
+        ``project`` is duck-typed: anything that can answer
+        ``get_metadata_value`` is asked which engine is selected. Anything else
+        — including None — falls back to makeindex, which is not merely the
+        safer guess but the *correct* one, since makeindex is the default
+        engine for a project that has never chosen.
+        """
+        engine = "makeindex"
+        getter = getattr(project, "get_metadata_value", None)
+        if getter is not None:
+            try:
+                engine = (getter("pref_index_engine") or "makeindex").strip().lower()
+            except Exception:
+                engine = "makeindex"
+        return XINDY_MAX_ENTRY if engine == "xindy" else MAKEINDEX_MAX_ENTRY
 
     def effective_max_levels(self, project: object = None) -> int:
         """
@@ -303,6 +345,17 @@ class LatexDialect:
 
     def check(self, text: str, *, role: str = syntax.ROLE_DISPLAY) -> list[Finding]:
         return syntax.check(text, role=role)
+
+    def check_entry(self, body: str, project: object = None) -> list[Finding]:
+        r"""
+        Findings about a whole tag body, as opposed to one field of it.
+
+        Currently the engine's length limit and nothing else. Kept separate
+        from :meth:`check` because the two answer different questions and take
+        different text: ``check`` is given one heading level as the indexer
+        types it, this is given the whole ``\index{...}`` argument.
+        """
+        return syntax.check_entry_length(body, self.max_entry_length(project))
 
 
 #: The one instance. Held rather than constructed per call because the

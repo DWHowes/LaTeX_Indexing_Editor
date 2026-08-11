@@ -1,6 +1,8 @@
 from dataclasses import dataclass, fields, asdict
 from typing import Dict, Any
 
+from bookindexcore.persistence import DictGlobalStore, ScopedSettings
+
 @dataclass
 class IndexPrefsData:
     # Absolute path to the pdflatex executable, selected via the "pdflatex"
@@ -114,6 +116,40 @@ class IndexPrefsConfigModel:
     def __init__(self) -> None:
         self._data = IndexPrefsData()
 
+    # The keys this model routes through the shared global/project router:
+    # everything on IndexPrefsData except the two sets with a home of their
+    # own. Structural fields (a compiler path) go to their own columns, and
+    # per-index fields belong to an index definition rather than to the
+    # project as a whole.
+    @staticmethod
+    def _scoped_keys() -> set:
+        return (set(asdict(IndexPrefsData()).keys())
+                - set(PROJECT_STRUCTURAL_KEY_MAP) - set(PER_INDEX_FIELD_MAP))
+
+    def _scoped(self, global_data: Dict[str, Any]) -> ScopedSettings:
+        """
+        The shared settings router, configured for this model's plain fields.
+
+        Built per call rather than held, because the global values arrive from
+        the caller (QSettings, read by PreferencesPersistence) rather than
+        being owned here — and because the routing is stateless apart from
+        which project is open, which the caller establishes immediately.
+
+        This replaces five behaviours this class used to implement privately:
+        seed-fill-missing, project-authoritative read, write-to-the-open-scope,
+        pref_ namespacing and legacy-key migration. Extraction phase 5 had
+        already written a second copy of them by hand for the index
+        definitions, which is what made a shared one worth having.
+        """
+        defaults = {k: v for k, v in asdict(IndexPrefsData()).items()
+                    if k in self._scoped_keys()}
+        store = DictGlobalStore({k: v for k, v in global_data.items()
+                                 if k in defaults})
+        return ScopedSettings(
+            defaults, store, prefix=_PREF_PREFIX,
+            legacy_names=LEGACY_INDEX_PREFS_KEY_ALIASES,
+        )
+
     def update_data(self, updates: Dict[str, Any]) -> None:
         defaults = asdict(self._data.__class__())
         for raw_key, value in updates.items():
@@ -150,15 +186,13 @@ class IndexPrefsConfigModel:
         PROJECT_STRUCTURAL_KEY_MAP fields, which are seeded into their own
         pre-existing structural columns instead.
         """
-        known_keys = (set(asdict(IndexPrefsData()).keys())
-                      - set(PROJECT_STRUCTURAL_KEY_MAP) - set(PER_INDEX_FIELD_MAP))
+        # The plain pref_ group goes through the shared router, which owns the
+        # fill-only-what-is-missing rule and the prefixing. What stays here is
+        # this application's two exceptions to it: fields that live in
+        # structural columns, and fields that belong to an index definition.
         existing = file_persistence.get_all_project_metadata()  # keys already have pref_ if seeded
-
-        missing = {
-            f"{_PREF_PREFIX}{k}": str(v)
-            for k, v in global_data.items()
-            if k in known_keys and f"{_PREF_PREFIX}{k}" not in existing
-        }
+        self._scoped(global_data).open_project(file_persistence)
+        missing: Dict[str, str] = {}
 
         # The per-index fields are seeded into the default index's definition
         # instead, and only while that definition is still untouched -- a
@@ -214,16 +248,14 @@ class IndexPrefsConfigModel:
         stripping the prefix before passing to update_data(). PROJECT_STRUCTURAL_KEY_MAP
         fields are read from their own unprefixed structural columns instead.
         """
-        self._migrate_legacy_project_metadata_keys(file_persistence)
-
-        known_keys = set(asdict(IndexPrefsData()).keys()) - set(PROJECT_STRUCTURAL_KEY_MAP)
+        # The router migrates renamed keys and reads the pref_ group,
+        # project-authoritative. Seeding is deliberately not re-run here:
+        # load and seed are different operations, and open_project performs
+        # the seeding once at the point a project is adopted.
         all_meta = file_persistence.get_all_project_metadata()
-
-        prefs_data = {
-            k[len(_PREF_PREFIX):]: v
-            for k, v in all_meta.items()
-            if k.startswith(_PREF_PREFIX) and k[len(_PREF_PREFIX):] in known_keys
-        }
+        scoped = self._scoped({})
+        scoped.open_project(file_persistence)
+        prefs_data: Dict[str, Any] = dict(scoped.load())
 
         for pref_key, db_key in PROJECT_STRUCTURAL_KEY_MAP.items():
             if db_key in all_meta:

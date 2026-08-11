@@ -344,6 +344,47 @@ def check(text: str, *, role: str = ROLE_DISPLAY) -> list[Finding]:
     return findings
 
 
+def check_entry_length(body: str, limit: Optional[int]) -> list[Finding]:
+    r"""
+    Whether a whole entry is too long for the index engine that will read it.
+
+    Separate from :func:`check` because it asks about a different thing.
+    ``check`` looks at one *field* — a heading level, a sort key — and reports
+    characters that will be misread. This looks at the **whole tag body**, and
+    the only thing it can say is that the engine will refuse it.
+
+    ``limit`` comes from ``dialect.max_entry_length(project)``, which is
+    engine-dependent: measured at 10,239 characters for makeindex 2.17 and
+    about 1,860 for xindy, a five-fold difference (see
+    ``e0_measurements`` in the bookindexcore repository). ``None`` means the
+    engine has no limit and there is nothing to say.
+
+    **Worth checking despite the limits being generous**, because of how the
+    failure presents. makeindex rejects the entry outright, writes nothing for
+    it, records ``First argument too long`` in the ``.ilg`` — and **exits 0**.
+    Nothing in a normal build reports it; the entry is simply missing from the
+    finished index, and the only way to notice is to look for something you
+    know you indexed. xindy is worse in one way and better in another: it dies
+    with a stack overflow and takes the whole run with it, which at least
+    cannot be missed.
+
+    Reported at position 0: the fault is the entry's length rather than
+    anything at a particular character, and underlining ten thousand
+    characters would say nothing.
+    """
+    if not limit or not body:
+        return []
+    if len(body) <= limit:
+        return []
+    return [Finding(
+        ERROR, 0,
+        f"This entry is {len(body):,} characters, and the index engine "
+        f"accepts at most {limit:,}. It will be rejected outright -- missing "
+        f"from the finished index, with the complaint buried in the .ilg log "
+        f"and the build still reporting success.",
+    )]
+
+
 def has_findings(text: str, *, role: str = ROLE_DISPLAY) -> bool:
     """Whether :func:`check` has anything to say about this text."""
     return bool(check(text, role=role))
