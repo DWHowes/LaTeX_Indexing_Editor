@@ -15,11 +15,36 @@ the shared model and stubbed out by two backends — the shared model is meant
 to call ``DocumentBackend.relocate_after`` and apply whatever
 ``LocatorUpdate``s come back.
 
-**That conversion is owed.** ``LatexTextBackend`` already computes exactly
-these relocations and passes the conformance battery on them; nothing in the
-edit pipeline routes through it yet. When it does, the three methods below
-collapse into an ``apply_relocations`` on the shared store, and this file
-becomes the codec binding and nothing else.
+**That conversion happened in phase 5a.** ``shift_coordinates_after`` no
+longer computes anything: it asks ``LatexTextBackend.relocations_for`` what
+moved and hands the answer to the shared store's ``apply_relocations``, which
+applies opaque ``LocatorUpdate``s and never asks what a position is. The sum
+lives with the backend that knows what a LaTeX position *is*; the application
+of it is shared. What is left in this file is the codec binding, the two
+coordinate methods the pipeline still calls by name, and the read accessor the
+controllers use.
+
+**Why the conversion needed a prerequisite.** ``apply_relocations`` matches an
+update to a record by anchor, so it refuses — completely, and loudly — a batch
+in which two records share one. Records used to be able to reach the cache
+with no anchor at all, and every anchorless locator compares equal. The rule
+that mints one now lives at the single point where a row becomes a record; see
+``latex_record_mapping.anchor_for``.
+
+**Where the sum lives, and why not on the backend.** ``LatexTextBackend`` sits
+in ``controllers/``, and a model reaching upwards for it is the shape of the
+first defect phase 0 fixed. The arithmetic is therefore in
+``latex_record_mapping`` — already this application's one written record of
+what a position *is* — and the backend re-exports it under the name §4.2 gives
+it. Both callers get the same function, so they cannot come to disagree about
+which entries an edit moves.
+
+An earlier attempt injected the backend here instead, and is worth recording
+because of how it failed: with the collaborator defaulting to None, every
+construction site that did not inject one got a ``shift_coordinates_after``
+that quietly returned nothing. Coordinates went stale, the next write guard
+refused the edit, and the refusal path opened a modal dialog with no user to
+dismiss it. **A missing collaborator must never be a silent no-op.**
 """
 
 import os
@@ -68,7 +93,7 @@ class EntryModifierModel(QtEntryStore):
         )
 
     # ------------------------------------------------------------------
-    # Coordinate maintenance — LaTeX's alone; see the module docstring
+    # Coordinate maintenance
     # ------------------------------------------------------------------
 
     def shift_coordinates_after(
@@ -78,67 +103,37 @@ class EntryModifierModel(QtEntryStore):
         delta: int,
     ) -> list[int]:
         """
-        Shifts absolute_position and absolute_end for every reference in
-        file_path whose macro starts after after_position.
+        Moves every reference in file_path that starts after after_position,
+        and returns the ids that moved.
 
-        Called immediately after DocumentIOController.rewrite_macro_span
-        returns a non-None delta.  DB update is deferred — the shifted
-        values live in the in-memory cache until the save operation flushes
-        them via update_reference_field.
+        Called immediately after a macro rewrite returns a non-None delta. The
+        database update is deferred: the moved positions live in the cache
+        until the save drain flushes them.
 
-        Parameters
-        ----------
-        file_path : str
-            Normalised path of the file that was just rewritten.
-        after_position : int
-            The absolute_position of the macro that was rewritten.
-            Only references with absolute_position > after_position
-            are shifted (the rewritten entry itself is updated separately
-            by the caller with its new absolute_end).
-        delta : int
-            Signed length change returned by rewrite_macro_span.
-            Positive = macro grew, negative = macro shrank.
-
-        Returns
-        -------
-        list[int]
-            unique_id_numbers of every record that was shifted, so the
-            caller can refresh those rows in the view if needed.
+        **Two halves, deliberately.** ``relocations_for`` answers *what moved*,
+        reading the hints it owns -- the one thing shared code may never do --
+        and the shared store's ``apply_relocations`` moves them, matching by
+        anchor and never looking inside a position. This method is only the
+        seam between the two, which is why it contains no arithmetic of its
+        own. ``LatexTextBackend`` re-exports the same function, so the backend
+        and the store cannot drift apart about which entries an edit moves.
         """
         if delta == 0:
             return []
 
-        norm_target = os.path.normpath(file_path)
-        shifted_ids: list[int] = []
+        moved = self.apply_relocations(codec.relocations_for(
+            [record.locator for record in self._records.values()],
+            container=file_path,
+            after_position=after_position,
+            delta=delta,
+        ))
 
-        for uid, record in list(self._records.items()):
-            if not record.container:
-                continue
-            if os.path.normpath(record.container) != norm_target:
-                continue
-
-            pos = position_of(record)
-            if pos is None or pos <= after_position:
-                continue
-
-            # In place, not replaced. Callers hold the record they got from
-            # get_record and go on using it after asking for a shift, so
-            # rebinding the cache to a new object would leave them mutating an
-            # orphan. That the locator is frozen and the record is not is
-            # exactly what makes this work.
-            record.locator = record.locator.with_hint(
-                absolute_position=pos + delta,
-                absolute_end=None if (end := end_of(record)) is None else end + delta,
-            )
-            shifted_ids.append(uid)
-
-        if shifted_ids:
+        if moved:
             print(
-                f"[MODEL] Shifted coordinates for {len(shifted_ids)} reference(s) "
+                f"[MODEL] Shifted coordinates for {len(moved)} reference(s) "
                 f"in {os.path.basename(file_path)} by {delta:+d}"
             )
-
-        return shifted_ids
+        return moved
 
     def update_entry_coordinates(
         self,

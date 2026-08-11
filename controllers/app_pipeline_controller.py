@@ -44,6 +44,7 @@ from controllers.project_command_manager_controller import ProjectCommandManager
 from bookindexcore.ui.theme.controller import ThemeConfigController
 from controllers.entry_modifier_controller import EntryModifierController
 from controllers.index_edit_controller import IndexEditController
+from controllers.latex_text_backend import LatexTextBackend
 from controllers.range_consistency_controller import RangeConsistencyController
 from controllers.cross_reference_controller import CrossReferenceController
 from controllers.pruned_files_controller import PrunedFilesController
@@ -139,6 +140,13 @@ class AppPipelineController(QObject):
         # in-flight bidirectional edits, keyed by unique_id_number. Must be
         # instantiated before any of its three consumers below.
         self.index_edit_staging_model = QtIndexEditStagingModel(parent=self)
+
+        # The DocumentBackend for this application, held so that shared code
+        # given one has something to hold. The coordinate arithmetic it
+        # re-exports is reached directly by the entry store through
+        # latex_record_mapping, so nothing here has to be wired for a
+        # rewrite to keep every later entry's position in step.
+        self.text_backend = LatexTextBackend(self.doc_io)
 
         self.entry_modifier_model = EntryModifierModel(persistence=None)  # persistence injected after project load
         self.entry_modifier_model.set_staging_model(self.index_edit_staging_model)

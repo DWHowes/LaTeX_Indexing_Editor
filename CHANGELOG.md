@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Internal: the preferences window, and one place that knows where entries are (phase 5a)
+
+**Nothing about using the application changes.** The Preferences window's
+frame, its General tab and its UI Themes tab are shared code now; the LaTeX
+Settings and RTF Export pages stay here. The window looks and behaves exactly
+as it did, including the order of the tabs down the left-hand side, which is
+now stated explicitly rather than left to the shared frame to guess.
+
+The "Page Number Styles" box on the General tab — where you list which macro
+names should show as bold or italic — is now shown only for a format whose
+page styles a project can actually extend. LaTeX's can, so it is there as
+before.
+
+**One real internal fix behind it.** When an index entry is edited or deleted,
+every entry after it in the same file shifts, and the sum that works out which
+ones moved existed in one place while the code that applies it existed in
+another. They are one thing now, in the module that already records what a
+position means. Entries also gained a guaranteed identity: an entry that
+somehow reached the cache without one used to be indistinguishable from any
+other such entry, which could make a whole batch of position updates
+unapplicable. That identity is now derived at the single point where a
+database row becomes an entry, so it cannot be missing.
+
+**A note for anyone running the test suite.** A failure on an error path used
+to open a warning dialog with nobody there to dismiss it, which stopped the
+run dead and looked exactly like an infinite loop. The suite now turns any such
+dialog into an ordinary test failure carrying the dialog's own message.
+
 ### Internal: the project database moves, and starts recording its own version (phase 5)
 
 **Nothing about using the application changes, but this one touches your

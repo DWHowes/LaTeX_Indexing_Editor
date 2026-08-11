@@ -42,7 +42,9 @@ knows is knowledge phase 5 will delete rather than move.
 """
 
 import json
+import os
 
+from bookindexcore.backend.locator import LocatorUpdate
 from bookindexcore.model.records import IndexReference, RowMapping, from_row, to_row
 
 from models.latex_dialect import LATEX_DIALECT
@@ -157,6 +159,82 @@ def shifted_by(record: IndexReference, delta: int) -> IndexReference:
     )
 
 
+def relocations_for(locators, *, container: str, after_position: int, delta: int):
+    r"""
+    What an edit of ``delta`` characters at ``after_position`` moves, among
+    the locators given, as ``LocatorUpdate``s.
+
+    **The one copy of this sum.** ``LatexTextBackend`` re-exports it — that is
+    the name §4.2 gives it, and shared code reaches it there — and the entry
+    store calls it for its cached records. Two implementations would
+    eventually disagree about which entries an edit moves, and that shows up
+    as a write guard refusing an edit several actions later, a long way from
+    the cause.
+
+    It lives *here* rather than in the backend module for a layering reason:
+    ``models/entry_modifier_model.py`` needs it, ``LatexTextBackend`` sits in
+    ``controllers/``, and a model reaching upwards is the fault phase 0
+    removed. This module is already where "what a LaTeX position is" is
+    written down — ``position_of``, ``end_of``, ``moved_to``, ``shifted_by``
+    are all here — so it is the honest home, and the backend importing
+    downwards is the right direction.
+
+    A locator with no position is passed over rather than guessed at: it
+    cannot be placed relative to the edit, so nothing is known about whether
+    it moved.
+    """
+    if not delta:
+        return ()
+
+    target = os.path.normpath(str(container))
+    updates = []
+    for locator in locators:
+        if not locator.container:
+            continue
+        if os.path.normpath(str(locator.container)) != target:
+            continue
+
+        start = locator.hint.get("absolute_position")
+        if start is None or start <= after_position:
+            continue
+
+        end = locator.hint.get("absolute_end")
+        updates.append(LocatorUpdate(
+            before=locator,
+            after=locator.with_hint(
+                absolute_position=start + delta,
+                absolute_end=None if end is None else end + delta,
+            ),
+        ))
+    return tuple(updates)
+
+
+def anchor_for(row: dict) -> str:
+    """
+    This application's anchor rule, in one place: ``path:line:column``.
+
+    Every production path that mints one already spells it this way — the
+    scanner, the manual-insertion handler, the duplicate-reference handler,
+    the project loader — and the database column is ``UNIQUE NOT NULL``, so a
+    row read back from disk always brings its own.
+
+    It is applied here as well because of what an anchor *is for*.
+    ``EntryStore.apply_relocations`` matches an update to a record by anchor,
+    so two records with no anchor have two locators that compare equal, and a
+    relocation batch over them is ambiguous rather than wrong-in-one-place.
+    Deriving the anchor at the single point where a row becomes a record makes
+    that impossible by construction, instead of a precondition every caller
+    has to remember.
+    """
+    existing = row.get("uid")
+    if existing:
+        return str(existing)
+    container = row.get("file_path") or row.get("path") or ""
+    line = row.get("line_number") or row.get("line") or 0
+    column = row.get("column_offset") or row.get("col") or 0
+    return f"{container}:{line}:{column}"
+
+
 def reference_from_row(row: dict) -> IndexReference:
     """
     One database row, or one scanner payload, as a record.
@@ -165,6 +243,8 @@ def reference_from_row(row: dict) -> IndexReference:
     the column names the table uses, which is why a freshly scanned project
     and a reopened one produce identical records.
     """
+    if not row.get("uid"):
+        row = {**row, "uid": anchor_for(row)}
     return from_row(row, LATEX_ROW_MAPPING, dialect=LATEX_DIALECT)
 
 

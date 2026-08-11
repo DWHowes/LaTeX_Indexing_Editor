@@ -38,6 +38,7 @@ from bookindexcore.backend.locator import (
 )
 
 from models import index_tag_grammar as grammar
+from models import latex_record_mapping as codec
 from models.latex_dialect import LATEX_DIALECT
 from models.latex_index_parser import LatexIndexParser
 
@@ -319,23 +320,41 @@ class LatexTextBackend(DocumentBackend):
                 return entry
         return None
 
+    #: What an edit of a given size moves, among a set of locators.
+    #:
+    #: **The arithmetic §4.2 keeps out of shared code**, exposed under the
+    #: name shared code knows it by. Reading ``absolute_position`` out of a
+    #: hint is forbidden to shared code and is precisely this class's
+    #: business: a LaTeX position is a character offset, so an edit
+    #: invalidates every offset after it. Word and InDesign inherit the base
+    #: class's "nothing moved" instead, because a bookmark and an insert label
+    #: travel with their text.
+    #:
+    #: The implementation lives in ``models/latex_record_mapping.py`` and is
+    #: re-exported here rather than written twice. That module is already
+    #: where this application says what a position *is*, and the entry store
+    #: -- a model -- needs the same sum without reaching up into
+    #: ``controllers/``.
+    relocations_for = staticmethod(codec.relocations_for)
+
     def _shift_after(self, container: str, position: int, delta: int):
         """
-        Moves every entry starting after ``position`` by ``delta``.
+        Moves every entry in this backend's own table that starts after
+        ``position``, and reports the moves.
 
-        The arithmetic §4.2 keeps out of shared code. Word and InDesign
-        inherit the base class's "nothing moved"; this is the backend that
-        has to do it, and the reason the method exists at all.
+        The sum itself is :meth:`relocations_for`; this applies the answer to
+        the table. Keeping the two apart is what lets the entry store get the
+        same answer for its own records without this backend having to know
+        that the store exists.
         """
-        if not delta:
-            return ()
-
-        updates = []
-        for entry in self._entries.get(container, ()):
-            if entry.start <= position:
-                continue
-            before = self.locator_for(entry)
-            entry.start += delta
-            entry.end += delta
-            updates.append(LocatorUpdate(before=before, after=self.locator_for(entry)))
-        return tuple(updates)
+        entries = self._entries.get(container, ())
+        by_locator = {self.locator_for(entry): entry for entry in entries}
+        updates = self.relocations_for(
+            list(by_locator), container=container,
+            after_position=position, delta=delta,
+        )
+        for update in updates:
+            entry = by_locator[update.before]
+            entry.start = update.after.hint["absolute_position"]
+            entry.end = update.after.hint["absolute_end"]
+        return updates

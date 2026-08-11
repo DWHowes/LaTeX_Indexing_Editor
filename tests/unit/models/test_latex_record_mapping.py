@@ -17,12 +17,14 @@ from models.latex_record_mapping import (
     DERIVED_COLUMNS,
     LATEX_ROW_MAPPING,
     POSITION_COLUMNS,
+    anchor_for,
     column_of,
     command_of,
     end_of,
     line_of,
     position_of,
     reference_from_row,
+    relocations_for,
     row_from_reference,
     shifted_by,
 )
@@ -171,6 +173,118 @@ class TestTheDerivedColumns:
         record = reference_from_row(dict(ROW, encap="textbf", is_range_closer=1))
         assert record.is_range_closer is False
         assert row_from_reference(record)["is_range_closer"] == 0
+
+
+class TestTheAnchorRule:
+    """
+    ``path:line:column``, applied at the single point where a row becomes a
+    record.
+
+    It matters because of what an anchor is *for*: ``apply_relocations``
+    matches an update to a record by anchor, and two records with no anchor
+    have two locators that compare equal. The batch is then ambiguous rather
+    than wrong in one place, and the store refuses the whole thing.
+    """
+
+    def test_a_stored_uid_is_kept_as_it_is(self):
+        assert reference_from_row(dict(ROW)).locator.anchor == "ch1.tex:12:4"
+
+    def test_a_row_with_no_uid_gets_the_canonical_anchor(self):
+        row = {k: v for k, v in ROW.items() if k != "uid"}
+        assert reference_from_row(row).locator.anchor == "ch1.tex:12:4"
+
+    def test_two_entries_on_one_line_still_differ(self):
+        """
+        The column is in the anchor for exactly this case. Two macros in the
+        same sentence are the ordinary shape of an index, not an edge case.
+        """
+        first = anchor_for(dict(ROW, uid=None, column_offset=4))
+        second = anchor_for(dict(ROW, uid=None, column_offset=30))
+        assert first != second
+
+    def test_an_empty_uid_is_treated_as_absent_rather_than_kept(self):
+        """
+        An empty anchor is the failure case itself, so it must never survive
+        being explicitly present.
+        """
+        assert reference_from_row(dict(ROW, uid="")).locator.anchor == "ch1.tex:12:4"
+
+
+class TestRelocations:
+    """
+    The one copy of "what an edit moves". ``LatexTextBackend`` re-exports it,
+    and the entry store calls it directly; two implementations would
+    eventually disagree about which entries an edit moves, which surfaces as a
+    write guard refusing an edit a long way from the cause.
+    """
+
+    def _locators(self, *positions):
+        return [
+            reference_from_row(dict(
+                ROW, uid=f"ch1.tex:1:{pos}", absolute_position=pos, absolute_end=pos + 10
+            )).locator
+            for pos in positions
+        ]
+
+    def test_only_entries_after_the_edit_move(self):
+        updates = relocations_for(
+            self._locators(10, 100, 200),
+            container="ch1.tex", after_position=100, delta=5,
+        )
+        assert [u.before.hint["absolute_position"] for u in updates] == [200]
+        assert updates[0].after.hint["absolute_position"] == 205
+        assert updates[0].after.hint["absolute_end"] == 215
+
+    def test_the_entry_at_the_edit_position_is_not_moved(self):
+        """
+        It is the one being rewritten. Its own new end is set by the caller,
+        and moving it here would apply the delta to it twice.
+        """
+        updates = relocations_for(
+            self._locators(100), container="ch1.tex", after_position=100, delta=5
+        )
+        assert updates == ()
+
+    def test_a_negative_delta_closes_the_gap(self):
+        updates = relocations_for(
+            self._locators(200), container="ch1.tex", after_position=0, delta=-17
+        )
+        assert updates[0].after.hint["absolute_position"] == 183
+
+    def test_another_file_is_untouched(self):
+        elsewhere = reference_from_row(
+            dict(ROW, uid="ch2.tex:1:0", file_path="ch2.tex", absolute_position=200)
+        ).locator
+        updates = relocations_for(
+            [elsewhere], container="ch1.tex", after_position=0, delta=5
+        )
+        assert updates == ()
+
+    def test_a_zero_delta_moves_nothing(self):
+        assert relocations_for(
+            self._locators(200), container="ch1.tex", after_position=0, delta=0
+        ) == ()
+
+    def test_a_locator_with_no_position_is_passed_over(self):
+        """
+        Passed over rather than guessed at: it cannot be placed relative to
+        the edit, so nothing is known about whether it moved.
+        """
+        unplaced = reference_from_row(
+            dict(ROW, uid="ch1.tex:9:9", absolute_position=None, absolute_end=None)
+        ).locator
+        assert relocations_for(
+            [unplaced], container="ch1.tex", after_position=0, delta=5
+        ) == ()
+
+    def test_the_backend_re_exports_this_very_function(self):
+        """
+        Not merely an equivalent one. The whole point of the arrangement is
+        that there is one implementation.
+        """
+        from controllers.latex_text_backend import LatexTextBackend
+
+        assert LatexTextBackend.relocations_for is relocations_for
 
 
 class TestHostOnlyColumns:

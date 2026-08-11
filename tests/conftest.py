@@ -62,6 +62,42 @@ def _reset_theme_broker_connections():
         AppStyleConfiguration.event_broker().theme_mutated.disconnect()
 
 
+@pytest.fixture(autouse=True)
+def _no_modal_dialogs(monkeypatch):
+    """
+    Turns every static QMessageBox into a failure instead of a block.
+
+    A modal dialog in an automated run is not a slow test, it is a stopped
+    one, and from the outside it is indistinguishable from an infinite loop --
+    which is what makes it expensive. It has cost this project real debugging
+    time twice: both times a genuine regression on an error path opened
+    ``QMessageBox.warning`` with nobody there to dismiss it, and both times the
+    visible symptom was a suite that simply never finished.
+
+    Raising instead converts that into a named test failing with the dialog's
+    own message in the assertion, which points straight at the error path that
+    was taken. A test that legitimately drives a prompt overrides this from
+    its own body -- ``monkeypatch.setattr`` inside the test runs after the
+    fixture, so the later patch wins.
+
+    Deliberately autouse and suite-wide rather than opt-in: the tests that
+    need it are exactly the ones nobody predicted would need it.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    def _blocked(kind):
+        def blocked(*args, **kwargs):
+            text = args[2] if len(args) > 2 else kwargs.get("text", "")
+            raise AssertionError(
+                f"QMessageBox.{kind} would have blocked the run: {text!r}. "
+                f"An error path was taken -- see the captured stdout above."
+            )
+        return blocked
+
+    for kind in ("warning", "critical", "information", "question", "about"):
+        monkeypatch.setattr(QMessageBox, kind, staticmethod(_blocked(kind)))
+
+
 @pytest.fixture
 def fresh_persistence(tmp_path) -> FileTreePersistence:
     """

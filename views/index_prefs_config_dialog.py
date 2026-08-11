@@ -1,51 +1,88 @@
-from PySide6.QtWidgets import (
-    QDialog, QTabWidget, QWidget, QVBoxLayout, QFormLayout, QHBoxLayout, QFileDialog, 
-    QCheckBox, QLineEdit, QDialogButtonBox, QSpinBox, QComboBox, QGroupBox, QLabel, QPushButton,
-)
-from PySide6.QtCore import Signal
+r"""
+This application's preferences window: the shared shell plus the LaTeX pages.
 
+The frame, the General tab and the UI Themes tab are
+``bookindexcore.ui.preferences.PreferencesDialog``. What is left here is what
+§5.4 calls Tier D — a compiler path, three package option sets, two indexing
+engines and a ``\printindex`` command. None of it means anything to a format
+that is not LaTeX.
+
+Two things worth knowing before editing this file:
+
+- **The vertical tab order is declared, not derived.** General, LaTeX
+  Settings, UI Themes, RTF Export — with a LaTeX page on either side of the
+  shared Themes page. That is the window as it shipped, and :meth:`tab_order`
+  is where it is stated rather than something the shell guesses.
+- **The page-style name lists are no longer here.** They moved into the
+  shared General tab, which shows them only for a dialect whose page-style
+  vocabulary a project can extend. LaTeX's can; Word's cannot.
+"""
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QFormLayout, QHBoxLayout, QFileDialog, QTabWidget,
+    QCheckBox, QLineEdit, QSpinBox, QComboBox, QGroupBox, QPushButton,
+)
+
+from bookindexcore.ui.preferences import GeneralPreferencesTab, PreferencesDialog
+
+from models.latex_dialect import LATEX_DIALECT
 from models.preferences_persistence import (
+    RECENT_PROJECTS_DEFAULT_SHOWN,
     RECENT_PROJECTS_MAX_SHOWN,
     RECENT_PROJECTS_MIN_SHOWN,
 )
-from bookindexcore.ui.theme.config_model import DarkThemeColours, LightThemeColours
 
-from bookindexcore.ui.style import AppStyleConfiguration
-from bookindexcore.ui.theme.config_dialog import _ThemeTab
 
-class IndexPrefsConfigDialog(QDialog):
-    sig_config_accepted = Signal(dict, dict, dict)  # prefs, dark_colours, light_colours
-    # The General tab travels separately because it is application-scoped:
-    # sig_config_accepted's payload gets written into the open project's
-    # project_metadata, which is the wrong home for a setting that has
-    # nothing to do with which book is open.
-    sig_general_accepted = Signal(dict)
-    # Clearing the recent-projects list acts immediately rather than on OK.
-    # It is a destructive one-off, not a setting being edited, so leaving it
-    # pending until the dialog is accepted would make Cancel look like it
-    # undoes it when it cannot.
-    sig_clear_recent_projects = Signal()
-
+class IndexPrefsConfigDialog(PreferencesDialog):
     def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Application Preferences")
-        self.resize(720, 560)
-        self._init_ui()
+        super().__init__(LATEX_DIALECT, parent)
 
-    def _init_ui(self) -> None:
-        main_layout = QVBoxLayout(self)
-        
-        # CORE VERTICAL TAB WINDOW (Positioned West)
-        self.vertical_tabs = QTabWidget(self)
-        self.vertical_tabs.setTabPosition(QTabWidget.TabPosition.West)
-        
-        # PRIMARY VERTICAL TAB 1: LATEX CONFIGURATION MATRIX
-        self.vtab_latex = QWidget()
-        vlatex_layout = QVBoxLayout(self.vtab_latex)
+    def build_general_tab(self) -> GeneralPreferencesTab:
+        """
+        The shared tab, told this application's recent-projects bounds.
+
+        They travel this way round on purpose: PreferencesPersistence is what
+        clamps a hand-edited value on the way in and out, so it owns the
+        numbers, and a widget module handing them *back* to a model would put
+        the model underneath a view.
+        """
+        return GeneralPreferencesTab(
+            self._dialect, self,
+            recent_projects_bounds=(RECENT_PROJECTS_MIN_SHOWN, RECENT_PROJECTS_MAX_SHOWN),
+            recent_projects_default=RECENT_PROJECTS_DEFAULT_SHOWN,
+        )
+
+    # -- the LaTeX-only pages -----------------------------------------------
+
+    def build_host_tabs(self) -> None:
+        self.vtab_latex = self._build_latex_tab()
+        self.vtab_rtf_export = self._build_rtf_export_tab()
+
+    def tab_order(self) -> list[tuple[str, QWidget]]:
+        return [
+            ("General", self.general_tab),
+            ("LaTeX Settings", self.vtab_latex),
+            ("UI Themes", self.theme_tab),
+            ("RTF Export", self.vtab_rtf_export),
+        ]
+
+    def _build_rtf_export_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        self.chk_rtf_display_on_creation = QCheckBox("Display RTF file on creation")
+        layout.addWidget(self.chk_rtf_display_on_creation)
+        layout.addStretch()
+        return tab
+
+    def _build_latex_tab(self) -> QWidget:
+        tab = QWidget()
+        vlatex_layout = QVBoxLayout(tab)
         vlatex_layout.setContentsMargins(5, 5, 5, 5)
-        
+
         # Nested Horizontal Tab Array
-        self.horizontal_latex_tabs = QTabWidget(self.vtab_latex)
+        self.horizontal_latex_tabs = QTabWidget(tab)
 
         # --- sub-tab: pdflatex ---
         self.tab_pdflatex = QWidget()
@@ -83,7 +120,7 @@ class IndexPrefsConfigDialog(QDialog):
         lay_imakeidx.addRow("Number of Columns:", self.spn_imakeidx_cols)
         lay_imakeidx.addRow("Index Title/Heading:", self.txt_imakeidx_title)
         lay_imakeidx.addRow(self.chk_imakeidx_intoc)
-        
+
         # --- sub-tab: idxlayout ---
         self.tab_idxlayout = QWidget()
         lay_idxlayout = QFormLayout(self.tab_idxlayout)
@@ -93,7 +130,7 @@ class IndexPrefsConfigDialog(QDialog):
         lay_idxlayout.addRow(self.chk_idxlayout)
         lay_idxlayout.addRow(self.chk_idxlayout_unbal)
         lay_idxlayout.addRow(self.chk_idxlayout_just)
-        
+
         # --- sub-tab: hyperref ---
         self.tab_hyperref = QWidget()
         lay_hyperref = QFormLayout(self.tab_hyperref)
@@ -165,7 +202,7 @@ class IndexPrefsConfigDialog(QDialog):
         vbox_binary.addWidget(self.pg_xindy)
 
         lay_makeindex.addWidget(grp_binary)
-        
+
         grp_ist = QGroupBox("Index Formatting Rules")
         form_ist = QFormLayout(grp_ist)
         self.chk_ist_headings = QCheckBox("Enable Alphabetical Section Headers (A, B, C...)")
@@ -183,7 +220,7 @@ class IndexPrefsConfigDialog(QDialog):
         form_ist.addRow("Standard Page Delimiter Mapping:", self.txt_ist_pdelim)
         form_ist.addRow("Page Range Connection Symbol:", self.txt_ist_rdelim)
         lay_makeindex.addWidget(grp_ist)
-        
+
         # --- sub-tab: printindex ---
         self.tab_printindex = QWidget()
         lay_printindex = QFormLayout(self.tab_printindex)
@@ -191,7 +228,7 @@ class IndexPrefsConfigDialog(QDialog):
         self.chk_printindex_multi = QCheckBox("Wrap inside Multicols environment block")
         lay_printindex.addRow("Output Printing Command:", self.txt_printindex_cmd)
         lay_printindex.addRow(self.chk_printindex_multi)
-        
+
         # Mount all sub-tabs to nested horizontal framework container
         self.horizontal_latex_tabs.addTab(self.tab_pdflatex, "LaTeX Compiler")
         self.horizontal_latex_tabs.addTab(self.tab_imakeidx, "pkg: imakeidx")
@@ -201,175 +238,17 @@ class IndexPrefsConfigDialog(QDialog):
         self.horizontal_latex_tabs.addTab(self.tab_printindex, "cmd: printindex")
         vlatex_layout.addWidget(self.horizontal_latex_tabs)
 
-        # PRIMARY VERTICAL TAB 2: THEMES COLOUR CONFIGURATION
-        self.vtab_themes = QWidget()
-        vthemes_layout = QVBoxLayout(self.vtab_themes)
-        vthemes_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Nested horizontal tabs — one per theme variant
-        self.horizontal_theme_tabs = QTabWidget(self.vtab_themes)
-
-        # These are populated externally via populate_theme_fields()
-        # so we initialise with defaults here as a safe fallback
-        from dataclasses import asdict
-        self._dark_tab  = _ThemeTab(asdict(DarkThemeColours()),  is_dark=True)
-        self._light_tab = _ThemeTab(asdict(LightThemeColours()), is_dark=False)
-
-        self.horizontal_theme_tabs.addTab(self._dark_tab,  "Dark Theme")
-        self.horizontal_theme_tabs.addTab(self._light_tab, "Light Theme")
-        vthemes_layout.addWidget(self.horizontal_theme_tabs)
-
-        # PRIMARY VERTICAL TAB 3: RTF EXPORT CONFIGURATION
-        self.vtab_rtf_export = QWidget()
-        vtab_rtf_layout = QVBoxLayout(self.vtab_rtf_export)
-        vtab_rtf_layout.setContentsMargins(5, 5, 5, 5)
-
-        self.chk_rtf_display_on_creation = QCheckBox("Display RTF file on creation")
-        vtab_rtf_layout.addWidget(self.chk_rtf_display_on_creation)
-        vtab_rtf_layout.addStretch()
-
-        # PRIMARY VERTICAL TAB 4: GENERAL APPLICATION BEHAVIOUR
-        #
-        # Application-scoped, unlike LaTeX Settings: these are properties
-        # of the installation, not of one book, so they are persisted
-        # straight to QSettings and never copied into project_metadata.
-        # That is why they travel on their own signal -- see _on_accepted.
-        self.vtab_general = QWidget()
-        vgeneral_layout = QVBoxLayout(self.vtab_general)
-        vgeneral_layout.setContentsMargins(5, 5, 5, 5)
-
-        grp_editing = QGroupBox("Editing")
-        form_editing = QFormLayout(grp_editing)
-
-        self.spn_undo_stack_size = QSpinBox()
-        self.spn_undo_stack_size.setRange(1, 10000)
-        # A form layout stretches its field column, which on a number this
-        # short reads as an unfinished layout rather than a deliberate one.
-        self.spn_undo_stack_size.setMaximumWidth(120)
-        self.spn_undo_stack_size.setToolTip(
-            "How many index operations Undo can step back through.\n"
-            "Lowering this discards the oldest steps immediately."
-        )
-        form_editing.addRow("Undo stack size:", self.spn_undo_stack_size)
-        vgeneral_layout.addWidget(grp_editing)
-
-        grp_recent = QGroupBox("Recent Projects")
-        form_recent = QFormLayout(grp_recent)
-
-        self.chk_recent_projects_enabled = QCheckBox(
-            "Show recently opened projects on the File menu"
-        )
-        form_recent.addRow(self.chk_recent_projects_enabled)
-
-        self.spn_recent_projects_max = QSpinBox()
-        self.spn_recent_projects_max.setRange(
-            RECENT_PROJECTS_MIN_SHOWN, RECENT_PROJECTS_MAX_SHOWN
-        )
-        self.spn_recent_projects_max.setMaximumWidth(120)
-        self.spn_recent_projects_max.setToolTip(
-            "How many projects the File > Open Recent list shows.\n"
-            "Lowering this hides the oldest entries rather than deleting "
-            "them, so raising it again brings them back."
-        )
-        form_recent.addRow("Projects to list:", self.spn_recent_projects_max)
-
-        # Clearing lives here, not only on the submenu: switching the feature
-        # off hides that submenu, and the button to erase the list would go
-        # with it exactly when someone most wants it.
-        self.btn_clear_recent_projects = QPushButton("Clear List Now")
-        self.btn_clear_recent_projects.setMaximumWidth(160)
-        self.btn_clear_recent_projects.setToolTip(
-            "Forget every remembered project. This cannot be undone."
-        )
-        self.btn_clear_recent_projects.clicked.connect(self._on_clear_recent_clicked)
-        form_recent.addRow("", self.btn_clear_recent_projects)
-
-        self.lbl_recent_cleared = QLabel("")
-        self.lbl_recent_cleared.setWordWrap(True)
-        form_recent.addRow(self.lbl_recent_cleared)
-
-        vgeneral_layout.addWidget(grp_recent)
-
-        grp_autosave = QGroupBox("Auto-Save")
-        form_autosave = QFormLayout(grp_autosave)
-
-        self.chk_autosave_enabled = QCheckBox("Save the project automatically")
-        form_autosave.addRow(self.chk_autosave_enabled)
-
-        self.spn_autosave_interval = QSpinBox()
-        self.spn_autosave_interval.setRange(1, 120)
-        self.spn_autosave_interval.setSuffix(" minutes")
-        self.spn_autosave_interval.setMaximumWidth(160)
-        form_autosave.addRow("Interval:", self.spn_autosave_interval)
-
-        lbl_autosave_note = QLabel(
-            "An automatic save is a real save: it also becomes the point "
-            "Discard reverts to. The clock restarts whenever you save "
-            "yourself, and a save is skipped when there is nothing to write."
-        )
-        lbl_autosave_note.setWordWrap(True)
-        form_autosave.addRow(lbl_autosave_note)
-        vgeneral_layout.addWidget(grp_autosave)
-
-        grp_logging = QGroupBox("Session Logs")
-        form_logging = QFormLayout(grp_logging)
-
-        self.txt_log_directory_name = QLineEdit()
-        self.txt_log_directory_name.setMaximumWidth(280)
-        self.txt_log_directory_name.setPlaceholderText("session_logs")
-        self.txt_log_directory_name.setToolTip(
-            "Folder name, not a full path — the folder is created inside "
-            "the open project's own directory."
-        )
-        form_logging.addRow("Log folder name:", self.txt_log_directory_name)
-        vgeneral_layout.addWidget(grp_logging)
-
-        grp_encap = QGroupBox("Page Number Styles")
-        form_encap = QFormLayout(grp_encap)
-
-        lbl_encap_note = QLabel(
-            "Which encap names the Entry Table's Page column shows as bold "
-            "or italic. Add your own here if your project styles page "
-            "numbers with a custom command. Separate names with commas, and "
-            "leave off the backslash."
-        )
-        lbl_encap_note.setWordWrap(True)
-        form_encap.addRow(lbl_encap_note)
-
-        self.txt_encap_bold = QLineEdit()
-        self.txt_encap_bold.setPlaceholderText("bold, textbf, bf")
-        form_encap.addRow("Bold:", self.txt_encap_bold)
-
-        self.txt_encap_italic = QLineEdit()
-        self.txt_encap_italic.setPlaceholderText("textit, it, italic")
-        form_encap.addRow("Italic:", self.txt_encap_italic)
-        vgeneral_layout.addWidget(grp_encap)
-
-        vgeneral_layout.addStretch()
-
-        # Mount Primary West View Elements to Root Frame
-        self.vertical_tabs.addTab(self.vtab_general, "General")
-        self.vertical_tabs.addTab(self.vtab_latex, "LaTeX Settings")
-        self.vertical_tabs.addTab(self.vtab_themes, "UI Themes")
-        self.vertical_tabs.addTab(self.vtab_rtf_export, "RTF Export")
-        main_layout.addWidget(self.vertical_tabs)
-        
-        # Dialog Decision Box Base Action Matrix
-        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
-        self.button_box.accepted.connect(self._on_accepted)
-        self.button_box.rejected.connect(self.reject)
-        main_layout.addWidget(self.button_box)
-
         # Wire Up Presentation Reactivity Toggles
-        self.chk_autosave_enabled.toggled.connect(self.spn_autosave_interval.setEnabled)
-        self.chk_recent_projects_enabled.toggled.connect(
-            self.spn_recent_projects_max.setEnabled)
         self.chk_imakeidx.toggled.connect(self._toggle_imakeidx_widgets)
         self.chk_idxlayout.toggled.connect(self._toggle_idxlayout_widgets)
         self.chk_hyperref.toggled.connect(self._toggle_hyperref_widgets)
         self.chk_ist_headings.toggled.connect(self.chk_ist_bold.setEnabled)
         self.cmb_index_engine.currentTextChanged.connect(self._toggle_index_engine_widgets)
         self.cmb_index_engine.currentTextChanged.connect(self._clear_index_binary_path)
+
+        return tab
+
+    # -- reactivity ---------------------------------------------------------
 
     def _toggle_imakeidx_widgets(self, state: bool) -> None:
         self.chk_imakeidx_noauto.setEnabled(state)
@@ -392,7 +271,7 @@ class IndexPrefsConfigDialog(QDialog):
         self.pg_xindy.setVisible(not is_makeindex)
 
     def _clear_index_binary_path(self, engine: str) -> None:
-        # Fired only on user-driven dropdown changes (see wiring below), not
+        # Fired only on user-driven dropdown changes (see wiring above), not
         # on the programmatic setCurrentText() in populate_fields(), so a
         # freshly loaded path isn't wiped out when the dialog opens.
         self.txt_index_binary_path.clear()
@@ -413,6 +292,8 @@ class IndexPrefsConfigDialog(QDialog):
         if file_name[0]:
             self.txt_index_binary_path.setText(file_name[0])
 
+    # -- populate and collect ------------------------------------------------
+
     def populate_fields(self, data: dict) -> None:
         """Concrete mapping initialization layer without hasattr/getattr leaks."""
         self.txt_pdflatex_path.setText(data.get("pdflatex_path", ""))
@@ -424,17 +305,17 @@ class IndexPrefsConfigDialog(QDialog):
         self.txt_imakeidx_title.setText(data.get("imakeidx_title", ""))
         self.chk_imakeidx_intoc.setChecked(data.get("imakeidx_intoc", False))
         self._toggle_imakeidx_widgets(self.chk_imakeidx.isChecked())
-        
+
         self.chk_idxlayout.setChecked(data.get("use_idxlayout", True))
         self.chk_idxlayout_unbal.setChecked(data.get("idxlayout_unbalanced", True))
         self.chk_idxlayout_just.setChecked(data.get("idxlayout_justified", False))
         self._toggle_idxlayout_widgets(self.chk_idxlayout.isChecked())
-        
+
         self.chk_hyperref.setChecked(data.get("include_hyperref", False))
         self.chk_hyperref_color.setChecked(data.get("hyperref_colorlinks", True))
         self.cmb_hyperref_color.setCurrentText(data.get("hyperref_linkcolor", "blue"))
         self._toggle_hyperref_widgets(self.chk_hyperref.isChecked())
-        
+
         self.cmb_index_engine.setCurrentText(data.get("index_engine", "makeindex"))
         self.chk_makeindex_blank.setChecked(data.get("makeindex_compress_blanks", True))
         self.chk_makeindex_space.setChecked(data.get("makeindex_ignore_spaces", False))
@@ -447,7 +328,7 @@ class IndexPrefsConfigDialog(QDialog):
         self.txt_xindy_module.setText(data.get("xindy_module", "default.xdy"))
         self.txt_index_binary_path.setText(data.get("index_binary_path", ""))
         self._toggle_index_engine_widgets(self.cmb_index_engine.currentText())
-        
+
         self.chk_ist_headings.setChecked(data.get("fmt_enable_headings", True))
         self.chk_ist_bold.setChecked(data.get("fmt_heading_bold", True))
         self.chk_ist_bold.setEnabled(self.chk_ist_headings.isChecked())
@@ -456,77 +337,14 @@ class IndexPrefsConfigDialog(QDialog):
         self.txt_ist_num.setText(data.get("fmt_numbers_label", "Numbers"))
         self.txt_ist_pdelim.setText(data.get("fmt_page_delimiter", ", "))
         self.txt_ist_rdelim.setText(data.get("fmt_range_delimiter", "--"))
-        
+
         self.txt_printindex_cmd.setText(data.get("printindex_command", "printindex"))
         self.chk_printindex_multi.setChecked(data.get("printindex_use_multicols", False))
 
         self.chk_rtf_display_on_creation.setChecked(data.get("rtf_display_on_creation", False))
 
-    def populate_general_fields(self, data: dict) -> None:
-        """
-        Fills the General tab. Separate from populate_fields() because its
-        source is separate: application preferences from QSettings, not
-        the project's index prefs model.
-        """
-        self.spn_undo_stack_size.setValue(int(data.get("undo_stack_size", 200)))
-
-        autosave_on = bool(data.get("autosave_enabled", True))
-        self.chk_autosave_enabled.setChecked(autosave_on)
-        self.spn_autosave_interval.setValue(int(data.get("autosave_interval_minutes", 5)))
-        self.spn_autosave_interval.setEnabled(autosave_on)
-
-        self.txt_log_directory_name.setText(str(data.get("log_directory_name", "session_logs")))
-
-        self.txt_encap_bold.setText(self._join_encap(data.get("encap_bold_values")))
-        self.txt_encap_italic.setText(self._join_encap(data.get("encap_italic_values")))
-
-        recent_on = bool(data.get("recent_projects_enabled", True))
-        self.chk_recent_projects_enabled.setChecked(recent_on)
-        self.spn_recent_projects_max.setValue(int(data.get("recent_projects_max", 10)))
-        self.spn_recent_projects_max.setEnabled(recent_on)
-        self.lbl_recent_cleared.clear()
-
-    def _on_clear_recent_clicked(self) -> None:
-        """Clears immediately and confirms in place.
-
-        No modal confirmation: the list is a convenience, not data, and the
-        worst case is having to reopen a project the long way once. An
-        in-place acknowledgement is used instead of a status bar because this
-        dialog is modal and has no status bar of its own.
-        """
-        self.sig_clear_recent_projects.emit()
-        self.lbl_recent_cleared.setText("Recent projects list cleared.")
-
-    @staticmethod
-    def _join_encap(value) -> str:
-        if isinstance(value, (list, tuple)):
-            return ", ".join(str(item).strip() for item in value if str(item).strip())
-        return str(value or "")
-
-    @staticmethod
-    def _split_encap(text: str) -> list:
-        return [part.strip() for part in str(text).split(",") if part.strip()]
-
-    def populate_theme_fields(self, dark_colours: dict, light_colours: dict) -> None:
-        """Called by controller before exec() — mirrors populate_fields() pattern."""
-        for field, row in self._dark_tab._rows.items():
-            if field in dark_colours:
-                row.set_colour(dark_colours[field])
-        self._dark_tab._colours = dict(dark_colours)
-        self._dark_tab._refresh_preview()
-
-        for field, row in self._light_tab._rows.items():
-            if field in light_colours:
-                row.set_colour(light_colours[field])
-        self._light_tab._colours = dict(light_colours)
-        self._light_tab._refresh_preview()
-
-    def current_theme_colours(self) -> tuple[dict, dict]:
-        """Read by controller in _on_accepted — returns working colour state."""
-        return self._dark_tab.current_colours(), self._light_tab.current_colours()        
-
-    def _on_accepted(self) -> None:
-        payload = {
+    def collect_host_payload(self) -> dict:
+        return {
             "pdflatex_path": self.txt_pdflatex_path.text().strip(),
             "use_imakeidx": self.chk_imakeidx.isChecked(),
             "imakeidx_noautomatic": self.chk_imakeidx_noauto.isChecked(),
@@ -562,29 +380,3 @@ class IndexPrefsConfigDialog(QDialog):
             "printindex_use_multicols": self.chk_printindex_multi.isChecked(),
             "rtf_display_on_creation": self.chk_rtf_display_on_creation.isChecked(),
         }
-
-        # An empty encap field means "leave the current list alone", not
-        # "recognise nothing" -- set_encap_style_values treats it that way
-        # too, so a cleared field restores rather than disables.
-        general_payload = {
-            "undo_stack_size": self.spn_undo_stack_size.value(),
-            "autosave_enabled": self.chk_autosave_enabled.isChecked(),
-            "autosave_interval_minutes": self.spn_autosave_interval.value(),
-            "log_directory_name": self.txt_log_directory_name.text().strip(),
-            "encap_bold_values": self._split_encap(self.txt_encap_bold.text()),
-            "encap_italic_values": self._split_encap(self.txt_encap_italic.text()),
-            "recent_projects_enabled": self.chk_recent_projects_enabled.isChecked(),
-            "recent_projects_max": self.spn_recent_projects_max.value(),
-        }
-
-        dark_colours, light_colours = self.current_theme_colours()
-
-        self.sig_general_accepted.emit(general_payload)
-        self.sig_config_accepted.emit(payload, dark_colours, light_colours)
-
-        self.accept()
-
-    def apply_theme_configuration(self, is_dark: bool) -> None:
-        colours = DarkThemeColours() if is_dark else LightThemeColours()
-        self.setStyleSheet(AppStyleConfiguration.get_dialog_stylesheet(colours))
-

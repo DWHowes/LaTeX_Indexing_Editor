@@ -100,6 +100,12 @@ class LatexDialect:
     #: has to be emulated and no level is spent.
     class_emulation = ClassEmulation.NATIVE
 
+    #: A page style here is a macro name, and a project may invent one --
+    #: ``\strong``, a Table-of-Authorities command. :meth:`set_emphasis_values`
+    #: exists precisely so that Preferences can hand those over, so this
+    #: declaration is not an aspiration: there is already a route in.
+    page_style_vocabulary_is_open = True
+
     def __init__(
         self,
         bold_values: Iterable[str] = grammar.DEFAULT_BOLD_ENCAP_VALUES,

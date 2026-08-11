@@ -143,6 +143,31 @@ backend did not cause. The generated preamble and cross-reference blocks are
 spliced straight into a file by machinery that knows nothing about entries,
 and everything after the splice point moves anyway.
 
+### `latex_record_mapping.py` — the anchor rule and the relocation sum
+
+Two later additions, both about the same thing: an entry's *identity*, as
+distinct from its position.
+
+`TestTheAnchorRule` covers `path:line:column`, applied at the single point
+where a row becomes a record. It matters because of what an anchor is for —
+`EntryStore.apply_relocations` matches an update to a record by anchor, and two
+records with no anchor have two locators that compare *equal*. The batch is
+then ambiguous rather than wrong in one place, and the store refuses the whole
+thing. Deriving the anchor in the codec makes that impossible by construction
+instead of a precondition every caller has to remember.
+
+`TestRelocations` covers `relocations_for`, which is the one copy of "what an
+edit moves". `test_the_backend_re_exports_this_very_function` asserts identity
+rather than equivalence, and is the point of the arrangement: `LatexTextBackend`
+presents the function under the name §4.2 gives it, the entry store calls it
+directly, and two implementations of the sum would eventually disagree about
+which entries an edit moves — surfacing as a write guard refusing an edit a
+long way from the cause.
+
+`test_the_entry_at_the_edit_position_is_not_moved` is the subtle one: that
+entry is the one being rewritten, its new end is set by the caller, and moving
+it here would apply the delta to it twice.
+
 ### `latex_record_mapping.py`
 
 The boundary between this application's `project_references` columns and the
@@ -541,6 +566,33 @@ for why.
 
 `pytest-qt`'s `qtbot`, testing one controller at a time with hand-built
 collaborators.
+
+### A modal dialog is a stopped run, not a slow one
+
+`tests/conftest.py` has an autouse `_no_modal_dialogs` fixture that turns every
+static `QMessageBox` into an `AssertionError` carrying the dialog's own
+message. It is suite-wide and not opt-in, deliberately: the tests that need it
+are exactly the ones nobody predicted would need it.
+
+It exists because this has cost real debugging time **twice**, both times the
+same way. A genuine regression on an error path opened `QMessageBox.warning`
+with nobody there to dismiss it; the visible symptom was a suite that simply
+never finished, which from the outside is indistinguishable from an infinite
+loop. The second time, the culprit was `EntryModifierController.
+_perform_row_deletion` — the deletion had been refused because coordinates had
+gone stale, which is precisely the information the dialog was holding hostage.
+
+A test that legitimately drives a prompt overrides the fixture from its own
+body; `monkeypatch.setattr` inside a test runs after the fixture, so the later
+patch wins. `test_batch_delete_removes_every_selected_entry` does exactly that
+for `QMessageBox.question`.
+
+**If the suite ever does appear to hang**, two things make it quick, and both
+were learned the hard way: do not pipe the run through anything (a pipe buffers,
+so a progressing run looks silent), and use
+`faulthandler.dump_traceback_later(interval, repeat=True, file=<handle>,
+exit=False)` — with `exit=True` the process dies before the stack flushes, and
+the one thing you needed is the one thing you do not get.
 
 ### Convention: prefer real collaborators over stubs
 

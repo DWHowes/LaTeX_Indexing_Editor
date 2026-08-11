@@ -19,6 +19,11 @@ _GENERAL_LIST_KEYS = ("encap_bold_values", "encap_italic_values")
 # should change how many are *displayed*, not throw history away, so raising it
 # again brings the older entries back. (Deliberately unlike the undo stack,
 # where lowering the bound really does discard.)
+#
+# These stay here rather than moving to the shared General tab, and the tab is
+# *told* them (IndexPrefsConfigDialog passes them through). A model importing a
+# widget module for three integers is the shape of Phase 0's first defect, and
+# this application remains the authority on what it will store.
 RECENT_PROJECTS_KEY = "recent_projects"
 RECENT_PROJECTS_HARD_CAP = 25
 RECENT_PROJECTS_MAX_SHOWN = 25
