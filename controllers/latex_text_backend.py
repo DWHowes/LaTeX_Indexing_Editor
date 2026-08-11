@@ -51,15 +51,24 @@ class MacroEntry:
     one, and moving it is a coordinate update rather than a new identity.
     """
 
-    __slots__ = ("anchor", "container", "start", "end", "command", "index_class")
+    __slots__ = ("anchor", "container", "start", "end", "command", "index_class",
+                 "line", "column")
 
-    def __init__(self, anchor, container, start, end, command="index", index_class=""):
+    def __init__(self, anchor, container, start, end, command="index", index_class="",
+                 line=1, column=0):
         self.anchor = anchor
         self.container = container
         self.start = start
         self.end = end
         self.command = command
         self.index_class = index_class
+        # Carried because this application persists them and shows them, not
+        # because the backend reasons with them: every position question here
+        # is answered from `start`. They are part of the hint for the same
+        # reason the offsets are -- they are this format's own idea of where
+        # something is, and no other format has them.
+        self.line = line
+        self.column = column
 
     @property
     def entry_id(self):
@@ -125,6 +134,8 @@ class LatexTextBackend(DocumentBackend):
                 end=uid["end_absolute_index"] + 1,
                 command=uid.get("macro_command", "index"),
                 index_class=uid.get("index_class", ""),
+                line=uid.get("line_number", 1),
+                column=uid.get("column_offset", 0),
             )
             for _parts, uid in payloads
         ]
@@ -182,6 +193,8 @@ class LatexTextBackend(DocumentBackend):
                 end=end,
                 command=codec.command_of(record),
                 index_class=record.index_class,
+                line=codec.line_of(record),
+                column=codec.column_of(record),
             ))
         entries.sort(key=lambda e: e.start)
         self._entries[key] = entries
@@ -199,6 +212,7 @@ class LatexTextBackend(DocumentBackend):
             raw_entry.container,
             raw_entry.anchor,
             {"absolute_position": raw_entry.start, "absolute_end": raw_entry.end,
+             "line_number": raw_entry.line, "column_offset": raw_entry.column,
              "macro_command": raw_entry.command},
         )
 
@@ -222,8 +236,13 @@ class LatexTextBackend(DocumentBackend):
     # -- mutation -----------------------------------------------------------
 
     def apply(self, edit: SourceEdit) -> EditResult:
-        """
-        Replaces one entry's source span, and reports what else moved.
+        r"""
+        Rewrites, places or removes one macro, and reports what else moved.
+
+        All three, because that is what ``apply`` means since phase 5b. An
+        anchorless locator names a *place* -- its hint's
+        ``absolute_position`` -- and places a new macro there; an anchored one
+        names an existing macro, and an empty ``after`` removes it.
 
         Refuses rather than guesses when the span does not currently read as
         ``edit.before``: a locator can be stale, an external edit can have
@@ -231,6 +250,9 @@ class LatexTextBackend(DocumentBackend):
         longer means anything is how a rewrite lands in the middle of a
         neighbouring word.
         """
+        if not edit.names_an_entry:
+            return self._place(edit)
+
         entry = self._find(edit.locator)
         if entry is None:
             return EditResult.failed(
@@ -257,6 +279,14 @@ class LatexTextBackend(DocumentBackend):
                 f"in {entry.container!r}"
             )
 
+        # An empty `after` removes the macro. The span is replaced with
+        # nothing rather than blanked, so the surrounding words close up the
+        # way an indexer expects when a reference is dropped.
+        if not after:
+            relocations = self._shift_after(entry.container, entry.start, delta)
+            self._entries[self._normalise(entry.container)].remove(entry)
+            return EditResult(ok=True, relocations=relocations)
+
         entry.end = entry.start + len(after)
         return EditResult(
             ok=True,
@@ -264,59 +294,51 @@ class LatexTextBackend(DocumentBackend):
             relocations=self._shift_after(entry.container, entry.start, delta),
         )
 
-    def insert(self, at: Locator, payload) -> EditResult:
-        """Inserts a new macro immediately after the entry ``at`` names."""
-        anchor_entry = self._find(at)
-        if anchor_entry is None:
-            return EditResult.failed(f"no entry anchored {at.anchor!r} to insert beside")
+    def _place(self, edit: SourceEdit) -> EditResult:
+        r"""
+        Writes a new macro at the position an anchorless locator carries.
 
-        text = str(payload)
-        coords = self._io.insert_macro_at_position(
-            anchor_entry.container, anchor_entry.end, text
-        )
+        **A place, not a neighbour.** The interface used to say "insert beside
+        the entry ``at`` names", which cannot express the thing this
+        application's insertion path actually does: a user puts the caret
+        somewhere and adds an entry, and the first ``\index`` in a fresh
+        chapter has no neighbour at all. Reading the position out of the
+        hint is exactly what a hint is for -- it is this backend's own
+        business, and only this application builds one.
+        """
+        text = str(edit.after)
+        if not text:
+            return EditResult.failed("an anchorless edit with nothing to write places nothing")
+
+        container = edit.locator.container
+        position = edit.locator.hint.get("absolute_position")
+        if position is None:
+            return EditResult.failed(
+                f"no absolute_position in the hint of a placement in {container!r}"
+            )
+
+        coords = self._io.insert_macro_at_position(container, position, text)
         if coords is None:
-            return EditResult.failed(f"the insert was refused in {anchor_entry.container!r}")
+            return EditResult.failed(f"the insert was refused in {container!r}")
 
+        parsed = grammar.parse_macro(text, self._pattern)
         new_entry = MacroEntry(
-            anchor=f"{anchor_entry.container}:{coords['line_number']}:{coords['column_offset']}",
-            container=anchor_entry.container,
+            anchor=f"{container}:{coords['line_number']}:{coords['column_offset']}",
+            container=container,
             start=coords["absolute_position"],
             end=coords["absolute_end"],
-            command=grammar.parse_macro(text, self._pattern).command
-            if grammar.parse_macro(text, self._pattern) else "index",
+            command=parsed.command if parsed else "index",
+            index_class=parsed.index_class if parsed else "",
+            line=coords["line_number"],
+            column=coords["column_offset"],
         )
         # Shift the others first, then add the newcomer -- otherwise the new
         # entry is itself in the list being shifted and moves twice.
-        relocations = self._shift_after(anchor_entry.container, anchor_entry.end, len(text))
-        self._entries[anchor_entry.container].append(new_entry)
-        self._entries[anchor_entry.container].sort(key=lambda e: e.start)
+        relocations = self._shift_after(container, position, len(text))
+        self._entries.setdefault(self._normalise(container), []).append(new_entry)
+        self._entries[self._normalise(container)].sort(key=lambda e: e.start)
 
         return EditResult(ok=True, locator=self.locator_for(new_entry), relocations=relocations)
-
-    def delete(self, at: Locator) -> EditResult:
-        """
-        Removes a macro from the document.
-
-        The span is replaced with nothing rather than blanked, so the
-        surrounding words close up the way an indexer expects when a
-        reference is dropped.
-        """
-        entry = self._find(at)
-        if entry is None:
-            return EditResult.failed(f"no entry anchored {at.anchor!r} to delete")
-
-        delta = self._io.rewrite_macro_span(
-            entry.container, entry.start, entry.end, "",
-            expected_macro_name=entry.command,
-        )
-        if delta is None:
-            return EditResult.failed(
-                f"the write guard rejected the span at {entry.start}:{entry.end}"
-            )
-
-        relocations = self._shift_after(entry.container, entry.start, delta)
-        self._entries[entry.container].remove(entry)
-        return EditResult(ok=True, relocations=relocations)
 
     # -- bookkeeping --------------------------------------------------------
 

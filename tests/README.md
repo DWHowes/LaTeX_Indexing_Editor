@@ -143,6 +143,24 @@ backend did not cause. The generated preamble and cross-reference blocks are
 spliced straight into a file by machinery that knows nothing about entries,
 and everything after the splice point moves anyway.
 
+### `test_latex_text_backend_adoption.py` — identity across the seam
+
+`adopt_entries` seeds the backend's entry table from records the application
+already holds rather than from a scan, because the two disagree about
+*identity*: a scan mints anchors from where a macro is now, and the app's
+anchors were minted once and never move.
+
+The two tests in `TestIdentityAcrossTheSeam` are both regressions from
+converting real call sites in phase 5b, and **neither produced an error** —
+which is why they are worth keeping:
+
+- Normalising the container spelling made every locator the backend returned
+  compare unequal to the ones the store held, so `apply_relocations` moved
+  nothing and reported nothing wrong.
+- A returned locator that omitted `line_number`/`column_offset` — NOT NULL
+  columns — produced a save that failed at the database, a long way from the
+  edit that caused it.
+
 ### `latex_record_mapping.py` — the anchor rule and the relocation sum
 
 Two later additions, both about the same thing: an entry's *identity*, as

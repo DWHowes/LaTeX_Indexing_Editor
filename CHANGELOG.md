@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Internal: every index edit now goes through one door (phase 5b)
+
+**Nothing about using the application changes.** Editing a heading, renaming
+one, deleting a reference, duplicating one, and undoing or redoing any of
+those all now write through a single component that also reports which other
+entries moved as a result — rather than each doing its own writing and its own
+arithmetic. There were nine such places; there is one.
+
+The practical benefit is that "which entries moved when this one changed
+length" is worked out in exactly one way. It was already down to one *sum* in
+the previous release; now the writing and the sum happen together, so they
+cannot disagree about which edit they refer to.
+
+One thing worth knowing if you ever look at a session log: a write that gets
+refused now says so with the reason attached, rather than only that something
+failed.
+
 ### Internal: the preferences window, and one place that knows where entries are (phase 5a)
 
 **Nothing about using the application changes.** The Preferences window's

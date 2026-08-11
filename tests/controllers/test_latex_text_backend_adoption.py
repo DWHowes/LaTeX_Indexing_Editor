@@ -122,25 +122,48 @@ class TestIdentityAcrossTheSeam:
         record = store.get_record(1)
         assert LatexTextBackend(doc_io=None).locator_for(adopted[0]) == record.locator
 
-    def test_a_returned_locator_revises_the_hint_rather_than_defining_it(self, store, tmp_path):
+    def test_a_returned_locator_carries_every_position_column(self, store, tmp_path):
         """
-        ``locator_for`` builds a hint out of what the *backend* owns — the two
-        offsets and the macro name. The application keeps more than that in
-        there, and ``line_number``/``column_offset`` are NOT NULL columns, so
-        assigning a returned locator wholesale produced a save that failed at
-        the database a long way from the edit that caused it.
+        ``line_number`` and ``column_offset`` are NOT NULL columns, and a
+        returned locator used to omit them: ``locator_for`` built its hint from
+        the two offsets and the macro name alone, so assigning one wholesale
+        produced a save that failed at the database a long way from the edit
+        that caused it.
 
-        This pins the merge that `_write_span` performs.
+        They are part of the hint now rather than something the caller merges
+        back in. That is the right place for them — they are this format's own
+        idea of where something is, which no other format has — and it means a
+        placement can report where a *new* entry landed completely, which the
+        duplicate-reference paths need.
         """
         container = str(tmp_path / "chapter.tex")
         store.load_records([_row(1, container, 0)])
-        record = store.get_record(1)
 
         backend = LatexTextBackend(doc_io=None)
         adopted = backend.adopt_entries(container, store.all_records())
         returned = backend.locator_for(adopted[0])
 
-        assert "line_number" not in returned.hint          # the backend does not track it
-        merged = record.locator.with_hint(**returned.hint)
-        assert merged.hint["line_number"] == 1             # ...and merging keeps it
+        assert returned.hint["line_number"] == 1
+        assert returned.hint["column_offset"] == 1
+        assert returned.hint["absolute_position"] == 0
+        assert returned.hint["absolute_end"] == 17
+
+    def test_a_returned_locator_revises_the_hint_rather_than_defining_it(self, store, tmp_path):
+        """
+        The merge `_write_span` performs, kept even though the backend now
+        carries every column the store persists. A backend builds the hint it
+        owns and cannot know what else an application keeps in there, so
+        replacing wholesale is the wrong operation regardless of whether it
+        happens to lose anything today.
+        """
+        container = str(tmp_path / "chapter.tex")
+        store.load_records([_row(1, container, 0)])
+        record = store.get_record(1)
+        record.locator = record.locator.with_hint(something_the_app_keeps="yes")
+
+        backend = LatexTextBackend(doc_io=None)
+        adopted = backend.adopt_entries(container, store.all_records())
+        merged = record.locator.with_hint(**backend.locator_for(adopted[0]).hint)
+
+        assert merged.hint["something_the_app_keeps"] == "yes"
         assert merged.hint["absolute_position"] == 0

@@ -17,7 +17,7 @@ from bookindexcore.model.commands import (
     deletion_command,
     edit_command,
 )
-from bookindexcore.backend.locator import SourceEdit
+from bookindexcore.backend.locator import Locator, SourceEdit
 from views.index_tree_view import IndexTreeView
 from controllers.document_io_controller import DocumentIOController
 from controllers.latex_text_backend import LatexTextBackend
@@ -167,6 +167,56 @@ class IndexEditController(QObject):
             self._entry_model.mark_dirty(moved_id)
 
         return True
+
+    def place_macro(self, container: str, position: int, text: str):
+        r"""
+        Writes a new macro at ``position``, and brings the cache in step.
+
+        The companion to :meth:`_write_span` for the one operation that names
+        no existing entry. Its locator carries a place and no anchor, which is
+        what ``apply`` reads as "put a new one here" — the shape the protocol
+        gained in phase 5b, because the old ``insert(at)`` meant *beside an
+        existing entry* and could not express a caret in a chapter that has no
+        entries yet.
+
+        Returns the backend's ``EditResult``. The caller needs the locator off
+        it: the anchor the backend minted is the new entry's identity, and
+        there is no other way to learn it.
+        """
+        self.text_backend.adopt_entries(container, self._entry_model.all_records())
+
+        result = self.text_backend.apply(SourceEdit(
+            entry_id=None,
+            locator=Locator(container, "", {"absolute_position": position}),
+            before="",
+            after=text,
+        ))
+        if not result.ok:
+            print(f"[WRITE] placement refused in {os.path.basename(container)}: {result.message}")
+            return result
+
+        for moved_id in self._entry_model.apply_relocations(result.relocations):
+            self._entry_model.mark_dirty(moved_id)
+        return result
+
+    def note_external_shift(self, container: str, position: int, delta: int) -> list:
+        """
+        Keeps positions in step after text this backend did not write.
+
+        The generated-block injections — the preamble, custom commands, head
+        notes, ``cross_refs.tex`` — splice straight into a file, so every entry
+        after the splice point moves with no ``SourceEdit`` involved. The
+        backend has an entry point for exactly that, and skipping it leaves
+        entries whose coordinates are stale, which the next write guard
+        refuses rather than corrects.
+        """
+        self.text_backend.adopt_entries(container, self._entry_model.all_records())
+        moved = self._entry_model.apply_relocations(
+            self.text_backend.shift_after(container, position, delta)
+        )
+        for moved_id in moved:
+            self._entry_model.mark_dirty(moved_id)
+        return moved
 
     # ------------------------------------------------------------------
     # Inline edit activation
@@ -1197,16 +1247,45 @@ class IndexEditController(QObject):
         return True
 
     def _apply_macro_edit(self, edit) -> bool:
-        """
-        Writes one recorded span edit, then keeps every coordinate that
-        depends on it in step. Returns False if the span doesn't currently
-        hold what the edit expects to replace.
+        r"""
+        Replays one recorded span edit, then keeps every coordinate that
+        depends on it in step.
+
+        The undo/redo path, and the one place all three operations arrive
+        through the same door -- a recorded edit with no ``before_text`` is
+        re-inserting something a deletion removed, and one with no
+        ``after_text`` is removing something an insertion added.
+
+        **The record may not exist yet**, which is why this cannot simply call
+        :meth:`_write_span`. Undoing a deletion re-writes the macro *first*
+        and recreates the record afterwards (``_recreate_entry``), so there is
+        nothing in the cache to look a locator up on. Placement takes the
+        position from the recorded edit instead, which is exactly the case the
+        anchorless locator exists for.
+
+        Returns False without leaving a partial write behind: an edit whose
+        span no longer holds what was recorded aborts, and the caller rolls
+        back whatever the command had already applied.
         """
         file_path = edit.file_path
         position = edit.absolute_position
-        old_end = position + len(edit.before_text)
 
         if edit.before_text:
+            record = self._entry_model.get_record(edit.entry_id)
+            if record is not None:
+                if not self._write_span(edit.entry_id, edit.before_text, edit.after_text):
+                    return False
+                return True
+
+            # No cached record, so there is no locator to name the entry by
+            # and `apply` has nothing to find. The span is still on disk, so
+            # it is rewritten directly and the backend is told what moved --
+            # the same "somebody else changed the text" route the injections
+            # take. **The one write in this application that does not go
+            # through `backend.apply`**, and it is here because identity is
+            # what the backend needs and identity is exactly what a record
+            # that no longer exists cannot supply.
+            old_end = position + len(edit.before_text)
             current = self._doc_io.read_macro_span(file_path, position, old_end)
             if current != edit.before_text:
                 print(
@@ -1220,22 +1299,11 @@ class IndexEditController(QObject):
             )
             if delta is None:
                 return False
-        else:
-            if self._doc_io.insert_macro_at_position(file_path, position, edit.after_text) is None:
-                return False
-            delta = len(edit.after_text)
+            self.note_external_shift(file_path, position, delta)
+            return True
 
-        # The edited entry's own span, when the record is there to update.
-        # It isn't for an insertion -- the record is created afterwards,
-        # already carrying these coordinates.
-        if edit.after_text and self._entry_model.get_location_metadata(edit.entry_id) is not None:
-            self._entry_model.update_entry_coordinates(edit.entry_id, position, edit.absolute_end)
-            self._entry_model.mark_dirty(edit.entry_id)
-
-        if delta:
-            for shifted_id in self._entry_model.shift_coordinates_after(file_path, position, delta):
-                self._entry_model.mark_dirty(shifted_id)
-
+        if not self.place_macro(file_path, position, edit.after_text).ok:
+            return False
         return True
 
     def _roll_back_applied_edits(self, applied: list) -> None:

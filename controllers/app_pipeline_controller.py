@@ -62,6 +62,26 @@ from bookindexcore.ui.dialogs.statistics_dialog import IndexStatisticsDialog
 from views.rtf_viewer_dialog import RtfViewerDialog
 from views.head_note_dialog import HeadNoteDialog
 
+def _placement_coords(result) -> dict:
+    r"""
+    A backend placement's ``EditResult``, in the coordinate shape the
+    new-entry paths already speak.
+
+    The backend reports where a new macro landed as a ``Locator``, whose hint
+    is its own business and happens to hold exactly these four values. This is
+    the one place that reads them back out, so that ``_build_duplicate_entry_dict``
+    and its siblings keep taking the plain dict they always did rather than
+    each learning what a hint is.
+    """
+    hint = result.locator.hint
+    return {
+        "line_number": hint.get("line_number", 1),
+        "column_offset": hint.get("column_offset", 0),
+        "absolute_position": hint.get("absolute_position"),
+        "absolute_end": hint.get("absolute_end"),
+    }
+
+
 class AppPipelineController(QObject):
     name_inversion_completed = Signal(QModelIndex, str)
     # Carries a finished lookup back from the worker thread: the persistent
@@ -1326,12 +1346,11 @@ class AppPipelineController(QObject):
         if not edits or not self.entry_modifier_model:
             return
 
+        # Through the backend, which is what `shift_after` is for: a change
+        # this backend did not make, whose consequences it still has to
+        # account for.
         for after_position, delta in edits:
-            shifted_ids = self.entry_modifier_model.shift_coordinates_after(
-                file_path, after_position, delta
-            )
-            for shifted_id in shifted_ids:
-                self.entry_modifier_model.mark_dirty(shifted_id)
+            self.index_edit_ctrl.note_external_shift(file_path, after_position, delta)
 
     def _refresh_file_sync_checksums(self) -> None:
         """
@@ -2544,11 +2563,12 @@ class AppPipelineController(QObject):
             and entry_dict["absolute_end"] is not None
         ):
             delta = entry_dict["absolute_end"] - entry_dict["absolute_position"]
-            shifted_ids = self.entry_modifier_ctrl.model.shift_coordinates_after(
+            # The macro was written by the editor's own cursor, not by the
+            # backend, so this is the same "somebody else changed the text"
+            # route the generated-block injections take.
+            self.index_edit_ctrl.note_external_shift(
                 entry_dict["file_path"], entry_dict["absolute_position"], delta
             )
-            for shifted_id in shifted_ids:
-                self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
 
         # Only the opener goes to the tree
         if not entry_dict["is_range_closer"]:
@@ -2631,13 +2651,10 @@ class AppPipelineController(QObject):
         if not macro_text:
             return False
 
-        coords = self.doc_io.insert_macro_at_position(file_path, abs_end, macro_text)
-        if coords is None:
+        result = self.index_edit_ctrl.place_macro(file_path, abs_end, macro_text)
+        if not result.ok:
             return False
-
-        shifted_ids = self.entry_modifier_ctrl.model.shift_coordinates_after(file_path, abs_pos, len(macro_text))
-        for shifted_id in shifted_ids:
-            self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
+        coords = _placement_coords(result)
 
         new_entry = self._build_duplicate_entry_dict(original, coords, self.macro_id_generator.get_and_increment_id())
         self._resolve_and_register_new_entry(new_entry, persistence, add_to_tree=True)
@@ -2666,26 +2683,21 @@ class AppPipelineController(QObject):
         if not opener_text or not closer_text:
             return False
 
-        # Insert the opener's copy first, then re-read the closer's
-        # location before touching it -- the opener-copy insert may have
-        # shifted it, since the closer always sits later in the file.
-        new_opener_coords = self.doc_io.insert_macro_at_position(file_path, opener_end, opener_text)
-        if new_opener_coords is None:
+        # Place the opener's copy first, then re-read the closer's location
+        # before touching it -- the opener-copy placement may have shifted it,
+        # since the closer always sits later in the file.
+        opener_result = self.index_edit_ctrl.place_macro(file_path, opener_end, opener_text)
+        if not opener_result.ok:
             return False
-        shifted = self.entry_modifier_ctrl.model.shift_coordinates_after(file_path, opener_pos, len(opener_text))
-        for shifted_id in shifted:
-            self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
+        new_opener_coords = _placement_coords(opener_result)
 
         closer_now = self.entry_modifier_ctrl.model.get_record(partner_id)
-        closer_pos_now = position_of(closer_now)
         closer_end_now = end_of(closer_now)
 
-        new_closer_coords = self.doc_io.insert_macro_at_position(file_path, closer_end_now, closer_text)
-        if new_closer_coords is None:
+        closer_result = self.index_edit_ctrl.place_macro(file_path, closer_end_now, closer_text)
+        if not closer_result.ok:
             return False
-        shifted2 = self.entry_modifier_ctrl.model.shift_coordinates_after(file_path, closer_pos_now, len(closer_text))
-        for shifted_id in shifted2:
-            self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
+        new_closer_coords = _placement_coords(closer_result)
 
         new_opener_id = self.macro_id_generator.get_and_increment_id()
         new_closer_id = self.macro_id_generator.get_and_increment_id()
