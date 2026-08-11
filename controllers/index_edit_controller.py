@@ -17,8 +17,10 @@ from bookindexcore.model.commands import (
     deletion_command,
     edit_command,
 )
+from bookindexcore.backend.locator import SourceEdit
 from views.index_tree_view import IndexTreeView
 from controllers.document_io_controller import DocumentIOController
+from controllers.latex_text_backend import LatexTextBackend
 
 
 
@@ -79,6 +81,15 @@ class IndexEditController(QObject):
         self._entry_model = entry_modifier_model
         self._staging_model = staging_model
 
+        # This application's DocumentBackend, constructed here rather than
+        # injected. Injecting it with a None default is what turned a stale
+        # coordinate into a hung test suite once already: every construction
+        # site that did not supply one silently stopped keeping positions in
+        # step. It is cheap, it needs only the doc_io this controller already
+        # holds, and AppPipelineController reads it back off here so that
+        # there is exactly one entry table.
+        self.text_backend = LatexTextBackend(doc_io)
+
         # Wire double-click to our handler — we disconnect the existing
         # navigation handler and re-route so we can split col 0 / col 1 behaviour.
         # The tree's existing doubleClicked connection (_process_embedded_metrics_click)
@@ -92,6 +103,70 @@ class IndexEditController(QObject):
         # Guard flag — set True while we are programmatically updating the model
         # so _on_tree_item_edited doesn't re-enter.
         self._rewriting = False
+
+    # ------------------------------------------------------------------
+    # The write seam
+    # ------------------------------------------------------------------
+
+    def _write_span(self, entry_id: int, before: str, after: str) -> bool:
+        r"""
+        Rewrites one entry's source span through the backend, and brings the
+        cache in step with whatever the backend says moved.
+
+        **This is the whole of §4.2's arrangement, at one call site.** The
+        backend performs the write, reports the entry's new position, and
+        reports every other entry that moved as ``LocatorUpdate``s; the store
+        applies those without asking what a position is. Passing ``""`` as
+        ``after`` deletes, which is why deletion does not need its own method.
+
+        The table is adopted immediately beforehand rather than scanned. The
+        backend mints anchors from where macros are *now*; this application's
+        anchors were minted at the scan that first filled its database and are
+        identity rather than position. After any edit the two disagree, and
+        the backend stops finding the entry it is being asked about --
+        reporting, not unreasonably, that no such entry exists.
+
+        Returns False without leaving a partial write behind. The backend
+        refuses rather than guesses when the span no longer reads as
+        ``before``, which is what stops a rewrite landing in the middle of a
+        neighbouring word after somebody else has edited the file.
+        """
+        record = self._entry_model.get_record(entry_id)
+        if record is None:
+            print(f"[WRITE] no cached record for entry {entry_id}")
+            return False
+
+        # Every record, not the ones this controller thinks are in the file:
+        # adopt_entries normalises and filters, which puts the one place that
+        # knows a container is a *path* in charge of deciding what counts as
+        # the same file. Two spellings of one path would otherwise leave the
+        # table short of entries, and a missing entry is one that never gets
+        # told it moved.
+        self.text_backend.adopt_entries(
+            record.locator.container, self._entry_model.all_records()
+        )
+
+        result = self.text_backend.apply(SourceEdit(
+            entry_id=entry_id, locator=record.locator, before=before, after=after,
+        ))
+        if not result.ok:
+            print(f"[WRITE] refused for entry {entry_id}: {result.message}")
+            return False
+
+        if result.locator is not None:
+            # Merged, not assigned. A backend builds the hint it owns --
+            # offsets and the macro name -- and knows nothing of the other
+            # things this application keeps in there, so replacing wholesale
+            # drops them. line_number and column_offset are NOT NULL columns,
+            # so the symptom was a save that failed at the database rather
+            # than anywhere near the edit that caused it.
+            record.locator = record.locator.with_hint(**result.locator.hint)
+            self._entry_model.mark_dirty(entry_id)
+
+        for moved_id in self._entry_model.apply_relocations(result.relocations):
+            self._entry_model.mark_dirty(moved_id)
+
+        return True
 
     # ------------------------------------------------------------------
     # Inline edit activation
@@ -443,23 +518,14 @@ class IndexEditController(QObject):
             new_macro_body, command=command_name,
             index_class=grammar.index_class_of(old_macro, grammar.command_pattern(command_name)),
         )
-        delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro, expected_macro_name=command_name)
-        if delta is None:
+        if not self._write_span(uid, old_macro, new_macro):
             # Write did not happen — revert the staged value so it doesn't
             # drift out of sync with what's actually on the .tex source.
             self._staging_model.discard(uid)
             return False
 
-        self._entry_model.update_entry_coordinates(uid, abs_pos, abs_pos + len(new_macro))
-        self._entry_model.mark_dirty(uid)
-
         if record:
             record.heading_raw = new_heading
-
-        if delta != 0:
-            shifted_ids = self._entry_model.shift_coordinates_after(file_path, abs_pos, delta)
-            for shifted_id in shifted_ids:
-                self._entry_model.mark_dirty(shifted_id)
 
         if recorder is not None and old_macro:
             recorder.append((
@@ -680,21 +746,12 @@ class IndexEditController(QObject):
                 current_partner_macro, grammar.command_pattern(partner_command)
             ),
         )
-        delta = self._doc_io.rewrite_macro_span(partner_file, partner_pos, partner_end, new_partner_macro, expected_macro_name=partner_command)
-        if delta is None:
+        if not self._write_span(partner_id, current_partner_macro, new_partner_macro):
             print(f"[CONTROLLER WARNING] _sync_range_partner: rewrite rejected for partner {partner_id}")
             return False
 
-        self._entry_model.update_entry_coordinates(partner_id, partner_pos, partner_pos + len(new_partner_macro))
-        self._entry_model.mark_dirty(partner_id)
-
         if partner_record:
             partner_record.heading_raw = new_heading_no_encap
-
-        if delta != 0:
-            shifted_ids = self._entry_model.shift_coordinates_after(partner_file, partner_pos, delta)
-            for shifted_id in shifted_ids:
-                self._entry_model.mark_dirty(shifted_id)
 
         return True
 
@@ -734,8 +791,7 @@ class IndexEditController(QObject):
             new_canonical_heading, command=command_name,
             index_class=grammar.index_class_of(old_macro, grammar.command_pattern(command_name)),
         )
-        delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro, expected_macro_name=command_name)
-        if delta is None:
+        if not self._write_span(entry_id, old_macro, new_macro):
             return False
 
         if old_macro:
@@ -745,18 +801,8 @@ class IndexEditController(QObject):
                 [HeadingChange(entry_id, old_heading, new_canonical_heading)],
             ))
 
-        self._entry_model.update_entry_coordinates(
-            entry_id, abs_pos, abs_pos + len(new_macro)
-        )
-        self._entry_model.mark_dirty(entry_id)                     # NEW
-
         if record:
             record.heading_raw = new_canonical_heading
-
-        if delta != 0:
-            shifted_ids = self._entry_model.shift_coordinates_after(file_path, abs_pos, delta)
-            for shifted_id in shifted_ids:                          # NEW
-                self._entry_model.mark_dirty(shifted_id)           # NEW
 
         # Keep this entry's range partner (if any) in sync -- this is the
         # actual fix for table edits only ever updating the range opener
@@ -814,14 +860,11 @@ class IndexEditController(QObject):
         snapshot = self._snapshot_entry(entry_id)
         old_macro = self._doc_io.read_macro_span(file_path, abs_pos, abs_end) or ""
 
-        delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, "", expected_macro_name=command_name)
-        if delta is None:
+        # An empty `after` is a deletion -- SourceEdit says so, and expressing
+        # it as an edit rather than a separate kind is what lets a command
+        # holding a mixture invert by inverting each of its edits.
+        if not self._write_span(entry_id, old_macro, ""):
             return False
-
-        if delta != 0:
-            shifted_ids = self._entry_model.shift_coordinates_after(file_path, abs_pos, delta)
-            for shifted_id in shifted_ids:
-                self._entry_model.mark_dirty(shifted_id)
 
         self._cleanup_deleted_entry(entry_id, heading_text, heading_id)
 

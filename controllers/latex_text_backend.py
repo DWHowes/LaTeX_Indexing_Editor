@@ -132,6 +132,61 @@ class LatexTextBackend(DocumentBackend):
         self._entries[container] = entries
         return entries
 
+    def adopt_entries(self, container: str, records) -> list[MacroEntry]:
+        r"""
+        Rebuilds one container's entry table from records the application
+        already holds, instead of from a scan.
+
+        **This is what makes the backend usable by an application that has
+        been running.** :meth:`add_container` mints anchors from where each
+        macro is found *right now*; the application's anchors were minted at
+        the scan that first populated its database and have not changed since,
+        because an anchor is identity rather than position. The moment
+        anything is edited the two disagree, and :meth:`_find` stops finding
+        the entry the application is asking about — not loudly, but by
+        reporting that no such entry exists.
+
+        Adopting resolves it in the only direction that can be right: the
+        application's anchors are the ones its database, its undo stack and
+        its cached records are all keyed by, so the table takes them and the
+        scan-minted ones are discarded.
+
+        A record with no position is skipped rather than adopted at a guessed
+        offset. It cannot be written to safely, and an entry in the table at
+        the wrong place is worse than an entry missing from it: the first
+        rewrites the wrong span, the second refuses.
+
+        **The adopted entry keeps the application's own spelling of the
+        container, not a normalised one**, and that is load-bearing rather
+        than tidy. A ``Locator`` compares equal on ``(container, anchor)`` as
+        opaque strings, so the locators this backend hands back have to be
+        string-identical to the ones the application is holding or they match
+        nothing. Normalising here — `C:/x/y.tex` becoming `C:\\x\\y.tex` —
+        made every relocation silently miss, which shows up not as an error
+        but as entries that quietly failed to move. Matching still normalises;
+        only the stored spelling is left alone.
+        """
+        key = self._normalise(container)
+        entries = []
+        for record in records:
+            locator = record.locator
+            if self._normalise(locator.container) != key:
+                continue
+            start, end = codec.position_of(record), codec.end_of(record)
+            if start is None or end is None:
+                continue
+            entries.append(MacroEntry(
+                anchor=locator.anchor,
+                container=locator.container,
+                start=start,
+                end=end,
+                command=codec.command_of(record),
+                index_class=record.index_class,
+            ))
+        entries.sort(key=lambda e: e.start)
+        self._entries[key] = entries
+        return entries
+
     def containers(self) -> list[str]:
         return list(self._entries)
 
@@ -346,8 +401,12 @@ class LatexTextBackend(DocumentBackend):
         the table. Keeping the two apart is what lets the entry store get the
         same answer for its own records without this backend having to know
         that the store exists.
+
+        Normalises its own lookup, because an adopted entry carries the
+        application's spelling of the container rather than this backend's --
+        see :meth:`adopt_entries`.
         """
-        entries = self._entries.get(container, ())
+        entries = self._entries.get(self._normalise(container), ())
         by_locator = {self.locator_for(entry): entry for entry in entries}
         updates = self.relocations_for(
             list(by_locator), container=container,
