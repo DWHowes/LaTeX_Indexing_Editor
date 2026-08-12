@@ -44,6 +44,8 @@ from controllers.project_command_manager_controller import ProjectCommandManager
 from bookindexcore.ui.theme.controller import ThemeConfigController
 from controllers.entry_modifier_controller import EntryModifierController
 from controllers.bulk_repair_controller import BulkRepairController
+from controllers.check_index_controller import CheckIndexController
+from models.check_index_prefs import CheckIndexPrefs
 from controllers.index_edit_controller import IndexEditController
 from controllers.latex_text_backend import LatexTextBackend
 from controllers.range_consistency_controller import RangeConsistencyController
@@ -248,6 +250,21 @@ class AppPipelineController(QObject):
                                                             on_general_changed=self.apply_general_preferences,
                                                             )
 
+        # Check Index reports rather than writes, so it takes the backend --
+        # for document order -- and not the edit controller. Built here rather
+        # than beside the other index tools because it reads the index-prefs
+        # model above: in LaTeX the entry-length ceiling belongs to the engine
+        # the project selected, not to the format. Its own settings follow the
+        # open project like every other preference; see
+        # _handle_project_open_completion.
+        self.check_index_prefs = CheckIndexPrefs()
+        self.check_index_ctrl = CheckIndexController(
+            self.entry_modifier_model,
+            self.text_backend,
+            self.check_index_prefs,
+            prefs_config=self._index_prefs_model,
+        )
+
         # Map context menu structures straight to the newly instantiated widgets
         self._file_context_manager = FileTreeContextMenuManager(self.file_tree_widget)
         self._index_context_manager = IndexTreeContextMenuManager(self.index_tree_widget)
@@ -348,6 +365,7 @@ class AppPipelineController(QObject):
         self.window.menu_bar.create_rtf_file_requested.connect(self._handle_create_rtf_file_request)
         self.window.menu_bar.resync_index_data_requested.connect(self._handle_manual_resync_request)
         self.window.menu_bar.repair_entries_requested.connect(self._handle_repair_entries_request)
+        self.window.menu_bar.check_index_requested.connect(self._handle_check_index_request)
         self.window.menu_bar.resync_workspace_files_requested.connect(self._handle_manual_workspace_resync_request)
         self.window.menu_bar.manage_pruned_files_requested.connect(self.pruned_files_ctrl.manage_pruned_files)
 
@@ -1221,6 +1239,10 @@ class AppPipelineController(QObject):
                                                   )
         self.range_consistency_ctrl.set_active_project(self.scope_ctrl.get_persistence_model())
         self.cross_reference_ctrl.set_active_project(self.scope_ctrl.get_persistence_model(), project_root_dir)
+        # Check Index's vocabulary and rule selection become this project's:
+        # globals seed anything the project has not been given, and never
+        # overwrite what it has.
+        self.check_index_prefs.open_project(self.scope_ctrl.get_persistence_model())
         self.window.status_bar.showMessage(f"Project '{project_name}' loaded successfully.", 3000)
 
         # Enable menu items that are gated behind an active project context
@@ -1695,6 +1717,26 @@ class AppPipelineController(QObject):
             self._tree_modified = True
             self.window.status_bar.showMessage(
                 f"Repaired {repaired} index entries.", 4000)
+
+    def _handle_check_index_request(self) -> None:
+        """
+        Runs Check Index and shows the report.
+
+        Never marks the project modified. The tool reports and does not write,
+        which is the point of it -- most of what it finds has no mechanical
+        repair, and being told two headings disagree does not say which one is
+        right. The corrections are made in the ordinary editing surfaces,
+        where they get the validation and the undo those already have.
+        """
+        if self.scope_ctrl.active_project_name == "Untitled Project":
+            self.window.status_bar.showMessage("No project is open.", 3000)
+            return
+
+        found = self.check_index_ctrl.run(self.window)
+        if found:
+            self.window.status_bar.showMessage(
+                f"Check index: {found} thing{'s' if found != 1 else ''} to "
+                f"look at.", 4000)
 
     def _confirm_resync_over_unsaved_changes(self) -> bool:
         """
@@ -2233,6 +2275,7 @@ class AppPipelineController(QObject):
         self.project_command_controller.set_active_project(None, None)
         self.range_consistency_ctrl.set_active_project(None)
         self.cross_reference_ctrl.set_active_project(None, None)
+        self.check_index_prefs.close_project()
         self._refresh_index_command_options()
 
         self._tree_modified = False

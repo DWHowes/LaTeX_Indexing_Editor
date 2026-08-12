@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+### New: Check Index (Tools menu)
+
+**Twenty-four checks over the whole index, in one report you can work through
+without losing your place.**
+
+**Tools → Check Index…** looks at everything at once and tells you what it
+finds, grouped into four sections: what is wrong inside a single entry, what
+is inconsistent between headings, where the cross-references point, and what
+the page references say. Click a finding and it selects the entries it is
+about — both of them, where two headings disagree, because you need to see
+both to decide which one is right.
+
+Some of what it finds:
+
+- `Trial` in one place and `Trials` in another; `Costs` and `costs`;
+  `Smith, John` and `Smith John`; `analysis of` beside `analysis`
+- `Jaguar (car)` beside a bare `Jaguar` — but **not** `Jaguar (car)` beside
+  `Jaguar (animal)`, which is the correct way to separate two meanings
+- A heading with exactly one subheading under it, which divides nothing
+- A *see* reference whose target does not exist, points back at itself, or
+  leads to a heading with no page references at all
+- A *see* on a heading that has page numbers of its own, which should be a
+  *see also*
+- Eight page references under one heading with no subheadings to divide them
+- Two page ranges under one heading that cover the same pages
+
+**It never changes anything.** Most of what it finds has no mechanical repair —
+being told two headings disagree does not tell you which one is right — so it
+reports, and you correct in the entry window or the entry table as usual, with
+the undo you already have. The report stays open beside your work.
+
+**It is built not to cry wolf.** `401(k)`, `2(a)(iii)` and `26(b)` are not
+missing a space; `Innovation(s)` is not either. `PDFs`, `NGOs`, `iPhone`,
+`McArthur` and `LaTeX` are not mis-capitalised. `dogs'` and `O'Brien` are not
+unbalanced quotation marks. And `See specific diseases` is a general
+cross-reference, not a broken one. A check that fires on any of those is a
+check you switch off after the first screen, and then it never finds the real
+one.
+
+Not yet: a preferences page for turning individual checks on and off, or for
+adding your own words to the lists it exempts. The project already stores
+both; nothing edits them from the menus yet, so for now every project runs the
+standard set.
+
 ### New: Repair Index Entries (Tools menu)
 
 **The first tool that works on the whole index at once, and it shows you what

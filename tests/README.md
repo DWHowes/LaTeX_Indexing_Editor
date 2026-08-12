@@ -618,6 +618,36 @@ can move underneath it. Edits are rebuilt from current coordinates at apply
 time and the backend's guard refuses any that no longer match, so the outcome
 is nothing written rather than the wrong span rewritten.
 
+### `test_check_index_controller.py` — the application's half, and only that
+
+The twenty-four Check Index rules are tested in `bookindexcore`, against a
+dialect no file is written in, precisely so that nothing about them can be
+LaTeX. What this file covers is the three things only an application can
+supply — the entries, the project's vocabulary, and **document order** — and
+one of those is the reason the file exists at all.
+
+`TestDocumentOrder` is the part to read. `LatexTextBackend.order_key` resolves
+an anchor through a per-container entry table, and against an **unadopted**
+backend it answers `-1` for every entry: no exception, no warning, and a
+report in which no two page ranges ever overlap because the rule could not
+look. That is the same shape as the coordinate bug this project already
+shipped once, so both halves are pinned —
+`test_the_backend_can_order_every_entry_it_is_given` asserts the controller's
+adoption works, and `test_without_adoption_the_keys_are_all_the_same` records
+what the report would silently become if it ever stopped.
+
+`TestTheProjectsOwnVocabulary` covers the application's one contribution to a
+shared rule. Nothing about `LaTeX`'s shape distinguishes it from a typing
+slip, so no heuristic in the core can exempt it; the LaTeX app seeds the
+exception list, and a real slip (`enGland`) still has to be reported or the
+seeding has gone too far.
+
+`_paired()` in the fixture is worth knowing about: the parser reports each
+`\index` macro as it finds it and does **not** work out which `|)` closes
+which `|(` — `ProjectLoadWorker` does that at load time. A fixture that
+skipped it would leave every opener without a partner, and the
+overlapping-range rule would have nothing to look at while appearing to pass.
+
 ### A modal dialog is a stopped run, not a slow one
 
 `tests/conftest.py` has an autouse `_no_modal_dialogs` fixture that turns every

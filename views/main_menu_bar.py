@@ -28,6 +28,7 @@ class MainMenuBar(QMenuBar):
     create_rtf_file_requested = Signal()
     resync_index_data_requested = Signal()
     repair_entries_requested = Signal()
+    check_index_requested = Signal()
     resync_workspace_files_requested = Signal()
     manage_pruned_files_requested = Signal()
     index_statistics_requested = Signal()
@@ -156,6 +157,16 @@ class MainMenuBar(QMenuBar):
         # the whole index, and applies only what the indexer approves -- as
         # one undoable command. Starts disabled: it has nothing to look at
         # until a project is open.
+        # Reports what is inconsistent across the whole index -- headings that
+        # disagree, cross-references with no target, undifferentiated runs of
+        # page numbers. It only ever reports: most of what it finds has no
+        # mechanical repair, so the corrections are made in the ordinary
+        # editing surfaces. Starts disabled with nothing to look at.
+        self.check_index_action = tools_menu.addAction("Chec&k Index...")
+        self.check_index_action.triggered.connect(
+            lambda: self.check_index_requested.emit())
+        self.check_index_action.setEnabled(False)
+
         self.repair_entries_action = tools_menu.addAction("&Repair Index Entries...")
         self.repair_entries_action.triggered.connect(
             lambda: self.repair_entries_requested.emit())
@@ -267,6 +278,7 @@ class MainMenuBar(QMenuBar):
         self.range_consistency_check_action.setEnabled(is_enabled)
         self.migrate_legacy_xrefs_action.setEnabled(is_enabled)
         self.repair_entries_action.setEnabled(is_enabled)
+        self.check_index_action.setEnabled(is_enabled)
         # Project closing always forces this off immediately. Project opening
         # only forces it as far as "project is open" -- whether a base file
         # has ALSO been chosen is re-checked separately whenever the Edit

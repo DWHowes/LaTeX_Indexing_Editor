@@ -124,6 +124,12 @@ class LatexDialect:
     #: has does not occur here. Measured -- see documentation/e0_measurements.
     distinguishing_prefix = None
 
+    #: None. Nothing in the LaTeX toolchain truncates an ``\index`` argument:
+    #: an over-long entry is *rejected* by the index engine, loudly, which is
+    #: what max_entry_length is about. The fingerprint exists for Word, where
+    #: a tool built on Indexes.MarkEntry silently cuts at 255.
+    truncation_fingerprint = None
+
     def __init__(
         self,
         bold_values: Iterable[str] = grammar.DEFAULT_BOLD_ENCAP_VALUES,
