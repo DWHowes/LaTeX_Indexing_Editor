@@ -95,9 +95,19 @@ class LatexDialect:
     max_levels = 3
 
     #: Per level: ``sort@display`` sits on each level of the heading.
-    #: InDesign is the same shape; Word is the outlier, with one key for
-    #: the whole entry.
+    #: All three formats turn out to be this shape — Word was thought to be
+    #: the outlier, with one key per entry, until its per-level
+    #: ``display;sort`` was measured on 12 Aug 2026.
     sort_key_scope = SORT_PER_LEVEL
+
+    #: True. ``makeindex`` and ``xindy`` both file by the key when one is
+    #: present, which is the whole purpose of ``sort@display``.
+    sort_key_reaches_index = True
+
+    #: Empty: ``makeindex`` collates the key as written, so every character
+    #: in it carries and a space can express word-by-word. Contrast InDesign,
+    #: which drops spaces while collating a key and therefore cannot.
+    sort_key_collation_ignores = ""
 
     #: A LaTeX range is a pair of entries, ``|(`` and ``|)``, which is what
     #: makes the range-consistency analyser meaningful here and meaningless
