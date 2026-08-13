@@ -34,6 +34,7 @@ is derived from mutable state and there is one dialect instance,
 :data:`LATEX_DIALECT`, rather than a set of interchangeable ones.
 """
 
+import re
 from typing import Iterable, Optional
 
 # Measured against TeX Live 2023 -- see documentation/e0_measurements in the
@@ -58,6 +59,7 @@ from bookindexcore.dialect import (
     PageStyle,
     STANDARD_PAGE_STYLE,
     TextRun,
+    XREF_LABEL_DOCUMENT,
     XRefSpec,
 )
 
@@ -140,6 +142,16 @@ class LatexDialect:
     #: a tool built on Indexes.MarkEntry silently cuts at 255.
     truncation_fingerprint = None
 
+    #: The **document's**. ``makeindex`` emits ``\see{target}{page}`` and the
+    #: words a reader sees come from whatever ``\see`` is defined to be — the
+    #: index style's macro, in the manuscript, under the author's control.
+    #:
+    #: So the label is reachable, unlike InDesign's, and still not ours: an
+    #: indexing tool that silently redefined a document's macro would be
+    #: exceeding its remit. Shared preferences read this and do not offer the
+    #: label fields for a LaTeX project. Measured in E7.
+    xref_label_owner = XREF_LABEL_DOCUMENT
+
     def __init__(
         self,
         bold_values: Iterable[str] = grammar.DEFAULT_BOLD_ENCAP_VALUES,
@@ -196,14 +208,82 @@ class LatexDialect:
         safer guess but the *correct* one, since makeindex is the default
         engine for a project that has never chosen.
         """
-        engine = "makeindex"
+        return (XINDY_MAX_ENTRY if self._engine(project) == "xindy"
+                else MAKEINDEX_MAX_ENTRY)
+
+    @staticmethod
+    def _engine(project: object) -> str:
+        r"""
+        Which index engine this project builds with, lowercased.
+
+        ``project`` is duck-typed: anything that can answer
+        ``get_metadata_value`` is asked. Anything else — including None —
+        falls back to makeindex, which is not merely the safer guess but the
+        *correct* one, since makeindex is the default engine for a project
+        that has never chosen.
+        """
         getter = getattr(project, "get_metadata_value", None)
-        if getter is not None:
-            try:
-                engine = (getter("pref_index_engine") or "makeindex").strip().lower()
-            except Exception:
-                engine = "makeindex"
-        return XINDY_MAX_ENTRY if engine == "xindy" else MAKEINDEX_MAX_ENTRY
+        if getter is None:
+            return "makeindex"
+        try:
+            return (getter("pref_index_engine") or "makeindex").strip().lower()
+        except Exception:
+            return "makeindex"
+
+    #: ``\string`` in front of a formatting command, with the optional space
+    #: LaTeX itself inserts after a control word. Both spellings reach the
+    #: ``.idx`` file and both are correct where they stand.
+    _STRING_PREFIX = re.compile(r"\\string(?=\\)")
+
+    def normalise_for_comparison(self, text: str) -> str:
+        r"""
+        ``\string\textit{X}`` reduced to ``\textit{X}``, for comparing only.
+
+        LaTeX requires ``\string`` in front of a formatting command inside a
+        *moving argument* -- a caption, a footnote, a section heading -- and
+        forbids nothing without it in body text. So the same heading, indexed
+        from a caption on one page and from the running text on another, is
+        legitimately spelled two ways:
+
+            \index{\string\textit{Vanity Fair}}
+            \index{\textit{Vanity Fair}}
+
+        They are one heading. Before this they grouped as two, filed in two
+        places, and were reported by the consistency rules as a discrepancy
+        the indexer could not fix -- each spelling being obligatory where it
+        stood.
+
+        Idempotent, because the pattern only matches ``\string`` immediately
+        before another backslash and removing it leaves the command with no
+        second ``\string`` to find. Total: it is a regular-expression
+        substitution over arbitrary text and has no failure mode.
+
+        The lookahead matters. A bare ``\string`` not followed by a control
+        sequence is doing something else -- ``\string~`` prints a tilde -- and
+        removing it there would change what the entry says.
+        """
+        return self._STRING_PREFIX.sub("", text)
+
+    def implicit_range_threshold(self, project: object = None) -> Optional[int]:
+        r"""
+        Three. ``makeindex`` collapses three or more consecutive pages into
+        ``100--102`` on its own, measured in E7.
+
+        This is the half of the elision question that turned out to be a real
+        cross-host divergence: Word forms no implicit ranges at all, so the
+        same entries print ``100--104`` here and ``100, 101, 102, 103, 104``
+        there. Neither host lets it be changed, which is why it is declared
+        rather than offered as a setting.
+
+        **The xindy answer is [UNVERIFIED]** and takes makeindex's number
+        rather than None. xindy does form ranges, and its threshold is set by
+        the index style's ``markup-crossref-list`` machinery, so the honest
+        options were this number or a measurement nobody has taken. None would
+        have been the one clearly wrong answer — it claims the engine never
+        forms a range, which would have the locator advice recommending ranges
+        that xindy is about to form anyway.
+        """
+        return 3
 
     def effective_max_levels(self, project: object = None) -> int:
         """

@@ -283,3 +283,48 @@ def test_the_dialect_and_the_grammar_never_disagree(body):
     assert LATEX_DIALECT.level_path(body) == grammar.level_path(body)
     assert LATEX_DIALECT.depth_of(body) == grammar.depth_of(body)
     assert LATEX_DIALECT.parent_path(body) == grammar.parent_path(body)
+
+
+class TestTheMovingArgumentNormalisation:
+    r"""
+    ``\string`` is what makes one heading have two correct spellings in LaTeX,
+    and this is the seam that reconciles them for comparison only.
+
+    LaTeX requires ``\string`` in front of a formatting command inside a
+    *moving argument* -- a caption, a footnote, a section heading -- and does
+    not in body text. Both spellings reach the ``.idx`` file. Before E8 they
+    grouped as two headings, filed in two places, and were reported by the
+    consistency rules as a discrepancy the indexer could not fix: each
+    spelling is obligatory where it stands.
+    """
+
+    def test_the_two_spellings_of_one_heading_become_one(self):
+        assert LATEX_DIALECT.normalise_for_comparison(
+            r"\string\textit{Vanity Fair}") == r"\textit{Vanity Fair}"
+
+    def test_several_commands_in_one_heading_are_all_reduced(self):
+        assert LATEX_DIALECT.normalise_for_comparison(
+            r"\string\textbf{A} and \string\textit{B}") == \
+            r"\textbf{A} and \textit{B}"
+
+    def test_a_bare_string_before_a_character_is_left_alone(self):
+        r"""
+        The lookahead is load-bearing. ``\string~`` prints a tilde and is
+        doing something quite different from escaping a command name;
+        stripping it there would change what the entry says.
+        """
+        assert LATEX_DIALECT.normalise_for_comparison(r"\string~") == r"\string~"
+        assert LATEX_DIALECT.normalise_for_comparison(r"a \string b") == r"a \string b"
+
+    def test_it_is_idempotent(self):
+        """
+        The property every composed comparison key depends on: this is applied
+        alongside folding and punctuation-stripping in an order no single
+        caller controls.
+        """
+        once = LATEX_DIALECT.normalise_for_comparison(r"\string\textit{X}")
+        assert LATEX_DIALECT.normalise_for_comparison(once) == once
+
+    def test_ordinary_headings_are_untouched(self):
+        for text in ("Kant, Immanuel", r"\textit{Emma}", "", "  "):
+            assert LATEX_DIALECT.normalise_for_comparison(text) == text
