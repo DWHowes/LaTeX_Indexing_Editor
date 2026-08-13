@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+### New: Check Index and Sorting pages in Preferences
+
+Both are new vertical tabs in **Preferences**, and both settle a gap: Check
+Index has been running its twenty-four checks with no way to switch one off,
+and the sort settings have had no way in at all.
+
+**Check Index** lists every rule with its own explanation as a tooltip,
+grouped the way the report is — inside one entry, between headings,
+cross-references, page references. Switching one off applies to the open
+project only; with no project open you are setting the default that new
+projects start from. Below the rules is the vocabulary the checks judge
+against: the words that introduce a cross-reference, the words that mark a
+general one ("see *specific diseases*"), the leading and trailing words that
+make `of costs` and `costs` worth comparing, and the mixed-case spellings this
+project uses on purpose. The last of those has been seeded with `LaTeX`,
+`BibTeX` and the rest since the checks shipped, and this is the first time you
+can see or change it.
+
+**Sorting** covers letter-by-letter versus word-by-word, whether numbers file
+by value or as text, prefixes to ignore at the front of a subheading, how
+parenthetical text is treated, and the order symbols, numbers and letters come
+in. It also offers a choice the LaTeX index itself cannot: show entries in
+**your** order, or in the order **makeindex will actually produce**.
+
+One control on that page is deliberately not editable here. Word-versus-letter
+ordering already lives on **LaTeX Settings → cmd: makeindex/xindy → Sort
+Ordering Rule**, so the Sorting page shows it and points at the real switch
+rather than offering a second copy that could disagree with the first.
+
+### Fixed: the Sort Ordering Rule never reached makeindex
+
+Letter ordering was offered in Preferences, stored, and then dropped: the `-l`
+flag was never written into the generated `\makeindex` options, so every index
+was built word-by-word whatever the setting said. The flag is now emitted.
+
+The second choice was also labelled `character`, a spelling nothing else in
+the application used — makeindex, the shared sort record and this
+application's own adapter all say `letter`. The list now reads **word** and
+**letter**; projects saved under the old spelling are read and re-saved
+correctly with no migration step.
+
+### Fixed: Check Index settings did not survive a restart
+
+With no project open, the Check Index vocabulary and rule selection were kept
+in memory and lost at exit. They now go to the application's settings like
+every other preference, and are copied into a project the first time it is
+opened.
+
 ### New: Check Index (Tools menu)
 
 **Twenty-four checks over the whole index, in one report you can work through

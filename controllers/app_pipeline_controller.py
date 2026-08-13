@@ -46,6 +46,7 @@ from controllers.entry_modifier_controller import EntryModifierController
 from controllers.bulk_repair_controller import BulkRepairController
 from controllers.check_index_controller import CheckIndexController
 from models.check_index_prefs import CheckIndexPrefs
+from models.sort_prefs import SortPrefs
 from controllers.index_edit_controller import IndexEditController
 from controllers.latex_text_backend import LatexTextBackend
 from controllers.range_consistency_controller import RangeConsistencyController
@@ -243,9 +244,25 @@ class AppPipelineController(QObject):
                                                        )        
 
         self._index_prefs_model = IndexPrefsConfigModel()
+
+        # Both are built before the preferences controller because that
+        # controller now edits them: the shared Check Index and Sorting pages
+        # live in the same window as the LaTeX ones, so the same OK button
+        # writes all three groups.
+        # Their own QSettings groups, so the no-project-open scope is durable
+        # rather than a dict that dies with the process. Separate groups from
+        # IndexPrefs/global because that one is filtered against IndexPrefsData
+        # on the way back in and would read these keys as nothing.
+        self.check_index_prefs = CheckIndexPrefs(
+            global_store=self.prefs.global_store("CheckIndexPrefs/global"))
+        self.sort_prefs = SortPrefs(
+            global_store=self.prefs.global_store("SortPrefs/global"))
+
         self._index_prefs_ctrl = IndexPrefsConfigController(model=self._index_prefs_model,
                                                             prefs_persistence=self.prefs,
                                                             theme_controller=self._theme_controller,
+                                                            check_index_prefs=self.check_index_prefs,
+                                                            sort_prefs=self.sort_prefs,
                                                             parent_window=self.window,
                                                             on_general_changed=self.apply_general_preferences,
                                                             )
@@ -257,7 +274,6 @@ class AppPipelineController(QObject):
         # the project selected, not to the format. Its own settings follow the
         # open project like every other preference; see
         # _handle_project_open_completion.
-        self.check_index_prefs = CheckIndexPrefs()
         self.check_index_ctrl = CheckIndexController(
             self.entry_modifier_model,
             self.text_backend,
@@ -1243,6 +1259,7 @@ class AppPipelineController(QObject):
         # globals seed anything the project has not been given, and never
         # overwrite what it has.
         self.check_index_prefs.open_project(self.scope_ctrl.get_persistence_model())
+        self.sort_prefs.open_project(self.scope_ctrl.get_persistence_model())
         self.window.status_bar.showMessage(f"Project '{project_name}' loaded successfully.", 3000)
 
         # Enable menu items that are gated behind an active project context
@@ -2276,6 +2293,7 @@ class AppPipelineController(QObject):
         self.range_consistency_ctrl.set_active_project(None)
         self.cross_reference_ctrl.set_active_project(None, None)
         self.check_index_prefs.close_project()
+        self.sort_prefs.close_project()
         self._refresh_index_command_options()
 
         self._tree_modified = False

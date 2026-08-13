@@ -24,8 +24,13 @@ __all__ = ["sort_rules_for_project", "alphabetising_from_prefs"]
 #: ``makeindex_ordering`` stores the same two words the shared record uses, so
 #: this is a validation rather than a translation. Kept explicit anyway: the
 #: two vocabularies happening to coincide today is not a reason for a caller
-#: to assume they always will.
-_ORDERING = {"word": WORD_BY_WORD, "letter": LETTER_BY_LETTER}
+#: to assume they always will — and "character" is the reason, an old spelling
+#: of letter ordering that the preferences combo offered and nothing read.
+_ORDERING = {
+    "word": WORD_BY_WORD,
+    "letter": LETTER_BY_LETTER,
+    "character": LETTER_BY_LETTER,
+}
 
 
 def alphabetising_from_prefs(prefs) -> str:

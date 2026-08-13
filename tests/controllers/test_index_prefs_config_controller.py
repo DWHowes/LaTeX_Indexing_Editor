@@ -14,7 +14,9 @@ modal UI machinery" convention.
 import pytest
 from PySide6.QtCore import QSettings
 
+from models.check_index_prefs import DISABLED_RULES_KEY, CheckIndexPrefs
 from models.index_prefs_config_model import IndexPrefsConfigModel
+from models.sort_prefs import SortPrefs
 from bookindexcore.ui.theme.config_model import ThemeConfigModel
 from models.preferences_persistence import PreferencesPersistence
 from bookindexcore.ui.theme.controller import ThemeConfigController
@@ -30,7 +32,15 @@ def _isolated_qsettings(tmp_path, qtbot):
 def _controller(qtbot):
     prefs = PreferencesPersistence()
     theme_controller = ThemeConfigController(ThemeConfigModel(), prefs)
-    controller = IndexPrefsConfigController(IndexPrefsConfigModel(), prefs, theme_controller)
+    # The two shared groups are given their real QSettings-backed stores, so
+    # that what these tests exercise is the routing the application does and
+    # not a dict standing in for it.
+    controller = IndexPrefsConfigController(
+        IndexPrefsConfigModel(), prefs, theme_controller,
+        check_index_prefs=CheckIndexPrefs(
+            global_store=prefs.global_store("CheckIndexPrefs/global")),
+        sort_prefs=SortPrefs(global_store=prefs.global_store("SortPrefs/global")),
+    )
     return controller, prefs
 
 
@@ -94,3 +104,59 @@ class TestHandleModelUpdate:
 
         assert controller._theme_controller.model.get_dark().window == "#NEWDARK"
         assert controller._theme_controller.model.get_light().window == "#NEWLIGHT"
+
+
+class TestOnePayloadThreeDestinations:
+    """
+    The shared Check Index and Sorting pages live in this window, so one OK
+    writes three settings groups. Each takes the keys it owns from the merged
+    payload -- ``ScopedSettings.save`` and ``update_data`` both already did
+    that -- so nothing in the controller splits the dictionary.
+    """
+
+    def test_each_group_takes_its_own_keys(self, qtbot):
+        controller, _prefs = _controller(qtbot)
+
+        controller._handle_model_update({
+            "fmt_page_delimiter": "; ",                  # LaTeX
+            DISABLED_RULES_KEY: ["headings.case"],       # Check Index
+            "evaluate_numbers": True,                    # Sorting
+        }, {}, {})
+
+        assert controller._model.serialize_to_dict()["fmt_page_delimiter"] == "; "
+        assert controller._check_index_prefs.load()[DISABLED_RULES_KEY] == [
+            "headings.case"]
+        assert controller._sort_prefs.load()["evaluate_numbers"] is True
+
+    def test_the_shared_keys_do_not_leak_into_the_latex_globals(self, qtbot):
+        """
+        `IndexPrefs/global` is filtered against `IndexPrefsData` on the way
+        back in, so anything else written there is stored and never read.
+        The model's own serialisation goes in rather than the raw payload.
+        """
+        controller, prefs = _controller(qtbot)
+
+        controller._handle_model_update(
+            {"fmt_page_delimiter": "; ", "evaluate_numbers": True}, {}, {})
+
+        prefs.settings.beginGroup("IndexPrefs/global")
+        try:
+            stored = set(prefs.settings.childKeys())
+        finally:
+            prefs.settings.endGroup()
+        assert "evaluate_numbers" not in stored
+        assert "fmt_page_delimiter" in stored
+
+    def test_the_shared_groups_follow_the_open_project(self, qtbot, fresh_persistence):
+        controller, _prefs = _controller(qtbot)
+        controller._check_index_prefs.open_project(fresh_persistence)
+        controller._sort_prefs.open_project(fresh_persistence)
+
+        controller._handle_model_update({
+            DISABLED_RULES_KEY: ["headings.case"],
+            "evaluate_numbers": True,
+        }, {}, {})
+
+        metadata = fresh_persistence.get_all_project_metadata()
+        assert metadata["pref_" + DISABLED_RULES_KEY] == "['headings.case']"
+        assert metadata["pref_evaluate_numbers"] == "True"

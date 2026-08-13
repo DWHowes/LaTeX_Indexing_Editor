@@ -929,6 +929,30 @@ same global-vs-project seed/load/persist orchestration, plus delegating theme
 colours to `ThemeConfigController`; see
 `test_index_prefs_config_controller.py`).
 
+That controller now edits **three** settings groups from one window, because
+the shared Check Index and Sorting pages went into the same dialog. The
+dialog hands back one merged payload and each group filters it — which is what
+`ScopedSettings.save` and `IndexPrefsConfigModel.update_data` were both
+already written to do — so `_handle_model_update` needs no knowledge of which
+key belongs where. `_controller()` in the test file builds the two shared
+groups with their **real** QSettings-backed stores rather than dict stubs, so
+what is exercised is the routing the application actually does.
+
+**A real bug the pages exposed**: with no project open, `CheckIndexPrefs` was
+constructed over `DictGlobalStore` — the in-memory store `bookindexcore`
+ships for tests. Its "global" scope therefore died with the process. Invisible
+while the settings were unreachable from a menu, and a straightforward data
+loss the moment they were not. `QSettingsGlobalStore` in
+`preferences_persistence.py` is the durable one; the dict store remains the
+test default, so a test that wants one still gets it by saying nothing.
+
+**A second one**: `makeindex_ordering` was collected, stored and never
+written. `generate_*` emitted `-c`, `-p` and `-s` and no `-l`, so letter
+ordering was a preference the build ignored. The combo's second item was also
+spelled `character`, which `sort_rules_adapter._ORDERING` did not recognise —
+so the adapter fell back to word ordering as well, from the other direction.
+Both are fixed and the old spelling is still read.
+
 **A real bug found and fixed here**: `PreferencesPersistence.load_index_prefs`'s
 `coerce()` helper compared `dataclasses.fields()`'s `.type` (an actual type
 object — `bool`/`int`/`str`, since this module has no

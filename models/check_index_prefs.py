@@ -17,7 +17,7 @@ stored value has to be the exception.
 
 from typing import Any, Dict
 
-from bookindexcore.checks import ALL_RULES, default_enabled
+from bookindexcore.checks import ALL_RULES, DISABLED_RULES_KEY, default_enabled
 from bookindexcore.model.grammar import GRAMMAR_DEFAULTS, grammar_from_settings
 from bookindexcore.persistence import DictGlobalStore, ScopedSettings
 
@@ -33,8 +33,15 @@ LATEX_MIXED_CASE_WORDS = [
     "BibLaTeX", "MakeIndex", "PostScript", "TeXShop",
 ]
 
-#: The setting naming the rules a project has switched off.
-DISABLED_RULES_KEY = "check_rules_disabled"
+#: Re-exported, not redeclared. The name is the shared checks package's --
+#: the runner reads it, the shared preferences page writes it -- and a second
+#: spelling of the same string here would let the two drift apart with nothing
+#: to catch it. Kept importable from this module because callers already
+#: reach for it here.
+__all__ = [
+    "CHECK_INDEX_DEFAULTS", "DISABLED_RULES_KEY", "LATEX_MIXED_CASE_WORDS",
+    "PREF_PREFIX", "CheckIndexPrefs", "default_rule_selection",
+]
 
 CHECK_INDEX_DEFAULTS: Dict[str, Any] = dict(GRAMMAR_DEFAULTS)
 CHECK_INDEX_DEFAULTS["mixed_case_exceptions"] = list(LATEX_MIXED_CASE_WORDS)
@@ -52,8 +59,20 @@ class CheckIndexPrefs:
     "where does this come from" answerable in one place.
     """
 
-    def __init__(self, global_data: Dict[str, Any] | None = None):
-        self._global = DictGlobalStore(
+    def __init__(
+        self,
+        global_data: Dict[str, Any] | None = None,
+        *,
+        global_store=None,
+    ):
+        """
+        ``global_store`` is where the no-project-open scope really lives —
+        ``QSettingsGlobalStore`` in the running application. Without one the
+        globals are a dict that dies with the process, which is fine for a
+        test and silently lossy anywhere else, so the application passes one
+        and only tests take the default.
+        """
+        self._global = global_store or DictGlobalStore(
             {k: v for k, v in (global_data or {}).items()
              if k in CHECK_INDEX_DEFAULTS}
         )

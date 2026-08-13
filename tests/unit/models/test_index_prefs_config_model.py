@@ -186,6 +186,31 @@ class TestGeneratePreambleSnippet:
         assert r"\usepackage[unbalanced=true]{idxlayout}" in snippet
         assert "hyperref" not in snippet
 
+    def test_letter_ordering_emits_the_flag(self):
+        """
+        `-l` was offered in Preferences, stored, and never written: every
+        index built word-by-word whatever the setting said. Word ordering is
+        makeindex's default and has no flag, so this branch is the only one
+        that produces anything and the only one that can be checked.
+        """
+        model = IndexPrefsConfigModel()
+        model.update_data({"makeindex_ordering": "letter"})
+        assert "-c -l -s default.ist" in model.generate_preamble_snippet()
+
+    def test_the_old_spelling_still_emits_the_flag(self):
+        """
+        The combo offered `character` before it offered `letter`. A project
+        saved then must not silently revert to word ordering.
+        """
+        model = IndexPrefsConfigModel()
+        model.update_data({"makeindex_ordering": "character"})
+        assert "-l" in model.generate_preamble_snippet()
+
+    def test_word_ordering_emits_nothing(self):
+        model = IndexPrefsConfigModel()
+        model.update_data({"makeindex_ordering": "word"})
+        assert "-l" not in model.generate_preamble_snippet()
+
     def test_everything_disabled_returns_empty_string(self):
         model = IndexPrefsConfigModel()
         model.update_data({"use_imakeidx": False, "use_idxlayout": False})

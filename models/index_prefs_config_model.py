@@ -478,6 +478,13 @@ class IndexPrefsConfigModel:
                     cli_flags.append("-c")
                 if d.makeindex_ignore_spaces:
                     cli_flags.append("-p")
+                if d.makeindex_ordering in ("letter", "character"):
+                    # Letter ordering. Word ordering is makeindex's default
+                    # and has no flag, so only this branch emits anything.
+                    # ("character" is the spelling an older build of the
+                    # preferences combo stored; see the dialog's
+                    # populate_fields.)
+                    cli_flags.append("-l")
                 cli_flags.append(f"-s {style_file}")
                 cli_opts = " ".join(cli_flags)
 

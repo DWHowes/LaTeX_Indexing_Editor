@@ -31,6 +31,49 @@ RECENT_PROJECTS_MIN_SHOWN = 1
 RECENT_PROJECTS_DEFAULT_SHOWN = 10
 
 
+class QSettingsGlobalStore:
+    r"""
+    A ``bookindexcore.persistence.GlobalStore`` over one QSettings group.
+
+    ``ScopedSettings`` needs a global store that outlives the process, and
+    ``DictGlobalStore`` does not: it is the in-memory one the package ships
+    for tests. Handing the shared Check Index and Sorting groups a dict meant
+    that with no project open they were edited, saved, and gone at the next
+    launch -- invisible until those pages became reachable from a menu.
+
+    Narrow on purpose. The protocol is two methods, and this is the whole
+    adapter: a group name, a read and a write. Values are stored as QSettings
+    stores them and coerced back to the group's declared types by
+    ``ScopedSettings.load``, which is why nothing here needs to know a type.
+    Lists are the one exception -- QSettings round-trips a Python list through
+    an ``.ini`` unreliably -- so they are comma-joined on the way out, the
+    same convention ``update_general_preferences`` already uses, and
+    ``coerce_like`` splits them again on the way in.
+    """
+
+    def __init__(self, group: str, settings: QSettings | None = None):
+        self._group = group
+        self._settings = settings if settings is not None else QSettings()
+
+    def read_all(self) -> dict:
+        self._settings.beginGroup(self._group)
+        try:
+            return {key: self._settings.value(key)
+                    for key in self._settings.childKeys()}
+        finally:
+            self._settings.endGroup()
+
+    def write(self, values) -> None:
+        self._settings.beginGroup(self._group)
+        try:
+            for key, value in values.items():
+                if isinstance(value, (list, tuple)):
+                    value = ",".join(str(item) for item in value)
+                self._settings.setValue(key, value)
+        finally:
+            self._settings.endGroup()
+
+
 class PreferencesPersistence(QObject):
     """
     Model Layer: Application State Serialization.
@@ -51,6 +94,16 @@ class PreferencesPersistence(QObject):
         self.settings = QSettings()
         self._migrate_legacy_settings_location()
         self._migrate_legacy_index_prefs_keys()
+
+    def global_store(self, group: str) -> "QSettingsGlobalStore":
+        """
+        A durable global store for one shared settings group.
+
+        Handed *this* QSettings rather than a fresh one so the group lands
+        wherever the migrations above settled, and cannot end up in the
+        legacy location a second time.
+        """
+        return QSettingsGlobalStore(group, self.settings)
 
     def _migrate_legacy_settings_location(self) -> None:
         """

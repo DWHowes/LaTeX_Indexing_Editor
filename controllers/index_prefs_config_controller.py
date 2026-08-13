@@ -13,12 +13,20 @@ class IndexPrefsConfigController:
         model: IndexPrefsConfigModel,
         prefs_persistence: PreferencesPersistence,
         theme_controller: ThemeConfigController,
+        check_index_prefs,
+        sort_prefs,
         parent_window=None,
         on_general_changed=None,
     ) -> None:
         self._model = model
         self._prefs = prefs_persistence
         self._theme_controller = theme_controller
+        # The two shared project-scoped groups the same window now edits.
+        # Required rather than defaulted: a None here would give the Check
+        # Index and Sorting pages nothing to fill from and nowhere to save
+        # to, and both would look like they worked.
+        self._check_index_prefs = check_index_prefs
+        self._sort_prefs = sort_prefs
         self._parent_window = parent_window
         # Called with the freshly-saved General payload so the application
         # can apply it live (AppPipelineController.apply_general_preferences).
@@ -69,6 +77,11 @@ class IndexPrefsConfigController:
 
         dialog = IndexPrefsConfigDialog(self._parent_window)
         dialog.populate_fields(self._model.serialize_to_dict())
+        # Both shared groups do their own global/project routing, so they are
+        # read from their own models rather than from anything assembled
+        # here — whichever scope is in force is already the answer they give.
+        dialog.populate_check_index_fields(self._check_index_prefs.load())
+        dialog.populate_sorting_fields(self._sort_prefs.load())
         # Application-scoped, so read straight from QSettings rather than
         # from the index prefs model, which is project-overlaid.
         dialog.populate_general_fields(self._prefs.load_application_preferences())
@@ -87,12 +100,34 @@ class IndexPrefsConfigController:
         dialog.exec()
 
     def _handle_model_update(self, updated_payload: dict, dark_colours: dict, light_colours: dict) -> None:
+        """
+        One payload, three destinations.
+
+        The dialog merges the LaTeX pages with the two shared project-scoped
+        ones and hands back a single dictionary; each model then takes the
+        keys it owns and ignores the rest. That is deliberate on both sides —
+        ``ScopedSettings.save`` documents it, and ``update_data`` already
+        skipped any key absent from its dataclass — so nothing here has to
+        know which key belongs where, and a key added to a shared page needs
+        no change in this method.
+        """
+        # The shared groups first: each routes itself to the project or to
+        # the globals, so they need no branch on _active_project_name.
+        self._check_index_prefs.save(updated_payload)
+        self._sort_prefs.save(updated_payload)
+
         # Prefs — unchanged routing
         self._model.update_data(updated_payload)
         if self._active_project_name is not None and self._file_persistence is not None:
             self._model.persist_to_project(self._file_persistence)
         else:
-            self._prefs.save_index_prefs(updated_payload, project_name=None)
+            # The model's own fields, not the raw payload: the payload now
+            # carries the two shared groups as well, and IndexPrefs/global is
+            # filtered against IndexPrefsData on the way back in — so those
+            # keys would be written there and never read. The shared groups
+            # have their own QSettings groups and saved themselves above.
+            self._prefs.save_index_prefs(
+                self._model.serialize_to_dict(), project_name=None)
 
         # Theme — delegate entirely to theme controller
         self._theme_controller.handle_accepted(dark_colours, light_colours)

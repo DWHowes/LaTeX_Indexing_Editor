@@ -7,15 +7,22 @@ The frame, the General tab and the UI Themes tab are
 engines and a ``\printindex`` command. None of it means anything to a format
 that is not LaTeX.
 
-Two things worth knowing before editing this file:
+Three things worth knowing before editing this file:
 
-- **The vertical tab order is declared, not derived.** General, LaTeX
-  Settings, UI Themes, RTF Export — with a LaTeX page on either side of the
-  shared Themes page. That is the window as it shipped, and :meth:`tab_order`
-  is where it is stated rather than something the shell guesses.
+- **The vertical tab order is declared, not derived.** General, Check Index,
+  Sorting, LaTeX Settings, UI Themes, RTF Export — with a LaTeX page on either
+  side of the shared Themes page. That is the window as it shipped plus the
+  two shared pages E3 and E4 owed, and :meth:`tab_order` is where it is stated
+  rather than something the shell guesses. A page added to the shell's own
+  default does *not* appear here until it is named below.
 - **The page-style name lists are no longer here.** They moved into the
   shared General tab, which shows them only for a dialect whose page-style
   vocabulary a project can extend. LaTeX's can; Word's cannot.
+- **The shared Sorting page's strategy control is read-only in this
+  application**, because ``makeindex_ordering`` on the LaTeX Settings page has
+  held that choice since before the shared page existed. :meth:`alphabetising_source`
+  is what says so; see :mod:`models.sort_rules_adapter` for why one setting is
+  worth the indirection.
 """
 
 from PySide6.QtWidgets import (
@@ -58,9 +65,19 @@ class IndexPrefsConfigDialog(PreferencesDialog):
         self.vtab_latex = self._build_latex_tab()
         self.vtab_rtf_export = self._build_rtf_export_tab()
 
+    def alphabetising_source(self) -> str:
+        """
+        Names the control that really holds word-versus-letter ordering, so
+        the shared Sorting page shows it read-only rather than offering a
+        second, disagreeable copy.
+        """
+        return "LaTeX Settings → cmd: makeindex/xindy → Sort Ordering Rule"
+
     def tab_order(self) -> list[tuple[str, QWidget]]:
         return [
             ("General", self.general_tab),
+            ("Check Index", self.check_index_tab),
+            ("Sorting", self.sorting_tab),
             ("LaTeX Settings", self.vtab_latex),
             ("UI Themes", self.theme_tab),
             ("RTF Export", self.vtab_rtf_export),
@@ -174,7 +191,14 @@ class IndexPrefsConfigDialog(PreferencesDialog):
         self.chk_makeindex_blank = QCheckBox("Compress Intermediate Blanks (-c)")
         self.chk_makeindex_space = QCheckBox("Ignore Leading Spaces (-p)")
         self.cmb_makeindex_order = QComboBox()
-        self.cmb_makeindex_order.addItems(["word", "character"])
+        # makeindex's own two words: word ordering is the default, letter
+        # ordering is `-l`. This read "character" until the shared Sorting
+        # page went in and nothing recognised it -- see populate_fields.
+        self.cmb_makeindex_order.addItems(["word", "letter"])
+        self.cmb_makeindex_order.setToolTip(
+            "Word ordering files 'New York' before 'Newark'; letter ordering "
+            "(-l) ignores the space and files them the other way round."
+        )
         self.txt_makeindex_style = QLineEdit()
         form_binary.addRow(self.chk_makeindex_blank)
         form_binary.addRow(self.chk_makeindex_space)
@@ -319,7 +343,14 @@ class IndexPrefsConfigDialog(PreferencesDialog):
         self.cmb_index_engine.setCurrentText(data.get("index_engine", "makeindex"))
         self.chk_makeindex_blank.setChecked(data.get("makeindex_compress_blanks", True))
         self.chk_makeindex_space.setChecked(data.get("makeindex_ignore_spaces", False))
-        self.cmb_makeindex_order.setCurrentText(data.get("makeindex_ordering", "word"))
+        # "character" was this combo's second item before the shared Sorting
+        # page arrived, and nothing else in the application ever spelled it
+        # that way: the adapter, the shared record and makeindex itself all
+        # say "letter". Projects saved under the old spelling are read here
+        # and re-saved under the new one, so the migration costs no schema.
+        ordering = str(data.get("makeindex_ordering", "word"))
+        self.cmb_makeindex_order.setCurrentText(
+            "letter" if ordering == "character" else ordering)
         self.txt_makeindex_style.setText(data.get("makeindex_stylesheet", "default.ist"))
         self.cmb_xindy_language.setCurrentText(data.get("xindy_language", "english"))
         self.cmb_xindy_codepage.setCurrentText(data.get("xindy_codepage", "utf8"))
