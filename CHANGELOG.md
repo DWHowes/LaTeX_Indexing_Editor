@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### New: Presentation page in Preferences
+
+Heading capitalisation and subheading order, the depth at which a heading is
+worth a warning, whether *passim* is permitted and from how many page
+references, and the name-filing tables — the particles absorbed into a family
+name, and the list of names that file in **direct order** with no inversion at
+all.
+
+That last one is worth finding. *Vincent van Gogh* files as *Gogh, Vincent
+van* and *Leonardo da Vinci* files as itself, and the two are the same shape:
+no rule can tell a surname from a place name. The list is how you say which is
+which, and it starts with the three names the structural rules would otherwise
+get wrong.
+
+The cross-reference wording — what *see* and *see also* actually read as — is
+shown but not editable for a LaTeX project, because in LaTeX those words come
+from the document's own `\see` macro rather than from this application.
+
+### Changed: the Preferences tabs are reordered
+
+**General, Check Index, Sorting, Presentation, UI Themes, LaTeX Settings, RTF
+Export.** The pages shared with the other index editors now come first and the
+two LaTeX-only pages are appended, where previously LaTeX Settings sat above UI
+Themes and RTF Export below it.
+
+The reason is not tidiness. Under the old arrangement each application listed
+its tabs in full, so a page added to the shared set did not appear here until
+it was named — and the Presentation page above was, briefly, exactly that: built,
+working, and invisible. Appending means a shared page arrives everywhere at once.
+
 ### New: Check Index and Sorting pages in Preferences
 
 Both are new vertical tabs in **Preferences**, and both settle a gap: Check

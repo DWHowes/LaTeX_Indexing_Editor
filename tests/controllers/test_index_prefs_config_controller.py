@@ -16,6 +16,7 @@ from PySide6.QtCore import QSettings
 
 from models.check_index_prefs import DISABLED_RULES_KEY, CheckIndexPrefs
 from models.index_prefs_config_model import IndexPrefsConfigModel
+from models.presentation_prefs import PresentationPrefs
 from models.sort_prefs import SortPrefs
 from bookindexcore.ui.theme.config_model import ThemeConfigModel
 from models.preferences_persistence import PreferencesPersistence
@@ -32,14 +33,16 @@ def _isolated_qsettings(tmp_path, qtbot):
 def _controller(qtbot):
     prefs = PreferencesPersistence()
     theme_controller = ThemeConfigController(ThemeConfigModel(), prefs)
-    # The two shared groups are given their real QSettings-backed stores, so
-    # that what these tests exercise is the routing the application does and
-    # not a dict standing in for it.
+    # The three shared groups are given their real QSettings-backed stores,
+    # so that what these tests exercise is the routing the application does
+    # and not a dict standing in for it.
     controller = IndexPrefsConfigController(
         IndexPrefsConfigModel(), prefs, theme_controller,
         check_index_prefs=CheckIndexPrefs(
             global_store=prefs.global_store("CheckIndexPrefs/global")),
         sort_prefs=SortPrefs(global_store=prefs.global_store("SortPrefs/global")),
+        presentation_prefs=PresentationPrefs(
+            global_store=prefs.global_store("PresentationPrefs/global")),
     )
     return controller, prefs
 
@@ -121,12 +124,14 @@ class TestOnePayloadThreeDestinations:
             "fmt_page_delimiter": "; ",                  # LaTeX
             DISABLED_RULES_KEY: ["headings.case"],       # Check Index
             "evaluate_numbers": True,                    # Sorting
+            "passim_enabled": True,                      # Presentation
         }, {}, {})
 
         assert controller._model.serialize_to_dict()["fmt_page_delimiter"] == "; "
         assert controller._check_index_prefs.load()[DISABLED_RULES_KEY] == [
             "headings.case"]
         assert controller._sort_prefs.load()["evaluate_numbers"] is True
+        assert controller._presentation_prefs.style().passim_enabled is True
 
     def test_the_shared_keys_do_not_leak_into_the_latex_globals(self, qtbot):
         """
@@ -151,10 +156,12 @@ class TestOnePayloadThreeDestinations:
         controller, _prefs = _controller(qtbot)
         controller._check_index_prefs.open_project(fresh_persistence)
         controller._sort_prefs.open_project(fresh_persistence)
+        controller._presentation_prefs.open_project(fresh_persistence)
 
         controller._handle_model_update({
             DISABLED_RULES_KEY: ["headings.case"],
             "evaluate_numbers": True,
+            "passim_enabled": True,
         }, {}, {})
 
         metadata = fresh_persistence.get_all_project_metadata()

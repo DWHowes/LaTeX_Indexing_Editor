@@ -23,29 +23,56 @@ def _dialog(qtbot):
 
 
 class TestTheWindowMountsThem:
-    def test_the_declared_order_includes_the_shared_pages(self, qtbot):
+    def test_the_shared_pages_come_first_and_the_latex_ones_are_appended(self, qtbot):
         dialog = _dialog(qtbot)
         labels = [dialog.vertical_tabs.tabText(i)
                   for i in range(dialog.vertical_tabs.count())]
-        assert labels == ["General", "Check Index", "Sorting",
-                          "LaTeX Settings", "UI Themes", "RTF Export"]
+        assert labels == ["General", "Check Index", "Sorting", "Presentation",
+                          "UI Themes", "LaTeX Settings", "RTF Export"]
 
-    def test_a_latex_page_still_sits_on_each_side_of_themes(self, qtbot):
+    def test_no_latex_page_is_mixed_into_the_shared_block(self, qtbot):
         """
-        The reason `tab_order()` is declared rather than merged: no
-        append-based shell can express this, and reordering it would take the
-        user guide's screenshots with it.
+        The rule that replaced the declared order. It used to be General,
+        Check Index, Sorting, LaTeX Settings, UI Themes, RTF Export -- a LaTeX
+        page on either side of the shared Themes page -- and two things were
+        wrong with that. A page added to the shell did not appear here until
+        it was named, which is how E8's Presentation page came to be missing,
+        and the failure is silent because an absent tab looks like one that
+        was never built. And *shared* and *ours* were not distinguishable in
+        the window, so the same page sat in a different neighbourhood in each
+        application.
+
+        The cost was one reorder, and it takes the user guide's preferences
+        screenshots with it.
         """
         dialog = _dialog(qtbot)
-        labels = [dialog.vertical_tabs.tabText(i) for i in range(6)]
-        assert labels.index("LaTeX Settings") < labels.index("UI Themes")
-        assert labels.index("RTF Export") > labels.index("UI Themes")
+        labels = [dialog.vertical_tabs.tabText(i)
+                  for i in range(dialog.vertical_tabs.count())]
+        shared = {"General", "Check Index", "Sorting", "Presentation", "UI Themes"}
+        first_host = min(i for i, l in enumerate(labels) if l not in shared)
+        assert all(l in shared for l in labels[:first_host])
+        assert not any(l in shared for l in labels[first_host:])
 
-    def test_six_tabs_still_fit(self, qtbot):
+    def test_a_page_added_to_the_shell_arrives_here_without_an_edit(self, qtbot):
+        """
+        The property the change bought. Overriding `tab_order` is now refused
+        outright rather than quietly dropping the pages it does not name.
+        """
+        from bookindexcore.ui.preferences import PreferencesDialog
+
+        dialog = _dialog(qtbot)
+        assert type(dialog).tab_order is PreferencesDialog.tab_order
+        labels = [dialog.vertical_tabs.tabText(i)
+                  for i in range(dialog.vertical_tabs.count())]
+        for label, _widget in dialog.shared_tab_order():
+            assert label in labels, label
+
+    def test_seven_tabs_still_fit(self, qtbot):
         """
         A West tab bar's height is the sum of its rotated labels' widths.
         Six of these labels overflowed a 580-tall window on a large font, and
-        Qt's answer was a scroll arrow with RTF Export behind it.
+        Qt's answer was a scroll arrow with the last page behind it. E8's
+        Presentation page made it seven.
         """
         dialog = _dialog(qtbot)
         bar = dialog.vertical_tabs.findChild(QTabBar)

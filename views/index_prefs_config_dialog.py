@@ -9,12 +9,15 @@ that is not LaTeX.
 
 Three things worth knowing before editing this file:
 
-- **The vertical tab order is declared, not derived.** General, Check Index,
-  Sorting, LaTeX Settings, UI Themes, RTF Export — with a LaTeX page on either
-  side of the shared Themes page. That is the window as it shipped plus the
-  two shared pages E3 and E4 owed, and :meth:`tab_order` is where it is stated
-  rather than something the shell guesses. A page added to the shell's own
-  default does *not* appear here until it is named below.
+- **The shared pages come first and this application's are appended.** The
+  order used to be declared here in full, with a LaTeX page on either side of
+  the shared Themes page, and two things were wrong with that. A page added to
+  the shell did not appear here until it was named below — E8's Presentation
+  page was invisible in this application for exactly that reason, and the
+  failure is silent, since a missing tab looks like one that was never built.
+  And interleaving meant *shared* and *ours* were not distinguishable in the
+  window, so the same page sat in a different neighbourhood in each
+  application. :meth:`host_tab_order` now names only the LaTeX pages.
 - **The page-style name lists are no longer here.** They moved into the
   shared General tab, which shows them only for a dialect whose page-style
   vocabulary a project can extend. LaTeX's can; Word's cannot.
@@ -73,13 +76,20 @@ class IndexPrefsConfigDialog(PreferencesDialog):
         """
         return "LaTeX Settings → cmd: makeindex/xindy → Sort Ordering Rule"
 
-    def tab_order(self) -> list[tuple[str, QWidget]]:
+    def xref_label_owner(self) -> str:
+        r"""
+        The document's. ``makeindex`` emits ``\see{target}{page}`` and the
+        words a reader sees come from whatever the manuscript defines ``\see``
+        to be, so the shared Presentation page renders its label fields
+        read-only here. Taken from the dialect rather than spelled out again,
+        that being where E7's measurement was recorded.
+        """
+        return LATEX_DIALECT.xref_label_owner
+
+    def host_tab_order(self) -> list[tuple[str, QWidget]]:
+        """This application's own pages, appended after the shared block."""
         return [
-            ("General", self.general_tab),
-            ("Check Index", self.check_index_tab),
-            ("Sorting", self.sorting_tab),
             ("LaTeX Settings", self.vtab_latex),
-            ("UI Themes", self.theme_tab),
             ("RTF Export", self.vtab_rtf_export),
         ]
 

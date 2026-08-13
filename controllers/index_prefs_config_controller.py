@@ -15,6 +15,7 @@ class IndexPrefsConfigController:
         theme_controller: ThemeConfigController,
         check_index_prefs,
         sort_prefs,
+        presentation_prefs,
         parent_window=None,
         on_general_changed=None,
     ) -> None:
@@ -27,6 +28,7 @@ class IndexPrefsConfigController:
         # to, and both would look like they worked.
         self._check_index_prefs = check_index_prefs
         self._sort_prefs = sort_prefs
+        self._presentation_prefs = presentation_prefs
         self._parent_window = parent_window
         # Called with the freshly-saved General payload so the application
         # can apply it live (AppPipelineController.apply_general_preferences).
@@ -82,6 +84,7 @@ class IndexPrefsConfigController:
         # here — whichever scope is in force is already the answer they give.
         dialog.populate_check_index_fields(self._check_index_prefs.load())
         dialog.populate_sorting_fields(self._sort_prefs.load())
+        dialog.populate_presentation_fields(self._presentation_prefs.load())
         # Application-scoped, so read straight from QSettings rather than
         # from the index prefs model, which is project-overlaid.
         dialog.populate_general_fields(self._prefs.load_application_preferences())
@@ -115,6 +118,7 @@ class IndexPrefsConfigController:
         # the globals, so they need no branch on _active_project_name.
         self._check_index_prefs.save(updated_payload)
         self._sort_prefs.save(updated_payload)
+        self._presentation_prefs.save(updated_payload)
 
         # Prefs — unchanged routing
         self._model.update_data(updated_payload)
