@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Changed: how hyphens file, and a setting that migrates
+
+**Preferences → Sorting** now asks what a hyphen *does* rather than whether to
+ignore it, because there are three answers and they give three different
+orders for the same headings: leave it alone, remove it so `co-operative`
+files as `cooperative`, or treat it as a space. Word removes it; the indexing
+manuals treat a hyphen inside a name as a word break.
+
+If you had "hyphens and slashes" ticked, your projects keep that behaviour —
+it becomes "Remove it" on first open. Nothing needs doing.
+
+**Also new on that page:** an option to file accented and transliterated
+letters under their base letter, so `Ḥusayn` files under H. Without it such a
+name sorts after every ordinary name in the index, because the marked letter
+is a higher character code than `z`. makeindex and xindy do not do this for
+you — Word and InDesign do — so for a LaTeX project it is the emitted sort key
+that carries it.
+
 ### New: note locators — `\index{Smith, John|fn{4}}`
 
 A note locator says *page 123, note 4* and prints `123n4`. LaTeX is the only

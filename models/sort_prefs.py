@@ -34,8 +34,8 @@ looking like a deletion.
 from typing import Any, Dict
 
 from bookindexcore.sorting import (
-    ORDER_BY_PROJECT, ORDER_MODE_KEY, SORT_DEFAULTS, SortRules,
-    makeindex_host, rules_for,
+    LEGACY_SORT_KEYS, ORDER_BY_PROJECT, ORDER_MODE_KEY, SORT_DEFAULTS,
+    SortRules, makeindex_host, rules_for,
 )
 from bookindexcore.persistence import DictGlobalStore, ScopedSettings
 
@@ -68,12 +68,24 @@ class SortPrefs:
         """See :class:`~models.check_index_prefs.CheckIndexPrefs` — same split,
         same reason: a dict store is for tests, the application passes a
         ``QSettingsGlobalStore`` so the no-project scope survives a restart."""
+        # A legacy key is kept rather than filtered out here, because the
+        # filter runs *before* ``ScopedSettings`` gets a chance to rename it --
+        # and a global dropped at this line is the user's chosen default for
+        # every project they create afterwards, not just this one.
         self._global = global_store or DictGlobalStore(
             {k: v for k, v in (global_data or {}).items()
-             if k in SORT_PREFS_DEFAULTS}
+             if k in SORT_PREFS_DEFAULTS or k in LEGACY_SORT_KEYS}
         )
+        # ``legacy_names`` moves the row and removes the old one; the *value*
+        # is still the old boolean when it arrives, and
+        # ``sort_rules_from_settings`` is what understands it as one. Both
+        # halves are needed: without the rename the stored row is filtered out
+        # on load, and without the value mapping it reads as an unknown
+        # vocabulary word and falls back to the default -- either way the
+        # project silently loses a setting it had switched on.
         self._scoped = ScopedSettings(
-            SORT_PREFS_DEFAULTS, self._global, prefix=PREF_PREFIX)
+            SORT_PREFS_DEFAULTS, self._global, prefix=PREF_PREFIX,
+            legacy_names=LEGACY_SORT_KEYS)
 
     # -- scope --------------------------------------------------------------
 
