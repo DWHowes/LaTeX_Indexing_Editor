@@ -35,6 +35,7 @@ from models.entry_modifier_model import EntryModifierModel
 from bookindexcore.qt.staging import QtIndexEditStagingModel
 from bookindexcore.naming.inverter import NameInverter, NameInversionResult
 from bookindexcore.style.languages import UNSTATED
+from bookindexcore.style.names import fold_for_matching
 
 from controllers.index_tree_controller import IndexTreeController
 from controllers.context_menu_subsystem import FileTreeContextMenuManager, IndexTreeContextMenuManager, EditEntryContextMenuManager
@@ -525,6 +526,35 @@ class AppPipelineController(QObject):
             print(f"[NAME INVERSION] Language lookup failed for {heading_text!r}: {exc}")
         return UNSTATED
 
+    def remember_compound_surname(self, surname: str) -> None:
+        """
+        Add a multi-word family name to the project's table.
+
+        The whole value of the table is that it generalises: *Vargas Llosa*
+        entered once makes every bearer of it file under V, without anybody
+        having to correct the next one. That is chapter 20's conclusion in
+        *Indexing Names* — no algorithm decides which words of a three-word
+        name are the surname, so the answer is a lookup grown from human-made
+        indexes — and this is where one gets made.
+
+        Appended rather than replacing, and a duplicate is dropped: the dialog
+        already declines to offer a surname the table holds, and this is the
+        second half of the same guard, for a caller that did not ask first.
+        """
+        surname = (surname or "").strip()
+        if not surname:
+            return
+        try:
+            existing = list(self.presentation_prefs.names().compound_surnames)
+            folded = {fold_for_matching(name) for name in existing}
+            if fold_for_matching(surname) in folded:
+                return
+            self.presentation_prefs.save(
+                {"compound_surnames": existing + [surname]})
+        except Exception as exc:
+            print(f"[NAME INVERSION] Could not remember the compound surname "
+                  f"{surname!r}: {exc}")
+
     def set_heading_language(self, heading_text: str, language: str) -> None:
         """
         Record a language against this heading, in both places it belongs.
@@ -570,6 +600,7 @@ class AppPipelineController(QObject):
             # language change is no reason to go back to the network.
             resuggest=lambda name, language: self._rule_only_inversion(
                 name, language).rule_suggestion,
+            compound_surnames=self.presentation_prefs.names().compound_surnames,
         )
         self._active_dialog = dialog
 
@@ -589,6 +620,7 @@ class AppPipelineController(QObject):
             # and accepting the suggestion is a complete answer, and the whole
             # point of asking is that it be there next time.
             self.set_heading_language(source_name, language)
+            self.remember_compound_surname(dialog.compound_surname_to_remember())
 
             self._apply_inverted_name(target_index, final_value)
 
@@ -2533,6 +2565,29 @@ class AppPipelineController(QObject):
             print(f"SHUTDOWN CRITICAL FAILURE: {shutdown_err}. Executing hard exit bypass.")
             self._force_application_exit()
 
+    def _refresh_name_rules(self) -> None:
+        r"""
+        Hand the inverter the rules this project is actually working to.
+
+        **The inverter is built once, at startup, before any project is
+        open**, so it took ``NameRules()`` -- the package defaults -- and kept
+        them. Nothing ever gave it the project's. Every table on the
+        Presentation page was therefore edited into a record the inversion
+        cascade never read: a name added to *Direct order* still inverted, a
+        particle removed from the list was still absorbed.
+
+        Read at the point of use rather than pushed on change, because the
+        rules can move under this object from three directions -- the
+        preferences dialog, opening a project, closing one -- and a push would
+        have to be wired to all three and stay wired.
+        """
+        if self.name_inverter is None:
+            return
+        try:
+            self.name_inverter.rules = self.presentation_prefs.names()
+        except Exception as exc:
+            print(f"[NAME INVERSION] Could not read the project's name rules: {exc}")
+
     def invert_name(self, name: str, locale: Optional[str] = None,
                     prefer_authority: bool = True) -> NameInversionResult:
         """Synchronous inversion -- safe for background work or unit tests.
@@ -2541,6 +2596,7 @@ class AppPipelineController(QObject):
         need the authority heading and the rule-based suggestion separately in
         order to offer both.
         """
+        self._refresh_name_rules()
         if self.name_inverter:
             return self.name_inverter.invert(name, locale=locale, prefer_authority=prefer_authority)
 
@@ -2574,6 +2630,10 @@ class AppPipelineController(QObject):
             callback(self._rule_only_inversion(name, locale))
             return
 
+        # Before the submit, not inside the worker: reading settings is the UI
+        # thread's business, and the rules have to be in place before the
+        # cascade runs on the other side of it.
+        self._refresh_name_rules()
         future = self._executor.submit(self.name_inverter.invert, name, locale, prefer_authority)
 
         def _done(fut):

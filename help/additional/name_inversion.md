@@ -21,6 +21,17 @@ Name Inversion never applies a change silently — a dialog always appears first
 
 If you type a correction that differs from both suggestions, that correction is remembered locally, so the same name will offer your corrected version next time rather than the original suggestion.
 
+## Family names of more than one word
+
+*Mario Vargas Llosa* is filed **Vargas Llosa, Mario**, under V — his family name is two words. No rule can work that out, and the reason is worth knowing, because it is why this needs you:
+
+- *Gabriel García Márquez* → **García Márquez, Gabriel**, under G.
+- *Winston Spencer Churchill* → **Churchill, Winston Spencer**, under C.
+
+Same shape, opposite answers. And *John Foster Dulles* is a single surname that looks like a double one. So the app keeps a list instead of guessing: **Preferences → Presentation → Compound surnames**, one per line, seeded with the examples the standard manuals print.
+
+**The list grows as you work.** When you change the suggested value in this dialog, it offers to remember the family name you used — "Remember 'Vargas Llosa' as a compound surname". Tick it, and every later name ending in those words is inverted correctly without being corrected again. A surname the list already holds is not offered, and accents are ignored when checking, so you will not be asked to add *Díaz del Castillo* to a list that already has *Diaz del Castillo*.
+
 ## Telling it what language the name is
 
 The dialog also asks what language the **name** is in — which is not the same question as what language the book is in. Most manuscripts carry names from several languages, and some of the filing rules cannot be applied without knowing which one applies to a given name.

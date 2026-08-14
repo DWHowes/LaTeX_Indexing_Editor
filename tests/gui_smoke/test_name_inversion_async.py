@@ -43,7 +43,7 @@ def _captured_dialogs(monkeypatch, pipeline):
 
     class _FakeDialog:
         def __init__(self, original_name, authority_value, rule_value, parent=None,
-                     language=UNSTATED, resuggest=None):
+                     language=UNSTATED, resuggest=None, compound_surnames=()):
             self.original_name = original_name
             self.authority_value = authority_value
             self.rule_value = rule_value
@@ -51,6 +51,7 @@ def _captured_dialogs(monkeypatch, pipeline):
             # let the two drift apart without a test noticing.
             self.language = language
             self.resuggest = resuggest
+            self.compound_surnames = compound_surnames
             self.accepted = _FakeSignal()
             self.rejected = _FakeSignal()
             seen.append(self)
@@ -268,3 +269,88 @@ class TestTheLanguageReachesTheDialog:
         assert resuggest is not None
         assert resuggest("Isa bin Sulman", "ar") == "Isa bin Sulman"
         assert resuggest("Isa bin Sulman", UNSTATED) == "bin Sulman, Isa"
+
+
+class TestRememberingACompoundSurname:
+    """
+    The table's growth path: the indexer corrects one name, and every later
+    bearer of that surname is right without being corrected again.
+    """
+
+    def test_the_dialog_is_told_what_the_table_already_holds(self, pipeline,
+                                                             name_index,
+                                                             monkeypatch, qtbot):
+        """
+        Or it offers to add a surname the project already knows, every time
+        that name comes up.
+        """
+        model, index = name_index
+        dialogs = _captured_dialogs(monkeypatch, pipeline)
+
+        pipeline._handle_index_name_inversion_request(index)
+        qtbot.waitUntil(lambda: bool(dialogs), timeout=5000)
+
+        assert "Vargas Llosa" in dialogs[0].compound_surnames
+
+    def test_a_remembered_surname_reaches_the_project_settings(self, pipeline):
+        pipeline.remember_compound_surname("Ferrer Salat")
+        assert "Ferrer Salat" in pipeline.presentation_prefs.names().compound_surnames
+
+    def test_it_generalises_to_the_next_bearer(self, pipeline):
+        """
+        The whole point of the table, in one assertion. Nobody corrects the
+        second name.
+
+        Its own surname, because the pipeline's settings outlive one test and
+        a shared one would make this pass on whatever ran before it.
+        """
+        assert pipeline._rule_only_inversion(
+            "Enrique Pena Nieto").rule_suggestion == "Nieto, Enrique Pena"
+
+        pipeline.remember_compound_surname("Pena Nieto")
+
+        assert pipeline._rule_only_inversion(
+            "Ana Pena Nieto").rule_suggestion == "Pena Nieto, Ana"
+
+    def test_a_duplicate_is_not_appended(self, pipeline):
+        before = pipeline.presentation_prefs.names().compound_surnames
+        pipeline.remember_compound_surname("Vargas Llosa")
+        assert pipeline.presentation_prefs.names().compound_surnames == before
+
+    def test_nothing_to_remember_is_not_an_error(self, pipeline):
+        before = pipeline.presentation_prefs.names().compound_surnames
+        pipeline.remember_compound_surname("")
+        assert pipeline.presentation_prefs.names().compound_surnames == before
+
+
+class TestTheInverterUsesTheProjectsRules:
+    """
+    A defect this feature exposed rather than introduced.
+
+    ``NameInverter`` is constructed once at startup, before any project is
+    open, so it took ``NameRules()`` — the package defaults — and kept them.
+    Nothing ever handed it the project's. Every table on the Presentation page
+    was therefore edited into a record the cascade never read: a name added to
+    *Direct order* still inverted, a particle removed was still absorbed.
+    """
+
+    def test_a_project_table_reaches_the_cascade(self, pipeline):
+        pipeline.presentation_prefs.save(
+            {"direct_order_names": ["Winston Churchill"]})
+
+        assert pipeline._rule_only_inversion(
+            "Winston Churchill").rule_suggestion == "Winston Churchill"
+
+    def test_it_is_read_at_the_point_of_use_not_pushed_on_change(self, pipeline):
+        """
+        The rules move under this object from three directions — the
+        preferences dialog, opening a project, closing one — and a push would
+        have to be wired to all three and stay wired.
+        """
+        pipeline.presentation_prefs.save({"particles": []})
+        assert pipeline._rule_only_inversion(
+            "Ludwig van Beethoven").rule_suggestion == "Beethoven, Ludwig van"
+
+        pipeline.presentation_prefs.save({"particles": ["van"]})
+        assert pipeline._rule_only_inversion(
+            "Ludwig van Beethoven").rule_suggestion == "van Beethoven, Ludwig"

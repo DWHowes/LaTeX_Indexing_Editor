@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### New: compound surnames, remembered once
+
+*Mario Vargas Llosa* is filed **Vargas Llosa, Mario**, under V. His family name
+is two words, and no rule can work that out: *Gabriel García Márquez* and
+*Winston Spencer Churchill* are the same shape and take opposite answers, and
+*John Foster Dulles* is a single surname that looks like a double one. The only
+honest answer is a list, and **Preferences → Presentation → Compound surnames**
+is where it lives, seeded with the examples the standard manuals print.
+
+**The list grows as you work.** When you correct a name in the Name Inversion
+dialog, it offers to remember the family name you used — tick it, and every
+later name ending in those words is right without being corrected again. A
+surname the list already holds is not offered, accents and all.
+
+### Fixed: your name settings never reached the inverter
+
+A real defect, found while building the above and older than it. The Name
+Inversion tables on the Preferences → Presentation page — direct order,
+particles, generational suffixes — were read once when the application started,
+before any project was open, so they were always the built-in defaults. A name
+you added to *Direct order* was still inverted; a particle you removed was still
+absorbed.
+
+They are now read each time a name is inverted, so a change on that page takes
+effect on the next lookup, in the project you are in.
+
 ### New: filing rules that differ by language
 
 Some names file differently depending on which language they are, and no rule
