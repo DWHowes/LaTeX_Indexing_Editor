@@ -43,6 +43,15 @@ The clearest example is Arabic, where two names differ by a single capital lette
 
 Nothing in the text of those two names says which is which, so the rules leave both alone until you say. Choose the language and the suggestion is worked out again in front of you, so you can see what it changed.
 
+### The authority record fills it in, and you check it
+
+When the VIAF/Library of Congress lookup finds a record, it usually knows a language, and the dialog pre-selects it for you — but only for a name you have not already given one to, and the note tells you it came from the record. Two things were checked against real authority records, and both are reasons to look rather than to accept:
+
+- **It is the language of the person, not of the name.** Joseph Conrad's record says English; his family name was Korzeniowski.
+- **It carries no region.** Hugo Claus — Flemish, born in Bruges — comes back as plain Dutch, the same code a Netherlands author gets. Since that is exactly the distinction that decides whether *Van den Eede* files under V or under E, a Flemish name still needs you to set it.
+
+Nothing is saved until you press OK, and a suggestion is never written into the remembered-names database — that records what *you* decided, and a guess kept there would come back looking settled in the next book.
+
 A line under the control tells you what your choice actually did:
 
 - **the filing and inversion rules for this language apply** — the rules acted on it.

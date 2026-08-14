@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### New: the authority lookup suggests the language
+
+When the VIAF/Library of Congress lookup finds a record, it now also fills in the
+**Language** on the Name Inversion dialog — for a name you have not already given
+one. You still confirm it, and the note under the control tells you why that
+matters.
+
+Two things were checked against real authority records before this was built, and
+both limit what the suggestion is worth:
+
+- **It is the language of the person, not of the name.** Joseph Conrad's record
+  says English. His family name was Korzeniowski.
+- **It carries no region.** Hugo Claus — Flemish, born in Bruges — comes back as
+  plain Dutch, the same code a Netherlands author gets. That is exactly the
+  distinction that decides whether *Van den Eede* files under V or under E, so a
+  Flemish name still needs you to say so.
+
+Nothing is stored until you press OK, and the suggestion is never written to the
+remembered-names database — that database records what you decided, and a guess
+kept there would come back looking settled in the next book.
+
 ### New: compound surnames, remembered once
 
 *Mario Vargas Llosa* is filed **Vargas Llosa, Mario**, under V. His family name

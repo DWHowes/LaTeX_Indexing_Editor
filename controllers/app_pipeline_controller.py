@@ -601,6 +601,13 @@ class AppPipelineController(QObject):
             resuggest=lambda name, language: self._rule_only_inversion(
                 name, language).rule_suggestion,
             compound_surnames=self.presentation_prefs.names().compound_surnames,
+            # Offered, never applied. The record gives the language the person
+            # is associated with rather than the language of the name, and it
+            # carries no region -- so a Flemish name arrives as plain Dutch,
+            # which is exactly the distinction the filing rules need. The
+            # dialog shows where it came from and the indexer confirms it.
+            language_from_authority=getattr(
+                inversion_result, "authority_language", ""),
         )
         self._active_dialog = dialog
 

@@ -17,6 +17,7 @@ import pytest
 from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 
+from bookindexcore.naming.inverter import NameInversionResult
 from bookindexcore.style.languages import UNSTATED
 
 from bookindexcore.naming.inverter import NameInversionResult
@@ -43,7 +44,8 @@ def _captured_dialogs(monkeypatch, pipeline):
 
     class _FakeDialog:
         def __init__(self, original_name, authority_value, rule_value, parent=None,
-                     language=UNSTATED, resuggest=None, compound_surnames=()):
+                     language=UNSTATED, resuggest=None, compound_surnames=(),
+                     language_from_authority=UNSTATED):
             self.original_name = original_name
             self.authority_value = authority_value
             self.rule_value = rule_value
@@ -52,6 +54,7 @@ def _captured_dialogs(monkeypatch, pipeline):
             self.language = language
             self.resuggest = resuggest
             self.compound_surnames = compound_surnames
+            self.language_from_authority = language_from_authority
             self.accepted = _FakeSignal()
             self.rejected = _FakeSignal()
             seen.append(self)
@@ -354,3 +357,42 @@ class TestTheInverterUsesTheProjectsRules:
         pipeline.presentation_prefs.save({"particles": ["van"]})
         assert pipeline._rule_only_inversion(
             "Ludwig van Beethoven").rule_suggestion == "van Beethoven, Ludwig"
+
+
+class TestTheAuthoritySuggestsALanguage:
+    """
+    The seeding path, end to end through the controller.
+
+    It reaches the dialog as a *suggestion*, and nothing is stored until the
+    indexer presses OK — which they have to do anyway to apply the heading.
+    Nothing is written behind their back, which is the whole design given what
+    the record can and cannot say: it gives the language the person is
+    associated with, not the language of the name, and it carries no region.
+    """
+
+    def test_the_authority_language_reaches_the_dialog(self, pipeline,
+                                                       name_index,
+                                                       monkeypatch, qtbot):
+        model, index = name_index
+        dialogs = _captured_dialogs(monkeypatch, pipeline)
+        monkeypatch.setattr(
+            pipeline.name_inverter, "invert",
+            lambda name, locale=None, prefer_authority=True: NameInversionResult(
+                display_value="Vattel, Emer de", authority_term="Vattel, Emer de",
+                rule_suggestion="de Vattel, Emer", used_authority=True,
+                authority_language="fr"))
+
+        pipeline._handle_index_name_inversion_request(index)
+        qtbot.waitUntil(lambda: bool(dialogs), timeout=5000)
+
+        assert dialogs[0].language_from_authority == "fr"
+
+    def test_a_result_without_one_passes_nothing_on(self, pipeline, name_index,
+                                                    monkeypatch, qtbot):
+        model, index = name_index
+        dialogs = _captured_dialogs(monkeypatch, pipeline)
+
+        pipeline._handle_index_name_inversion_request(index)
+        qtbot.waitUntil(lambda: bool(dialogs), timeout=5000)
+
+        assert dialogs[0].language_from_authority in ("", UNSTATED)
