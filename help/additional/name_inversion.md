@@ -21,6 +21,27 @@ Name Inversion never applies a change silently — a dialog always appears first
 
 If you type a correction that differs from both suggestions, that correction is remembered locally, so the same name will offer your corrected version next time rather than the original suggestion.
 
+## Telling it what language the name is
+
+The dialog also asks what language the **name** is in — which is not the same question as what language the book is in. Most manuscripts carry names from several languages, and some of the filing rules cannot be applied without knowing which one applies to a given name.
+
+The clearest example is Arabic, where two names differ by a single capital letter and file in completely different places:
+
+- *Osama Bin Laden* is filed as **Bin Laden, Osama**, under B — a capitalised *Bin* is a modern surname.
+- *Isa bin Sulman* is filed as **Isa bin Sulman**, under I — a lowercase *bin* means "son of", and the name is not inverted at all.
+
+Nothing in the text of those two names says which is which, so the rules leave both alone until you say. Choose the language and the suggestion is worked out again in front of you, so you can see what it changed.
+
+A line under the control tells you what your choice actually did:
+
+- **the filing and inversion rules for this language apply** — the rules acted on it.
+- **recorded on this entry; no rules are written for it yet** — the language is stored against the entry and nothing else has changed. This is worth doing anyway: it is a note of something true, kept where the next person to open the entry will see it.
+- **no language stated** — the default, and the rules that need one stand back.
+
+What you choose is remembered in two places: against this entry in this project, and against the name itself, so a name you have classified in one book arrives already classified in the next. The entry's own setting always wins where the two differ.
+
+If a book really is all one language, set **Preferences → Presentation → Default name language** rather than answering for every name. That default is the weakest of the three — both the entry and the remembered name override it — and it starts at "Not stated" on purpose, because a language assumed for every name in a book is wrong on exactly the ones that needed you to look.
+
 ## See also
 
 - [Editing Entries in the Table](../entry_table/editing.md)

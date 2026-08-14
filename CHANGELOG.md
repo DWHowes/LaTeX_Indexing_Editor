@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### New: Name Inversion asks what language the name is
+
+Not what language the *book* is — most manuscripts carry names from several,
+and some filing rules cannot be applied without knowing which one applies to
+a given name. The clearest case is Arabic, where two names differ by a single
+capital letter and file in completely different places: *Osama Bin Laden*
+files as **Bin Laden, Osama** under B, while *Isa bin Sulman* files as
+**Isa bin Sulman** under I. Nothing in the text says which is which, so until
+now both took the same rule and one of them was always wrong.
+
+Choose the language in the Name Inversion dialog and the suggestion is worked
+out again in front of you. A line underneath says what your choice did — the
+rules applied, or the language was recorded and nothing else changed. That
+second case is deliberate and worth using: a language with no rules behind it
+yet is still a note of something true, kept where the next person to open the
+entry will see it, and it is what any future rule would be built on.
+
+Your choice is remembered against this entry **and** against the name itself,
+so a name classified in one book arrives classified in the next. The entry
+wins where the two differ.
+
+For a book that really is all one language, **Preferences → Presentation**
+now has a *default name language*. It is the weakest of the three — the entry
+and the remembered name both override it — and it starts at "Not stated",
+because a language assumed for every name in a book is wrong on exactly the
+ones that needed you to look.
+
+**Also on Preferences → Sorting:** a second list of ignored leading words,
+matched exactly as written. It is what lets `al Turabi` file under T while
+`Al Thani` files under A — the Arabic article and the Arabic word for *clan*,
+which are the same two letters and are told apart by the capital alone. It is
+filled in for you when an index is declared to be an index of names.
+
 ### Changed: how hyphens file, and a setting that migrates
 
 **Preferences → Sorting** now asks what a hyphen *does* rather than whether to

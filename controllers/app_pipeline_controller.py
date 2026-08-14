@@ -34,6 +34,7 @@ from bookindexcore.ui.theme.config_model import ThemeConfigModel
 from models.entry_modifier_model import EntryModifierModel
 from bookindexcore.qt.staging import QtIndexEditStagingModel
 from bookindexcore.naming.inverter import NameInverter, NameInversionResult
+from bookindexcore.style.languages import UNSTATED
 
 from controllers.index_tree_controller import IndexTreeController
 from controllers.context_menu_subsystem import FileTreeContextMenuManager, IndexTreeContextMenuManager, EditEntryContextMenuManager
@@ -490,7 +491,58 @@ class AppPipelineController(QObject):
             self.name_lookup_finished.emit(persistent_index, source_name, inversion_result)
 
         self.invert_name_async(
-            source_name, _on_lookup_done, locale=None, prefer_authority=True)
+            source_name, _on_lookup_done,
+            locale=self.heading_language(source_name), prefer_authority=True)
+
+    def heading_language(self, heading_text: str) -> str:
+        """
+        What language this heading's name is in, by the settled precedence.
+
+        Three sources, most specific first, and the order is the design:
+
+        1. **This project's heading row.** A book is entitled to read a name
+           differently from the last book -- the same word can be a different
+           person.
+        2. **The name database**, which outlives any one project, so a name
+           classified once arrives classified in the next volume.
+        3. **The project default**, which lives in ``NameRules`` and is read
+           by the cascade itself, so nothing here has to apply it.
+
+        Never raises and never creates a heading row: this is a question, and
+        a reader that writes would turn a cancelled dialog into a row nothing
+        points at.
+        """
+        try:
+            persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+            if persistence is not None:
+                heading_id = persistence.find_heading_id(heading_text)
+                stated = persistence.heading_language(heading_id)
+                if stated != UNSTATED:
+                    return stated
+            if self.name_inverter is not None:
+                return self.name_inverter.remembered_language(heading_text)
+        except Exception as exc:
+            print(f"[NAME INVERSION] Language lookup failed for {heading_text!r}: {exc}")
+        return UNSTATED
+
+    def set_heading_language(self, heading_text: str, language: str) -> None:
+        """
+        Record a language against this heading, in both places it belongs.
+
+        The project row is the answer for this book; the name database is what
+        carries the decision into the next one. Written together because an
+        indexer classifying a name has answered both questions at once, and
+        writing only one of them is how the two come to disagree.
+        """
+        try:
+            persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+            if persistence is not None:
+                heading_id = persistence.find_heading_id(heading_text)
+                if heading_id is not None:
+                    persistence.set_heading_language(heading_id, language)
+        except Exception as exc:
+            print(f"[NAME INVERSION] Could not store the language for "
+                  f"{heading_text!r}: {exc}")
 
     @Slot(object, str, object)
     def _present_name_inversion_dialog(self, persistent_index, source_name: str,
@@ -509,18 +561,34 @@ class AppPipelineController(QObject):
             original_name=source_name,
             authority_value=inversion_result.authority_term or "",
             rule_value=inversion_result.rule_suggestion or inversion_result.display_value,
-            parent=self.window
+            parent=self.window,
+            language=self.heading_language(source_name),
+            # Re-ask the rules when the language changes. Without it the
+            # control states a fact and appears to do nothing: an indexer
+            # marks a name Arabic, watches the suggestion sit unchanged, and
+            # cannot tell whether the setting took. Rule-based only -- a
+            # language change is no reason to go back to the network.
+            resuggest=lambda name, language: self._rule_only_inversion(
+                name, language).rule_suggestion,
         )
         self._active_dialog = dialog
 
         def on_accepted():
             final_value = dialog.result_value()
             reason = dialog.correction_reason()
+            language = dialog.language()
 
             # Cache if the user changed the auto-resolved value
             original_auto = inversion_result.authority_term or inversion_result.rule_suggestion or ""
             if self.name_inverter and final_value.strip() != original_auto.strip():
-                self.name_inverter.cache_resolved_heading(source_name, final_value, reason=reason, user_edited=True)
+                self.name_inverter.cache_resolved_heading(
+                    source_name, final_value, reason=reason, locale=language,
+                    user_edited=True)
+
+            # Unconditionally, unlike the correction above. Stating a language
+            # and accepting the suggestion is a complete answer, and the whole
+            # point of asking is that it be there next time.
+            self.set_heading_language(source_name, language)
 
             self._apply_inverted_name(target_index, final_value)
 

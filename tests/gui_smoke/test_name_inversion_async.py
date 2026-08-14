@@ -17,6 +17,8 @@ import pytest
 from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 
+from bookindexcore.style.languages import UNSTATED
+
 from bookindexcore.naming.inverter import NameInversionResult
 
 
@@ -40,10 +42,15 @@ def _captured_dialogs(monkeypatch, pipeline):
     seen = []
 
     class _FakeDialog:
-        def __init__(self, original_name, authority_value, rule_value, parent=None):
+        def __init__(self, original_name, authority_value, rule_value, parent=None,
+                     language=UNSTATED, resuggest=None):
             self.original_name = original_name
             self.authority_value = authority_value
             self.rule_value = rule_value
+            # The real dialog takes both, and a stand-in that did not would
+            # let the two drift apart without a test noticing.
+            self.language = language
+            self.resuggest = resuggest
             self.accepted = _FakeSignal()
             self.rejected = _FakeSignal()
             seen.append(self)
@@ -186,3 +193,78 @@ class TestSynchronousWrapper:
 
         assert isinstance(result, NameInversionResult)
         assert result.display_value == "Emer de Vattel"
+
+
+class TestTheLanguageReachesTheDialog:
+    """
+    Part 3's wiring, from the entry table to the dialog and back.
+
+    The precedence is the design: this project's heading row, then what the
+    name database remembers about the name, then the project default -- which
+    the cascade applies itself, so nothing here has to.
+    """
+
+    def test_an_unclassified_name_arrives_unstated(self, pipeline, name_index,
+                                                   monkeypatch, qtbot):
+        model, index = name_index
+        dialogs = _captured_dialogs(monkeypatch, pipeline)
+
+        pipeline._handle_index_name_inversion_request(index)
+        qtbot.waitUntil(lambda: bool(dialogs), timeout=5000)
+
+        assert dialogs[0].language == UNSTATED
+
+    def test_the_name_database_supplies_one_when_the_project_has_not(
+            self, pipeline, name_index, monkeypatch, qtbot):
+        """
+        The cross-project half: a name classified in one book arrives
+        classified in the next, because the authority cache outlives any one
+        project.
+        """
+        model, index = name_index
+        dialogs = _captured_dialogs(monkeypatch, pipeline)
+        monkeypatch.setattr(pipeline.name_inverter, "remembered_language",
+                            lambda name: "fr")
+
+        pipeline._handle_index_name_inversion_request(index)
+        qtbot.waitUntil(lambda: bool(dialogs), timeout=5000)
+
+        assert dialogs[0].language == "fr"
+
+    def test_asking_never_fails_the_lookup(self, pipeline, name_index,
+                                           monkeypatch, qtbot):
+        """
+        A language nobody can look up is not a reason to refuse to invert a
+        name. The dialog is the point of the exercise; the language is a
+        refinement on it.
+        """
+        model, index = name_index
+        dialogs = _captured_dialogs(monkeypatch, pipeline)
+
+        def _explode(name):
+            raise RuntimeError("cache is gone")
+
+        monkeypatch.setattr(pipeline.name_inverter, "remembered_language", _explode)
+
+        pipeline._handle_index_name_inversion_request(index)
+        qtbot.waitUntil(lambda: bool(dialogs), timeout=5000)
+
+        assert dialogs[0].language == UNSTATED
+
+    def test_the_dialog_is_given_a_way_to_re_ask_the_rules(self, pipeline,
+                                                           name_index,
+                                                           monkeypatch, qtbot):
+        """
+        Rule-based only: a language change is no reason to go back to the
+        network, and the authority's answer does not depend on it.
+        """
+        model, index = name_index
+        dialogs = _captured_dialogs(monkeypatch, pipeline)
+
+        pipeline._handle_index_name_inversion_request(index)
+        qtbot.waitUntil(lambda: bool(dialogs), timeout=5000)
+
+        resuggest = dialogs[0].resuggest
+        assert resuggest is not None
+        assert resuggest("Isa bin Sulman", "ar") == "Isa bin Sulman"
+        assert resuggest("Isa bin Sulman", UNSTATED) == "bin Sulman, Isa"
