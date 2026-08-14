@@ -42,6 +42,24 @@ What you choose is remembered in two places: against this entry in this project,
 
 If a book really is all one language, set **Preferences → Presentation → Default name language** rather than answering for every name. That default is the weakest of the three — both the entry and the remembered name override it — and it starts at "Not stated" on purpose, because a language assumed for every name in a book is wrong on exactly the ones that needed you to look.
 
+## What the language changes about filing
+
+Marking a name's language does not only affect how it is inverted. Some names *file* differently depending on the language, and the clearest pair is Dutch and Flemish:
+
+- *Louis van den Eede*, marked Dutch, files under **E** — Dutch moves the prefix to the end.
+- The same name marked Flemish files under **V** — Belgian practice files on the prefix.
+
+German has one of its own. *ten* is an ordinary Dutch preposition, so *Hein ten Hoff* marked Dutch files under **H**; in German it is an article of foreign origin and is filed on, so the same name marked German files under **T**.
+
+Two languages have competing national standards, and **Preferences → Presentation** asks which one this project follows:
+
+- **Dutch** — FOBID (1994) leaves *Ver* and the prefixes of foreign origin standing, so *La Fontaine Verwey, Herman de* files under L. ABC-regels (NOBIN, 1985) moves them, so it files under F.
+- **German** — RAK/AACR2 files a contraction of preposition and article, so *Vom Berg, Fritz* files under V. DIN 5007-2 moves those too, so it files under B. Nothing else separates the two.
+
+Your choice fills in a list of words on **Preferences → Sorting**, under *By language*, where you can see it and change it. A line ending at the colon means that language ignores no leading words at all — that is how Flemish is expressed.
+
+None of this touches a heading you have not given a language to.
+
 ## See also
 
 - [Editing Entries in the Table](../entry_table/editing.md)

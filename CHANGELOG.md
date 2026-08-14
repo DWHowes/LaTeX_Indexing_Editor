@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### New: filing rules that differ by language
+
+Some names file differently depending on which language they are, and no rule
+reading the text can tell. The clearest pair is Dutch and Flemish: *Louis van
+den Eede* is filed **Van den Eede, Louis** under V in Belgian practice, and
+**Eede, Louis van den** under E in Dutch. German has one of its own — *ten* is
+an ordinary Dutch preposition and files under the name behind it, but in German
+it is an article of foreign origin and is filed on, so *Hein ten Hoff* files
+under T.
+
+Where a heading has been given a language (see Name Inversion, below), those
+rules now apply to it. Headings with no language file exactly as they did.
+
+**Preferences → Presentation** asks which national code to follow for Dutch and
+for German, the only two languages where two compete. The choice is small and
+concrete: FOBID leaves *Ver* and the foreign-origin prefixes standing so *La
+Fontaine Verwey, Herman de* files under L, while ABC-regels transposes them and
+files it under F; RAK files a contraction so *Vom Berg, Fritz* files under V,
+while DIN 5007-2 transposes it and files it under B.
+
+**Preferences → Sorting** shows what that choice filled in — one line per
+language — and you can edit it. A line ending at the colon means that language
+ignores no leading words at all, which is what makes Flemish work.
+
+This was measured against every worked example in the Dutch, German and Spanish
+chapters of *Indexing Names* (ASI, 2012). Fourteen of the seventeen already
+filed correctly; these are the other three.
+
 ### New: Name Inversion asks what language the name is
 
 Not what language the *book* is — most manuscripts carry names from several,
