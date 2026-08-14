@@ -282,6 +282,21 @@ a `see{X}` encap is reported as a command — nothing in the *marker* grammar
 distinguishes a cross-reference, so callers that care ask `parse_encap_xref`
 first. `TestRangeRoles` keeps the bare `(`/`)` cases and adds the styled ones.
 
+**A note locator is a page style with an argument.** `TestNoteLocators` covers
+`fn{4}` — the encap that renders `123n4` against a document defining
+`\def\fn#1#2{{#2}n#1}` — and it is built *on top of* the range pair above
+rather than beside it, because `(fn{4}` is a range that also carries a note
+number and a caller that read the note and forgot the marker would write back
+a range with one end. LaTeX is the only one of the three formats this family of
+editors targets that can express one, which is why `LatexDialect` is the only
+dialect declaring `supports_note_locators = True`.
+
+The tests that matter are the ones that decline. `see{Cats}` has exactly the
+same shape and is a cross-reference; a project's own `\toacite{5}` has it too
+and is a page style. **Membership in the project's list of note macros is what
+identifies a note locator, never the shape**, which is the same discipline as
+the `parse_encap_xref`-first rule directly above.
+
 Because `ProjectLoadWorker` and `range_consistency_model` already asked the
 grammar rather than comparing encaps themselves, both started handling styled
 ranges the moment this changed — covered where they live, in

@@ -152,6 +152,22 @@ class LatexDialect:
     #: label fields for a LaTeX project. Measured in E7.
     xref_label_owner = XREF_LABEL_DOCUMENT
 
+    #: **True, and LaTeX is the only one of the three for which it is.**
+    #: ``\index{X|fn{4}}`` against a document defining ``\def\fn#1#2{{#2}n#1}``
+    #: renders ``123n4``, and makeindex files the plain locator ahead of the
+    #: decorated one on its own -- CMOS's order without asking for it.
+    #:
+    #: Word cannot: an ``XE`` inside a footnote files at the page the note
+    #: sits on and is indistinguishable from body text there. Neither can
+    #: InDesign, whose ``PageReferenceType`` enumeration describes only how
+    #: far a reference *runs*, never what kind of place it sits in -- so a
+    #: note locator has nowhere to live rather than merely being unimplemented.
+    #: Both measured in E7; see ``documentation`` §8.13.
+    #:
+    #: The reading path is
+    #: :func:`models.index_tag_grammar.parse_note_locator`.
+    supports_note_locators = True
+
     def __init__(
         self,
         bold_values: Iterable[str] = grammar.DEFAULT_BOLD_ENCAP_VALUES,

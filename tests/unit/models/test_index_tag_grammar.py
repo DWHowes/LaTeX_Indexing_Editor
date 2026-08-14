@@ -447,6 +447,73 @@ class TestBuildRangeEncap:
         assert grammar.parse_macro(tag.to_macro()).range_role == "open"
 
 
+class TestNoteLocators:
+    r"""
+    ``\index{X|fn{4}}`` -- the one thing LaTeX can do here that neither
+    page-layout host can, and the reason ``supports_note_locators`` is a
+    declaration rather than an assumption.
+    """
+
+    def test_a_note_locator_parses(self):
+        found = grammar.parse_note_locator("fn{4}")
+        assert found is not None
+        assert (found.macro, found.note, found.range_role) == ("fn", "4", None)
+
+    def test_a_note_locator_that_also_opens_a_range(self):
+        """
+        The two are one string in the file, so a caller that read the note and
+        forgot the marker would write back a range with one end.
+        """
+        found = grammar.parse_note_locator("(fn{4}")
+        assert (found.note, found.range_role) == ("4", "open")
+
+    def test_a_cross_reference_is_not_one(self):
+        """Identical shape, different thing. Membership in the project's list
+        of note macros is what identifies a note locator, not the shape."""
+        assert grammar.parse_note_locator("see{Cats}") is None
+        assert grammar.parse_note_locator("seealso{Cats!domestic}") is None
+
+    def test_an_ordinary_page_style_is_not_one(self):
+        assert grammar.parse_note_locator("textbf") is None
+        assert grammar.parse_note_locator("(textbf") is None
+
+    def test_a_project_macro_taking_an_argument_is_not_one_unless_declared(self):
+        r"""A project's ``\toacite{...}`` has the shape and is a page style."""
+        assert grammar.parse_note_locator("toacite{5}") is None
+        assert grammar.parse_note_locator(
+            "toacite{5}", note_values=("fn", "toacite")) is not None
+
+    @pytest.mark.parametrize("encap", ["", None, "   ", "fn{", "fn}",
+                                       "fn{4}{5}", "{4}"])
+    def test_it_is_total(self, encap):
+        assert grammar.parse_note_locator(encap) is None
+
+    def test_it_round_trips(self):
+        for encap in ("fn{4}", "(fn{4}", ")fn{12}"):
+            found = grammar.parse_note_locator(encap)
+            assert grammar.build_note_locator(
+                found.note, found.macro, found.range_role) == encap
+
+    def test_an_empty_note_yields_no_encap_rather_than_an_empty_macro(self):
+        """
+        ``fn{}`` renders ``123n`` and files as a page style nobody defined, so
+        the honest output for "no note" is no encap at all.
+        """
+        assert grammar.build_note_locator("") == ""
+        assert grammar.build_note_locator("", range_role="open") == "("
+
+    def test_it_serializes_into_a_whole_tag(self):
+        tag = grammar.IndexTag(("Smith, John",), grammar.build_note_locator("4"))
+        assert tag.to_macro() == r"\index{Smith, John|fn{4}}"
+        assert grammar.parse_note_locator(
+            grammar.parse_macro(tag.to_macro()).encap).note == "4"
+
+    def test_the_worked_example_is_what_a_reader_sees(self):
+        """For the prenote's formatting legend: the printed form, not the
+        markup that produced it."""
+        assert grammar.note_locator_example() == "123n4"
+
+
 class TestMacroPattern:
     def test_matches_plain_index(self):
         assert grammar.MACRO_PATTERN.search(r"text \index{A}").group(1) == "index"

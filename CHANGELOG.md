@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### New: note locators — `\index{Smith, John|fn{4}}`
+
+A note locator says *page 123, note 4* and prints `123n4`. LaTeX is the only
+one of the three formats this family of editors targets that can express one:
+it works through an encapsulation that takes an argument, against a document
+defining `\def\fn#1#2{{#2}n#1}`. Word cannot — an `XE` field inside a footnote
+files at the page the note sits on and is indistinguishable from body text
+there — and neither can InDesign, whose model draws no distinction between
+kinds of place a reference sits in.
+
+The application now reads and writes the form: `fn{4}`, and `(fn{4}` where the
+same reference also opens a range. A project that spells its macro differently
+says so; membership in the project's list is what identifies a note locator,
+because `see{Cats}` has exactly the same shape and is a cross-reference.
+
+Two things come free from makeindex and are worth knowing. It files the plain
+locator ahead of the decorated one on its own, which is the order *Chicago*
+asks for; and it emits one `.ilg` warning per page carrying both, which is
+noise rather than a fault.
+
+**Check Index** now reports a note locator typed into the heading text —
+`Costs 123n4` — since that files as part of the heading, several lines from
+`Costs`, carrying a number that is not a page number. In this format there is a
+better place to put it, and the message says so.
+
 ### New: Presentation page in Preferences
 
 Heading capitalisation and subheading order, the depth at which a heading is

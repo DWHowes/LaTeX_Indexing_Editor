@@ -89,6 +89,22 @@ XREF_TYPES = (XREF_SEE, XREF_SEEALSO)
 DEFAULT_BOLD_ENCAP_VALUES = ("bold", "textbf", "bf")
 DEFAULT_ITALIC_ENCAP_VALUES = ("textit", "it", "italic")
 
+#: Encap macros that take a **note number** and render a note locator --
+#: ``\index{X|fn{4}}`` coming out as ``123n4``.
+#:
+#: LaTeX is the only one of the three hosts that can do this, which E7
+#: measured and E9 built on. The mechanism is a two-argument macro the
+#: *document* defines -- ``\def\fn#1#2{{#2}n#1}``, note number then page --
+#: so the name is a convention rather than a standard, and this list is what
+#: makes it a project's to choose. ``fn`` is the name the LaTeX indexing
+#: literature uses.
+#:
+#: What it buys, beyond the printed form: makeindex files the plain locator
+#: ahead of the decorated one on its own, which is CMOS's order for free. It
+#: also emits one ``.ilg`` warning per shared page ("multiple encaps for the
+#: same page under same key"), which is noise rather than a fault.
+DEFAULT_NOTE_ENCAP_VALUES = ("fn",)
+
 #: makeindex's own escape character. It quotes the character after it and
 #: is then consumed: ``"!`` -> ``!``, ``""`` -> ``"``, and even ``"a`` ->
 #: ``a``, eaten ahead of an ordinary character -- so never emit a stray
@@ -900,6 +916,105 @@ def is_range_opener(encap: Optional[str]) -> bool:
 
 def is_range_closer(encap: Optional[str]) -> bool:
     return range_role(encap) == "close"
+
+
+# --------------------------------------------------------------------------
+# Note locators
+# --------------------------------------------------------------------------
+#
+# A note locator is not a fourth kind of encap. It is a *page style with an
+# argument* -- the note number -- which is why it lives after the range
+# section and reuses it: ``|(fn{4}`` is a range that opens and prints its
+# pages as note references, and both halves have to survive an edit to
+# either.
+#
+# Reading is here; writing a preamble that defines ``\fn`` is not, and is
+# not planned. That macro is the document's, the author's, and frequently
+# already present in a manuscript that has notes in it at all.
+
+#: ``macro{argument}``, with the argument admitting no braces of its own.
+#:
+#: Deliberately stricter than the cross-reference pattern beside it, which
+#: allows anything: a note number is a number, and a permissive pattern here
+#: would read ``see{Cats!domestic}`` as a note locator on the macro ``see``
+#: were the membership test below ever relaxed.
+_NOTE_ENCAP_PATTERN = re.compile(r"^([A-Za-z@]+)\{([^{}]*)\}$", re.DOTALL)
+
+
+@dataclass(frozen=True)
+class NoteLocator:
+    """
+    A parsed note-locator encap: which macro, which note, and whether the
+    reference is also one end of a range.
+
+    ``range_role`` rides along rather than being the caller's problem,
+    because the two are one string in the file and a caller that read the
+    note and forgot the marker would write back a range with one end.
+    """
+
+    macro: str
+    note: str
+    range_role: Optional[str] = None
+
+
+def parse_note_locator(
+    encap: Optional[str],
+    note_values: Iterable[str] = DEFAULT_NOTE_ENCAP_VALUES,
+) -> Optional[NoteLocator]:
+    """
+    Reads ``fn{4}``, or ``(fn{4}`` at the start of a range, into a
+    :class:`NoteLocator`. Returns None for anything else.
+
+    **Membership in ``note_values`` is what identifies one**, not the shape.
+    ``see{Cats}`` has exactly the same shape and is a cross-reference, and a
+    project's own ``\\toacite{...}`` has it too and is a page style. Only the
+    project knows which of its macros take a note number, which is what
+    ``note_values`` is: ask :func:`parse_encap_xref` first if the answer
+    matters, exactly as :func:`split_range_encap` already tells callers to.
+    """
+    role, command = split_range_encap(encap)
+    match = _NOTE_ENCAP_PATTERN.match(command)
+    if not match:
+        return None
+    macro, note = match.group(1), match.group(2).strip()
+    if macro not in tuple(note_values):
+        return None
+    return NoteLocator(macro=macro, note=note, range_role=role)
+
+
+def is_note_locator(
+    encap: Optional[str],
+    note_values: Iterable[str] = DEFAULT_NOTE_ENCAP_VALUES,
+) -> bool:
+    return parse_note_locator(encap, note_values) is not None
+
+
+def build_note_locator(note: str, macro: str = DEFAULT_NOTE_ENCAP_VALUES[0],
+                       range_role: Optional[str] = None) -> str:
+    """
+    Inverse of :func:`parse_note_locator`.
+
+    An empty note yields an empty encap rather than ``fn{}``: a note locator
+    with no note number renders as ``123n`` and files as a page style nobody
+    defined, so the honest output for "no note" is no encap at all.
+    """
+    text = str(note or "").strip()
+    if not text:
+        return build_range_encap(range_role)
+    return build_range_encap(range_role, f"{macro}{{{text}}}")
+
+
+def note_locator_example(macro: str = DEFAULT_NOTE_ENCAP_VALUES[0]) -> str:
+    """
+    A worked example of the form this project's note locators print in, for
+    the prenote's formatting legend -- ``123n4``.
+
+    A worked example rather than a template, because that is what a reader
+    can pattern-match against the page in front of them. It takes the macro
+    name for symmetry and ignores it: what reaches the page is decided by the
+    document's ``\\def``, and this is the form the conventional one produces.
+    """
+    return "123n4"
 
 
 # --------------------------------------------------------------------------
