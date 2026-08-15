@@ -35,7 +35,6 @@ from models.entry_modifier_model import EntryModifierModel
 from bookindexcore.qt.staging import QtIndexEditStagingModel
 from bookindexcore.naming.inverter import NameInverter, NameInversionResult
 from bookindexcore.style.languages import UNSTATED
-from bookindexcore.style.names import fold_for_matching
 
 from controllers.index_tree_controller import IndexTreeController
 from controllers.context_menu_subsystem import FileTreeContextMenuManager, IndexTreeContextMenuManager, EditEntryContextMenuManager
@@ -271,6 +270,7 @@ class AppPipelineController(QObject):
                                                             presentation_prefs=self.presentation_prefs,
                                                             parent_window=self.window,
                                                             on_general_changed=self.apply_general_preferences,
+                                                            on_name_database_moved=self.reopen_name_database,
                                                             )
 
         # Check Index reports rather than writes, so it takes the backend --
@@ -526,9 +526,10 @@ class AppPipelineController(QObject):
             print(f"[NAME INVERSION] Language lookup failed for {heading_text!r}: {exc}")
         return UNSTATED
 
-    def remember_compound_surname(self, surname: str) -> None:
+    def remember_compound_surname(self, surname: str, *,
+                                  everywhere: bool = False) -> None:
         """
-        Add a multi-word family name to the project's table.
+        Add a multi-word family name to the compound-surname table.
 
         The whole value of the table is that it generalises: *Vargas Llosa*
         entered once makes every bearer of it file under V, without anybody
@@ -537,20 +538,25 @@ class AppPipelineController(QObject):
         name are the surname, so the answer is a lookup grown from human-made
         indexes — and this is where one gets made.
 
-        Appended rather than replacing, and a duplicate is dropped: the dialog
-        already declines to offer a surname the table holds, and this is the
-        second half of the same guard, for a caller that did not ask first.
+        ``everywhere`` is the indexer's answer to *which books is this for*,
+        asked by the dialog's second checkbox and never assumed here. True, the
+        surname also joins the global template, so it reaches every index
+        started afterwards and — because the table is declared cumulative —
+        every one already open. False, it stays with this project. Both are
+        legitimate: a family name is usually a fact about a person, and
+        occasionally a reading this one volume takes.
+
+        Appending and the duplicate guard both live in ``ScopedSettings``,
+        which owns the routing and folds with ``fold_for_matching`` — the same
+        question the dialog asks before offering and the table asks when it
+        matches. A copy of either here is what that module exists to prevent.
         """
         surname = (surname or "").strip()
         if not surname:
             return
         try:
-            existing = list(self.presentation_prefs.names().compound_surnames)
-            folded = {fold_for_matching(name) for name in existing}
-            if fold_for_matching(surname) in folded:
-                return
-            self.presentation_prefs.save(
-                {"compound_surnames": existing + [surname]})
+            self.presentation_prefs.append(
+                "compound_surnames", surname, also_global=everywhere)
         except Exception as exc:
             print(f"[NAME INVERSION] Could not remember the compound surname "
                   f"{surname!r}: {exc}")
@@ -563,6 +569,14 @@ class AppPipelineController(QObject):
         carries the decision into the next one. Written together because an
         indexer classifying a name has answered both questions at once, and
         writing only one of them is how the two come to disagree.
+
+        **The second write is new, and its absence is the defect this docstring
+        described its way past.** Only the project row was written. The name
+        database was reached by ``cache_resolved_heading``, which runs when the
+        heading is *changed* — so stating a language and accepting the
+        suggestion unaltered, which is the commonest thing an indexer does
+        here, recorded the decision for this book alone and asked again in the
+        next one. Classifying a name is meant to be work done once.
         """
         try:
             persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
@@ -572,6 +586,15 @@ class AppPipelineController(QObject):
                     persistence.set_heading_language(heading_id, language)
         except Exception as exc:
             print(f"[NAME INVERSION] Could not store the language for "
+                  f"{heading_text!r}: {exc}")
+        try:
+            # Separately guarded: the two stores fail for unrelated reasons —
+            # no project open, no name cache configured — and one of them being
+            # unavailable is no reason to withhold the decision from the other.
+            if self.name_inverter is not None:
+                self.name_inverter.remember_language(heading_text, language)
+        except Exception as exc:
+            print(f"[NAME INVERSION] Could not remember the language for "
                   f"{heading_text!r}: {exc}")
 
     @Slot(object, str, object)
@@ -627,7 +650,9 @@ class AppPipelineController(QObject):
             # and accepting the suggestion is a complete answer, and the whole
             # point of asking is that it be there next time.
             self.set_heading_language(source_name, language)
-            self.remember_compound_surname(dialog.compound_surname_to_remember())
+            self.remember_compound_surname(
+                dialog.compound_surname_to_remember(),
+                everywhere=dialog.remember_surname_everywhere())
 
             self._apply_inverted_name(target_index, final_value)
 
@@ -2594,6 +2619,31 @@ class AppPipelineController(QObject):
             self.name_inverter.rules = self.presentation_prefs.names()
         except Exception as exc:
             print(f"[NAME INVERSION] Could not read the project's name rules: {exc}")
+
+    def reopen_name_database(self, path: str = "") -> None:
+        """
+        Point the inverter at the name database's new home.
+
+        Called after the Preferences page has moved the file. A relocation is
+        a file move, and the connection this object is holding is to the path
+        that used to exist -- sqlite keeps a deleted file open quite happily,
+        so without this every correction for the rest of the session would go
+        into a file nothing will ever read again.
+
+        The path is reported rather than obeyed: ``bookindexcore`` resolves
+        where the database is, and an application taking a path from a signal
+        and connecting to it directly is the arrangement this replaced.
+        """
+        if self.name_inverter is None:
+            return
+        try:
+            rules, enabled = self.name_inverter.rules, self.name_inverter.viaf_enabled
+            self.name_inverter.close()
+            self.name_inverter = NameInverter.shared(
+                viaf_enabled=enabled, rules=rules)
+            print(f"[NAME INVERSION] Name database reopened at {path or 'its new location'}.")
+        except Exception as exc:
+            print(f"[NAME INVERSION] Could not reopen the name database: {exc}")
 
     def invert_name(self, name: str, locale: Optional[str] = None,
                     prefer_authority: bool = True) -> NameInversionResult:

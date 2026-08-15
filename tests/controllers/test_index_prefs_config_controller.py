@@ -165,5 +165,57 @@ class TestOnePayloadThreeDestinations:
         }, {}, {})
 
         metadata = fresh_persistence.get_all_project_metadata()
-        assert metadata["pref_" + DISABLED_RULES_KEY] == "['headings.case']"
+        # Comma-separated, and this line used to pin the Python repr that
+        # `ScopedSettings._encode` wrote for every list -- which `coerce_like`
+        # then read back as `["['headings.case']"]`, one item with a bracket
+        # and a quote welded to each end. The round-trip below is what the
+        # assertion was reaching for and is now checked directly, because the
+        # stored spelling is the store's business and the value coming back
+        # intact is not.
+        assert metadata["pref_" + DISABLED_RULES_KEY] == "headings.case"
         assert metadata["pref_evaluate_numbers"] == "True"
+        assert controller._check_index_prefs.load()[DISABLED_RULES_KEY] == [
+            "headings.case"]
+
+
+class TestTheNameDatabaseMoving:
+    """
+    A relocation is not a preference being saved.
+
+    It has already happened by the time it arrives — the file is on disk in its
+    new place — so it does not travel in the payload and it does not wait for
+    OK. All this controller does is pass it on, because the one thing that has
+    to happen next is the *application's*: something is holding a sqlite
+    connection to the path that used to exist, and sqlite will keep writing to
+    a deleted file quite happily.
+    """
+
+    def test_the_relocation_reaches_the_application(self, qtbot):
+        seen = []
+        controller, _prefs = _controller(qtbot)
+        controller._on_name_database_moved = seen.append
+
+        controller._handle_name_database_relocated(r"D:\somewhere\names.db")
+
+        assert seen == [r"D:\somewhere\names.db"]
+
+    def test_an_application_that_did_not_ask_is_not_an_error(self, qtbot):
+        """
+        Optional, like the General callback beside it, so this controller stays
+        constructible on its own.
+        """
+        controller, _prefs = _controller(qtbot)
+        controller._handle_name_database_relocated("anywhere")   # must not raise
+
+    def test_nothing_about_the_location_is_stored_here(self, qtbot):
+        """
+        Where the database lives is recorded by `bookindexcore` in a pointer
+        every editor reads. A copy in this application's settings would be a
+        second answer that can disagree with it — which is the fault the shared
+        location was introduced to remove.
+        """
+        controller, prefs = _controller(qtbot)
+        controller._handle_name_database_relocated(r"D:\somewhere\names.db")
+
+        prefs.settings.sync()
+        assert not [k for k in prefs.settings.allKeys() if "name_database" in k]

@@ -1255,6 +1255,53 @@ That last case is why the request carries a `QPersistentModelIndex` rather
 than a `QModelIndex`: a responsive window means the user can re-sort or edit
 the table while a lookup is out.
 
+The same file has grown two classes about where a confirmed answer *goes*,
+which is a different question from how it is obtained.
+
+`TestWhichBooksTheSurnameIsFor` covers the scope of a remembered compound
+surname. `ScopedSettings` routes a save to the project store whenever a project
+is open, so a surname confirmed by hand was remembered for that book and lost
+for the next — the correction made again from scratch in every subsequent
+project. `test_a_book_already_open_gets_it_too` is the one to read: it seeds a
+second project *first*, then adds the surname, then reopens the second project,
+because seeding fills only what is missing and a project that already holds a
+compound-surname list would otherwise skip the key forever. Without that case
+the feature reaches every book except the ones anybody is currently working on.
+
+Every test in it uses **its own surname**. `booted_app` is module-scoped, so the
+global template outlives each test, and a shared name would make them pass or
+fail on whatever ran before them. The fixture opens the project and closes it
+again on teardown for the same reason: a project left open is open for every
+test in the module that runs afterwards.
+
+`TestTheNameDatabaseMoves` covers what has to happen after the Preferences page
+relocates the shared name database. A relocation is a file move and this
+controller is holding a sqlite connection, which SQLite will go on writing to
+after the file has been renamed out from under it — so without the reopen, every
+correction for the rest of the session lands in a file nothing will ever read
+again, and nothing reports it, because the write succeeds.
+`test_the_project_rules_survive_the_reopen` is the one that would rot silently:
+the rules are pushed onto the inverter by this object rather than read by it, so
+a freshly built one holds the package defaults and quietly stops honouring the
+project's own tables.
+
+Both tests set `BOOKINDEXCORE_NAME_DB` and put the original inverter back in a
+`finally`. `booted_app` is module-scoped, so an inverter left pointing at a
+`tmp_path` that pytest has since removed would take out every test after them.
+`tests/conftest.py` also points that variable at a throwaway file before any
+import, because the name database is per *user* and shared by every editor —
+the one an unguarded `NameInverter.shared()` reaches for is the developer's own.
+
+`TestAStatedLanguageOutlivesTheBook` pins the second write in
+`set_heading_language`, which its own docstring had described for some time
+without the code doing it. Only the project's heading row was written; the name
+database was reached by `cache_resolved_heading`, which runs when the heading is
+*changed* — so stating a language and accepting the suggestion unaltered, the
+commonest thing that happens on that dialog, recorded the decision for one book
+and asked again in the next. The second test monkeypatches the project store
+into raising, because the two stores fail for unrelated reasons and one being
+unavailable is no reason to withhold the answer from the other.
+
 ### Dark-mode dialog contrast
 
 `test_dark_dialog_contrast.py` measures rendered pixels rather than reading

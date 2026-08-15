@@ -26,8 +26,8 @@ from typing import Any, Dict
 
 from bookindexcore.persistence import DictGlobalStore, ScopedSettings
 from bookindexcore.style import (
-    NAME_DEFAULTS, STYLE_DEFAULTS, NameRules, StyleProfile,
-    names_from_settings, style_from_settings,
+    NAME_CUMULATIVE, NAME_DEFAULTS, STYLE_DEFAULTS, NameRules, StyleProfile,
+    fold_for_matching, names_from_settings, style_from_settings,
 )
 
 from models.check_index_prefs import PREF_PREFIX
@@ -69,7 +69,12 @@ class PresentationPrefs:
              if k in PRESENTATION_DEFAULTS}
         )
         self._scoped = ScopedSettings(
-            PRESENTATION_DEFAULTS, self._global, prefix=PREF_PREFIX)
+            PRESENTATION_DEFAULTS, self._global, prefix=PREF_PREFIX,
+            # The two name tables accumulate; nothing else in this group does.
+            # `fold_for_matching` and not a fold of this module's own — the
+            # duplicate guard has to ask the question `NameRules` asks when it
+            # matches the table, or the two disagree about `Díaz del Castillo`.
+            cumulative=NAME_CUMULATIVE, fold=fold_for_matching)
 
     # -- scope --------------------------------------------------------------
 
@@ -96,3 +101,14 @@ class PresentationPrefs:
 
     def save(self, values: Dict[str, Any]) -> None:
         self._scoped.save(values)
+
+    def append(self, key: str, item: str, *, also_global: bool = False) -> bool:
+        """
+        Add one entry to a name table, optionally to the global one as well.
+
+        Straight through to :meth:`ScopedSettings.append`, which is the point:
+        the routing rule — and the duplicate guard that goes with it — lives
+        there, and a second copy of either here is what this whole arrangement
+        exists to prevent.
+        """
+        return self._scoped.append(key, item, also_global=also_global)

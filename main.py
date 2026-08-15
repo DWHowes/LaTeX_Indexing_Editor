@@ -7,6 +7,7 @@ from bookindexcore.session.logger import SessionLogger
 from models.preferences_persistence import PreferencesPersistence
 from bookindexcore.util.text import TextSanitizer
 from bookindexcore.session.backup import SessionBackupManager
+from bookindexcore.naming import name_database
 from bookindexcore.naming.inverter import NameInverter
 from models.app_paths import get_app_root
 from models.app_version import APP_NAME, APP_VERSION
@@ -57,8 +58,22 @@ if __name__ == "__main__":
         text_sanitizer = TextSanitizer()
         backup_manager = SessionBackupManager()
 
-        viaf_cache = str(get_app_root() / "data" / "name_cache.db")
-        name_inverter = NameInverter(viaf_cache_path=viaf_cache, viaf_enabled=True)
+        # The name database is not this application's, and this application no
+        # longer says where it is. It holds what an indexer decided about a
+        # person -- which heading, why, in what language -- and those answers
+        # are as true in a Word index as in this one, so `bookindexcore` owns
+        # the location and every editor gets the same file.
+        #
+        # It used to live at `<install directory>/data/name_cache.db`, which was
+        # wrong twice over: per application, so the Word and InDesign editors
+        # would each have grown their own partial duplicate of it, and per
+        # installation -- beside the executable, read-only under Program Files
+        # and discarded by the next upgrade. Adopted rather than abandoned: the
+        # call below moves that file into the shared location the first time,
+        # or merges it if something is already there, and does nothing at all
+        # on every start after that.
+        name_database.adopt(get_app_root() / "data" / "name_cache.db")
+        name_inverter = NameInverter.shared(viaf_enabled=True)
 
         # Initialize the main visual window shell
         editor_window = LatexEditor()

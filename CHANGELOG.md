@@ -2,6 +2,61 @@
 
 ## Unreleased
 
+### Changed: the name database is shared, and it has moved
+
+Every name you settle is kept in a database of its own — how it inverts, why,
+and what language it is. That database was being kept **inside the
+application's own folder**, which was wrong in two ways. The Word and InDesign
+index editors would each have built up their own separate set of the same
+names, so a name you had already answered in one would ask you again in the
+other. And a folder beside the program is not yours: it is read-only on many
+installations, and an upgrade replaces it.
+
+It now lives in your own user folder, in one place that **all of the index
+editors share**. Nothing is lost — the database you already have is moved there
+the first time you start the application, and if there is somehow one at each
+end, the two are merged with your own hand-made corrections taking precedence
+over anything looked up automatically. Your old file is kept, renamed, rather
+than deleted.
+
+**Preferences → General → Name Database** shows where it is and moves it
+somewhere else if you want it somewhere else — a synced folder, say, or a drive
+you back up. Choose a folder and the database is moved there and every index
+editor follows it.
+
+### New: a name you have settled stays settled, book after book
+
+A compound surname you confirmed on the Name Inversion dialog was remembered
+for the rest of that index and forgotten for the next one, so the same
+correction had to be made again in every book. The answer is about the person,
+not about the manuscript, so the dialog now asks.
+
+Under the *Remember 'Vargas Llosa' as a compound surname* tick there is a
+second one — **Remember it for every index, not just this one** — and it starts
+ticked. Leave it, and the surname joins the table every new index starts from
+*and* the indexes you already have open, so it never has to be entered again.
+Untick it and the surname stays with the index you are in, which is the right
+answer when a name is a reading this one volume takes.
+
+The same applies to the **Language** you state on that dialog. It went to the
+index you were in and nowhere else unless you also changed the heading; it is
+now written to the remembered-names database as well, which is what carries a
+classification into the next book.
+
+### Fixed: name tables were corrupt in every open project
+
+A real defect, older than the above and found while building it. Every list on
+**Preferences → Presentation** — particles, direct order, compound surnames,
+generational suffixes — was written into the project file in a form the reader
+could not parse back, so what came out had a stray bracket and quote mark
+attached to the first and last entries. The list looked present and matched
+nothing, which is why it never showed up as an obvious failure: names simply
+filed as though the table were empty.
+
+Lists are now stored the same way the application-level settings have always
+stored them. **Projects already saved are repaired the next time they are
+opened** — nothing needs re-entering.
+
 ### New: the authority lookup suggests the language
 
 When the VIAF/Library of Congress lookup finds a record, it now also fills in the

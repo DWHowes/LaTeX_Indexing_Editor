@@ -18,6 +18,7 @@ class IndexPrefsConfigController:
         presentation_prefs,
         parent_window=None,
         on_general_changed=None,
+        on_name_database_moved=None,
     ) -> None:
         self._model = model
         self._prefs = prefs_persistence
@@ -34,6 +35,12 @@ class IndexPrefsConfigController:
         # can apply it live (AppPipelineController.apply_general_preferences).
         # Optional so this controller stays constructible on its own in tests.
         self._on_general_changed = on_general_changed
+        # Called after the Preferences page has moved the name database, so
+        # whatever holds an open connection can reopen it. Optional for the
+        # same reason as the callback above, and separate from it because a
+        # relocation is not a preference being saved -- it has already
+        # happened, and it arrives whether the dialog is accepted or not.
+        self._on_name_database_moved = on_name_database_moved
         self._active_project_name: str | None = None
         # Held during an open project; cleared on project close.
         self._file_persistence = None   
@@ -99,6 +106,7 @@ class IndexPrefsConfigController:
         dialog.sig_general_accepted.connect(self._handle_general_update)
         dialog.sig_config_accepted.connect(self._handle_model_update)
         dialog.sig_clear_recent_projects.connect(self._handle_clear_recent_projects)
+        dialog.sig_name_database_relocated.connect(self._handle_name_database_relocated)
 
         dialog.exec()
 
@@ -154,3 +162,16 @@ class IndexPrefsConfigController:
         does not travel with the rest of the General payload.
         """
         self._prefs.clear_recent_projects()
+
+    def _handle_name_database_relocated(self, path: str) -> None:
+        """
+        Tell whoever holds the name database open that it has moved.
+
+        Nothing is saved here, and nothing is stored: where the database lives
+        is recorded by ``bookindexcore.naming.name_database`` in a pointer every
+        application reads, precisely so that this application does not keep an
+        opinion about it. All this does is let the open connection be replaced.
+        """
+        if self._on_name_database_moved is None:
+            return
+        self._on_name_database_moved(path)

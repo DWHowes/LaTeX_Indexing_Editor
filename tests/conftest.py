@@ -8,6 +8,16 @@ from pathlib import Path
 # display, which is what makes it usable in CI and from a plain terminal.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+# The name database is per *user* and shared by every index editor, so the one
+# an unguarded `NameInverter.shared()` reaches for is the developer's real set
+# of confirmed corrections. Pointed somewhere disposable before anything can
+# import it, for the same reason as the line above.
+import tempfile
+os.environ.setdefault(
+    "BOOKINDEXCORE_NAME_DB",
+    os.path.join(tempfile.gettempdir(), "latex-indexing-editor-tests", "names.db"),
+)
+
 import pytest
 from PySide6.QtCore import QSettings
 
@@ -177,7 +187,14 @@ def booted_app(tmp_path_factory, qapp):
 
     text_sanitizer = TextSanitizer()
     backup_manager = SessionBackupManager()
-    name_inverter = NameInverter(viaf_cache_path=str(tmp_dir / "name_cache.db"), viaf_enabled=True)
+    # An explicit path rather than `NameInverter.shared()`, which is what the
+    # real main.py calls: the shared one is the developer's own name database,
+    # per user and shared by every editor, and a test suite has no business
+    # writing to it. `tests/conftest.py` also points BOOKINDEXCORE_NAME_DB at a
+    # throwaway file, so anything that reaches for the shared one anyway lands
+    # somewhere harmless rather than in the real corrections.
+    name_inverter = NameInverter(name_database_path=str(tmp_dir / "name_cache.db"),
+                                 viaf_enabled=True)
 
     editor_window = LatexEditor()
     editor_window.set_preferences_model(preferences_model)
