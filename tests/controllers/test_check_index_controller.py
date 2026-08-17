@@ -224,15 +224,28 @@ class TestTheProjectsOwnVocabulary:
 
 class TestTheRuleSelection:
 
-    def test_by_default_everything_but_the_opt_in_rule_runs(self):
+    def test_by_default_everything_but_the_opt_in_rules_runs(self):
+        """
+        Derived from `default_on` rather than naming the opt-in rules, because
+        there are now several and the list is the shared package's to grow.
+
+        It was a hardcoded `{"locators.above_lowest_level"}` until T5 added
+        five `requires_table` rules — checks about a Table of Authorities,
+        which this application does not build — and the literal made a correct
+        change look like a regression here.
+        """
         prefs = CheckIndexPrefs()
-        expected = {rule.id for rule in ALL_RULES} - {
-            "locators.above_lowest_level"}
+        expected = {rule.id for rule in ALL_RULES if rule.default_on}
         assert prefs.enabled_rules() == expected
 
     def test_a_project_can_switch_a_rule_off(self, tmp_path, qtbot):
-        prefs = CheckIndexPrefs(
-            {DISABLED_RULES_KEY: ["headings.plural"]})
+        # The opt-in rules stay off alongside the one being switched off.
+        # Supplying a bare list replaces the seeded default rather than adding
+        # to it, and a real project's stored value always carries them --
+        # `set_enabled_rules` writes the complement against every rule.
+        prefs = CheckIndexPrefs({DISABLED_RULES_KEY: [
+            "headings.plural",
+            *(rule.id for rule in ALL_RULES if not rule.default_on)]})
         controller, *_ = _stack(
             tmp_path, qtbot, "a \\index{Trial} b \\index{Trials} c\n",
             prefs=prefs)
