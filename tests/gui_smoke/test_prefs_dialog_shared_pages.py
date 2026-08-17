@@ -1,11 +1,14 @@
 r"""
-The two shared preferences pages, as this application mounts them.
+The shared preferences pages, as this application mounts them.
 
 The pages themselves are tested in ``bookindexcore``. What is only true here
-is the wiring, and it is the wiring that fails quietly: ``tab_order()`` is
-declared rather than derived, so a page added to the shared shell does **not**
-appear in this window until it is named -- and the failure looks like nothing
-at all, an unchanged dialog with a working new feature behind it.
+is the wiring, and the wiring has failed in both directions. It used to fail
+by *absence*: ``tab_order()`` was declared rather than composed, so a page
+added to the shared shell did not appear in this window until it was named,
+and the failure looked like nothing at all -- an unchanged dialog with a
+working new feature behind it. Composing it fixed that and introduced the
+opposite failure, where a page arrived in an application that had no use for
+it. Both are tested below.
 """
 
 from PySide6.QtWidgets import QTabBar
@@ -44,11 +47,18 @@ class TestTheWindowMountsThem:
 
         The cost was one reorder, and it takes the user guide's preferences
         screenshots with it.
+
+        The shared set is asked for rather than written down. It used to be a
+        literal, and that made this test fail for a reason it does not test:
+        T1b added a "Table of Authorities" page to the shell, the literal did
+        not know about it, and a test about *ordering* went red over
+        *membership*. What is shared is the shell's to say — this file's
+        business is only that all of it comes first.
         """
         dialog = _dialog(qtbot)
         labels = [dialog.vertical_tabs.tabText(i)
                   for i in range(dialog.vertical_tabs.count())]
-        shared = {"General", "Check Index", "Sorting", "Presentation", "UI Themes"}
+        shared = {label for label, _ in dialog.shared_tab_order()}
         first_host = min(i for i, l in enumerate(labels) if l not in shared)
         assert all(l in shared for l in labels[:first_host])
         assert not any(l in shared for l in labels[first_host:])
@@ -66,6 +76,32 @@ class TestTheWindowMountsThem:
                   for i in range(dialog.vertical_tabs.count())]
         for label, _widget in dialog.shared_tab_order():
             assert label in labels, label
+
+    def test_this_application_gets_no_table_of_authorities_page(self, qtbot):
+        """
+        The other direction of the same wiring fault. Composing `tab_order`
+        means a shared page arrives here without an edit, which is right for
+        a page every index needs and wrong for one only some applications can
+        act on: T1b's "Table of Authorities" page landed in this window while
+        emission was still T3's, unbuilt.
+
+        This editor will declare `supports_table_of_authorities()` when T3
+        gives it something to generate, and this test inverts then. Until it
+        does, the absence is the assertion -- including in the payload, since
+        the page's controls are collected on OK and an unconditional one
+        would have written a defaulted `bluebook` into every LaTeX project.
+        """
+        from bookindexcore.ui.preferences.authorities_tab import (
+            CITATION_SYSTEM_KEY,
+        )
+
+        dialog = _dialog(qtbot)
+        labels = [dialog.vertical_tabs.tabText(i)
+                  for i in range(dialog.vertical_tabs.count())]
+
+        assert not dialog.supports_table_of_authorities()
+        assert "Table of Authorities" not in labels
+        assert CITATION_SYSTEM_KEY not in dialog.collect_project_payload()
 
     def test_seven_tabs_still_fit(self, qtbot):
         """

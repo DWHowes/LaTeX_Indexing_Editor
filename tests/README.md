@@ -1152,6 +1152,40 @@ Add/remove writes `cross_refs.tex` for real, and "Insert Cross-References
 File..." splices `\input{cross_refs.tex}` into the real base file and is
 idempotent on a second run.
 
+### The shared preferences pages
+
+`test_prefs_dialog_shared_pages.py` tests the *wiring*, not the pages — those
+belong to `bookindexcore`. The wiring has failed in both directions, and both
+are pinned here.
+
+**By absence.** `tab_order()` used to be declared by each application, so a
+page added to the shared shell did not appear in this window until it was
+named — and the failure is silent, because an absent tab looks exactly like one
+that was never built. E8's Presentation page shipped invisible here for that
+reason. It is composed now, and
+`test_a_page_added_to_the_shell_arrives_here_without_an_edit` is what keeps it
+that way.
+
+**By arrival.** The opposite fault, found when T1b's "Table of Authorities"
+page landed in this window while emission was still unbuilt.
+`test_this_application_gets_no_table_of_authorities_page` asserts three things:
+no declaration, no tab, and — the one that matters — no
+`authorities_citation_system` key in the project payload. The page's controls
+are collected on every OK, so an ungated page would have stamped a defaulted
+Bluebook declaration into every LaTeX project. **That test inverts when T3
+lands**, and flipping `supports_table_of_authorities()` is the only edit T3
+owes this window.
+
+`test_no_latex_page_is_mixed_into_the_shared_block` asks
+`dialog.shared_tab_order()` what is shared rather than keeping its own list.
+It kept one until T1b, and a page added to the shell broke a test about
+*ordering* over a question of *membership*.
+
+`test_seven_tabs_still_fit` looks cosmetic and is not: a West tab bar's height
+is the sum of its rotated labels' *widths*, so it grows with both the page
+count and the user's font, and Qt's answer to overflow is a scroll arrow with
+the last page behind it. Six labels and a large font already produced that.
+
 ### Auto-resync safety gate
 
 `AppPipelineController._is_safe_to_auto_resync`, `_handle_external_file_change`
