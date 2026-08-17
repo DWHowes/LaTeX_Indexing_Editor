@@ -76,6 +76,24 @@ class IndexPrefsConfigDialog(PreferencesDialog):
         """
         return "LaTeX Settings → cmd: makeindex/xindy → Sort Ordering Rule"
 
+    def supports_table_of_authorities(self) -> bool:
+        r"""
+        True as of T3b, which gave this application something to generate.
+
+        The declaration was added in August 2026 defaulting to False, because
+        T1b had put a Table of Authorities preferences page in the shared shell
+        while emission did not exist anywhere -- so three applications showed a
+        page for a feature none of them could perform, and two of this
+        application's own tests said so.
+
+        Flipping it here is the whole of what T3b owes that decision:
+        :mod:`models.toa_emission` writes ``\index[toacases]{...}`` into the
+        manuscript and ``imakeidx`` generates the table, so the citation
+        standard an indexer chooses on that page now changes what this
+        application finds and how it files it.
+        """
+        return True
+
     def xref_label_owner(self) -> str:
         r"""
         The document's. ``makeindex`` emits ``\see{target}{page}`` and the

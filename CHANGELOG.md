@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### New: build a Table of Authorities from the manuscript
+
+For a legal book, the editor can now read the manuscript, find every case,
+statute, regulation and rule it cites, and write the index entries that produce
+a **Table of Authorities** — cases in one section, statutes in another, each in
+the order a law publisher expects rather than plain alphabetical order.
+
+`42 U.S.C. § 1983` files under 42, and `2 U.S.C.` comes before `10 U.S.C.` —
+which is what a table of authorities requires and what ordinary alphabetical
+sorting gets wrong. Under the British and Canadian standards, an Act appears
+once with the sections you cited listed beneath it.
+
+**Preferences → Table of Authorities** is where you say which citation standard
+the book is written in. That page has been in the window for a while and did
+nothing; it now decides what the editor looks for, because `[1986] 1 SCR 103`
+is a citation under the McGill guide and is not one under the Bluebook.
+
+Everything found is written as ordinary `\index` entries at the citation, so
+LaTeX produces the table with real page numbers exactly as it produces your
+subject index. The editor tells you what to add to your preamble, and the whole
+run is a single undo.
+
+**What it does not do yet.** Short forms — `Id.`, `supra note 4`, `ibid` — are
+counted and reported but not resolved to the case they point at, because that
+needs the rest of the document rather than a better pattern. And a citation the
+editor could not attribute a party name to appears under its citation rather
+than under a case name, where you can see it and fix it.
+
 ### Changed: the name database is shared, and it has moved
 
 Every name you settle is kept in a database of its own — how it inverts, why,

@@ -31,7 +31,8 @@ class TestTheWindowMountsThem:
         labels = [dialog.vertical_tabs.tabText(i)
                   for i in range(dialog.vertical_tabs.count())]
         assert labels == ["General", "Check Index", "Sorting", "Presentation",
-                          "UI Themes", "LaTeX Settings", "RTF Export"]
+                          "Table of Authorities", "UI Themes",
+                          "LaTeX Settings", "RTF Export"]
 
     def test_no_latex_page_is_mixed_into_the_shared_block(self, qtbot):
         """
@@ -77,19 +78,22 @@ class TestTheWindowMountsThem:
         for label, _widget in dialog.shared_tab_order():
             assert label in labels, label
 
-    def test_this_application_gets_no_table_of_authorities_page(self, qtbot):
+    def test_this_application_now_gets_a_table_of_authorities_page(self, qtbot):
         """
-        The other direction of the same wiring fault. Composing `tab_order`
-        means a shared page arrives here without an edit, which is right for
-        a page every index needs and wrong for one only some applications can
-        act on: T1b's "Table of Authorities" page landed in this window while
-        emission was still T3's, unbuilt.
+        **This test used to assert the opposite, and inverting it is the whole
+        of what T3b owed the decision that created it.**
 
-        This editor will declare `supports_table_of_authorities()` when T3
-        gives it something to generate, and this test inverts then. Until it
-        does, the absence is the assertion -- including in the payload, since
-        the page's controls are collected on OK and an unconditional one
-        would have written a defaulted `bluebook` into every LaTeX project.
+        Composing `tab_order` means a shared page arrives here without an edit,
+        which is right for a page every index needs and wrong for one only some
+        applications can act on: T1b's "Table of Authorities" page landed in
+        this window while emission did not exist anywhere. The page was gated
+        on `supports_table_of_authorities()`, this application answered False,
+        and the assertion was that it had no page and wrote no keys.
+
+        T3b gives it something to generate -- `models.toa_emission` writes
+        `\\index[toacases]{...}` and imakeidx builds the table -- so the answer
+        is now True, the page is mounted, and the citation standard chosen on
+        it decides what this application finds.
         """
         from bookindexcore.ui.preferences.authorities_tab import (
             CITATION_SYSTEM_KEY,
@@ -99,9 +103,9 @@ class TestTheWindowMountsThem:
         labels = [dialog.vertical_tabs.tabText(i)
                   for i in range(dialog.vertical_tabs.count())]
 
-        assert not dialog.supports_table_of_authorities()
-        assert "Table of Authorities" not in labels
-        assert CITATION_SYSTEM_KEY not in dialog.collect_project_payload()
+        assert dialog.supports_table_of_authorities()
+        assert "Table of Authorities" in labels
+        assert CITATION_SYSTEM_KEY in dialog.collect_project_payload()
 
     def test_seven_tabs_still_fit(self, qtbot):
         """

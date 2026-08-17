@@ -1152,6 +1152,40 @@ Add/remove writes `cross_refs.tex` for real, and "Insert Cross-References
 File..." splices `\input{cross_refs.tex}` into the real base file and is
 idempotent on a second run.
 
+### Table of Authorities (T3b)
+
+`tests/unit/models/test_toa_emission.py`. No Qt, no project, no backend — the
+fake is three methods, because that is all of `DocumentBackend` this reads.
+
+**The file exists because of a measurement, and the docstring carries it.** Run
+at a raw `.tex` file the citation grammar found eight citations in the fixture
+and got every case wrong: each parsed as a *short form* with a party of
+`Goodfellow}` or `Key}`, because the party walk stops on `\textit{` and starts
+again after the space. Parallel citations went with the parties and three of
+the eight failed the round trip. With the projection: correct forms, whole
+parties, parallel citations intact, zero round-trip failures.
+
+Two tests pin faults this phase **introduced** rather than inherited, which is
+worth knowing when reading them:
+
+- `test_the_party_walk_does_not_reach_the_chapter_title`. Blanking markup
+  leaves whitespace, and the walk looks back 260 characters, so the first
+  citation in a chapter absorbed the chapter title. Citations are parsed a
+  paragraph at a time now.
+- `test_an_escaped_literal_keeps_its_character` and
+  `test_an_escaped_percent_does_not_open_a_comment` are a pair that pull
+  against each other. `\&` prints an ampersand a reader sees, so it must
+  survive the projection; a restored `%` must not then open a comment. **Caught
+  by compiling a real document, not by a test** — `Bell \& Howell v. Wade`
+  parsed as `Bell Howell` and the generated table named a case that does not
+  exist, with a clean parse, a passing round trip and a successful build.
+
+`test_both_halves_of_the_key_are_escaped` covers the other half of that:
+`escape_for_makeindex` does not escape `&`, correctly, because `&` is LaTeX's
+grammar and not makeindex's. A bare one fails the build with *Misplaced
+alignment tab character*, so the two escapings compose and neither covers the
+other.
+
 ### The shared preferences pages
 
 `test_prefs_dialog_shared_pages.py` tests the *wiring*, not the pages — those
