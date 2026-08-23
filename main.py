@@ -41,7 +41,7 @@ if __name__ == "__main__":
         # dialog inherits it and the taskbar button picks it up. The .ico
         # carries all six sizes, so Windows chooses a purpose-rendered
         # bitmap rather than resampling one.
-        app.setWindowIcon(QIcon(str(get_app_root() / "icons" / "lidx.ico")))
+        app.setWindowIcon(QIcon(str(get_app_root() / "icons" / "lix.ico")))
 
         # Initialize global shared non-UI models
         preferences_model = PreferencesPersistence()

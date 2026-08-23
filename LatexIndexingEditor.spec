@@ -63,7 +63,7 @@ exe = EXE(
     # Embedded in the .exe, which is what Explorer and the taskbar read
     # before the app is running. The same file is set on the QApplication
     # at startup (main.py) for window and dialog icons.
-    icon='icons/lidx.ico',
+    icon='icons/lix.ico',
 )
 
 coll = COLLECT(

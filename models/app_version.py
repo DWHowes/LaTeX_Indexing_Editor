@@ -47,6 +47,6 @@ def app_identity():
         copyright=APP_COPYRIGHT,
         licence=APP_LICENCE,
         publisher=APP_PUBLISHER,
-        logo_dark_ink=icons / "lidx_wordmark.png",
-        logo_light_ink=icons / "lidx_wordmark_light.png",
+        logo_dark_ink=icons / "lix_wordmark_dark_ink.png",
+        logo_light_ink=icons / "lix_wordmark_light_ink.png",
     )
