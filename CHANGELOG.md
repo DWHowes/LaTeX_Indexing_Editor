@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+### The index tree's References column, and one visible change
+
+`bookindexcore`'s index tree carried this application's shape and nothing
+else's: every reference row was `file_path` / `line_number` / `column_offset`
+/ `absolute_position` / `absolute_end` / `macro_command` / `fallback_label`,
+and the navigation signal was those seven fields plus an entry id, in eight
+positional arguments. A second application with no files and no lines could
+not describe where its entries were at all, so the tree now carries a
+`TreeReference` whose `location` is opaque and whose host resolves it.
+
+**This application is unchanged to look at, with one exception.** Identity is
+now the entry id rather than `f"{file_path}:{line_number}"`, so **two `\index`
+macros on one source line draw as `[12] [13]` where they drew `[12]`**. They
+were always two entries and the entry table beside the tree always listed
+both.
+
+`IndexTreeView` here gains `SourceCoordinate` and `tree_reference_from_row`,
+which is where the seven coordinate keys are read now. Nothing else moved:
+`handle_index_navigation` still resolves the entry's current position from the
+live `EntryModifierModel` and still falls back to the snapshot, which is what
+it did before. What changed is that the snapshot is this application's own
+record instead of the shared tree's assumption, and the entry id no longer has
+to be smuggled past a contract that could not carry it.
+
+The `[12] [13]` string is composed in one place now,
+`IndexTreeView.render_reference_column`, rather than here and in the tree.
+
+### Two test files moved into bookindexcore
+
+`test_index_tree_view_undo_redo.py` and `test_index_tree_cross_reference_nodes.py`
+were this application's tests of a **shared** widget, which is how a shared
+widget acquires one host's assumptions. They are
+`bookindexcore/tests/ui/test_tree_undo_redo.py` and
+`.../test_tree_cross_reference_nodes.py` now, run against the paper dialect.
+
+`test_index_tree_sort_keys.py` stays. What it asserts is that
+`	extit{Titanic}` files under *Titanic*: that is this dialect's answer, and
+the core ships no LaTeX dialect.
+
 ### The application mark is now LiX, and part of a suite
 
 The icon is redrawn: **LiX** in Computer Modern, pale blue on a dark navy plate

@@ -75,8 +75,13 @@ def _add_top_level_node(tree, token: str, refs: list[dict]):
     root = tree.base_model.invisibleRootItem()
     col0 = QStandardItem(token)
     col0.setData(token, Qt.ItemDataRole.ToolTipRole)
-    col1 = QStandardItem(" ".join(f"[{r['unique_id_number']}]" for r in refs))
-    col1.setData(list(refs), Qt.ItemDataRole.UserRole + 1)
+    # **Seeded the way the tree itself would seed it.** Since extraction step
+    # 9b a node's UserRole+1 payload is a list of TreeReference, not of raw
+    # load rows, and the column text is composed in one place; a test that
+    # hand-builds the old shape is testing a payload the app no longer makes.
+    records = [tree.tree_reference_from_row(r) for r in refs]
+    col1 = QStandardItem(tree.render_reference_column(records))
+    col1.setData(records, Qt.ItemDataRole.UserRole + 1)
     root.appendRow([col0, col1])
 
 
@@ -242,7 +247,7 @@ class TestHandleEntryTableEdit:
 
         renamed_row = top_level_tokens.index("Renamed")
         col1 = root.child(renamed_row, 1)
-        attached_ids = [r["unique_id_number"] for r in col1.data(Qt.ItemDataRole.UserRole + 1)]
+        attached_ids = [r.entry_id for r in col1.data(Qt.ItemDataRole.UserRole + 1)]
         assert uid in attached_ids
 
     def test_reuses_an_existing_heading_node_instead_of_duplicating(self, tmp_path, qtbot):
@@ -267,7 +272,7 @@ class TestHandleEntryTableEdit:
         assert len(existing_rows) == 1  # not duplicated
 
         col1 = root.child(existing_rows[0], 1)
-        attached_ids = {r["unique_id_number"] for r in col1.data(Qt.ItemDataRole.UserRole + 1)}
+        attached_ids = {r.entry_id for r in col1.data(Qt.ItemDataRole.UserRole + 1)}
         assert attached_ids == {uid, other_ref["unique_id_number"]}
 
     def test_syncs_the_range_partners_heading(self, tmp_path, qtbot):

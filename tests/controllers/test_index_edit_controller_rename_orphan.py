@@ -82,7 +82,7 @@ def _build_stack(tmp_path, qtbot, tex_content: str, heading_raw_text: str):
         "macro_command": uid_dict["macro_command"],
         "is_range_closer": False,
     }
-    col1.setData([ref], Qt.ItemDataRole.UserRole + 1)
+    col1.setData([tree.tree_reference_from_row(ref)], Qt.ItemDataRole.UserRole + 1)
 
     staging_model = QtIndexEditStagingModel()
     entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
@@ -371,7 +371,10 @@ class TestOrphanCleanupAfterDeletion:
         col0 = QStandardItem("Main")
         col0.setData("Main", Qt.ItemDataRole.ToolTipRole)
         col1 = QStandardItem("")
-        col1.setData([first_ref, second_ref], Qt.ItemDataRole.UserRole + 1)
+        col1.setData(
+            [tree.tree_reference_from_row(first_ref),
+             tree.tree_reference_from_row(second_ref)],
+            Qt.ItemDataRole.UserRole + 1)
         root.appendRow([col0, col1])
 
         staging_model = QtIndexEditStagingModel()

@@ -20,6 +20,7 @@ from bookindexcore.model.commands import (
     edit_command,
 )
 from bookindexcore.backend.locator import Locator, SourceEdit
+from bookindexcore.ui.tree.reference import TreeReference
 from views.index_tree_view import IndexTreeView
 from controllers.document_io_controller import DocumentIOController
 from controllers.latex_text_backend import LatexTextBackend
@@ -30,12 +31,14 @@ def _ref_entry_id(ref) -> int:
     """
     The entry id of a reference payload stored on a tree node.
 
-    Tolerant of both shapes on purpose. The entry *table* is fed records by
-    the pipeline, but the tree's ``UserRole+1`` ref-lists are still built
-    from the raw load payload, so a node can be carrying either. Phase 4
-    moves the tree, and this helper goes with it.
+    Tolerant of three shapes on purpose. The entry *table* is fed records by
+    the pipeline; the tree's ``UserRole+1`` ref-lists hold ``TreeReference``
+    values since extraction step 9b; and a raw load payload still reaches
+    some of these paths directly. **All four sites that used to inline this
+    expression now call it**, which is what made adding the third shape one
+    edit rather than four.
     """
-    if isinstance(ref, IndexReference):
+    if isinstance(ref, (IndexReference, TreeReference)):
         return int(ref.entry_id or 0)
     return int(ref.get("unique_id_number") or ref.get("id") or 0)
 
@@ -413,8 +416,7 @@ class IndexEditController(QObject):
         # the tree node itself out of sync with its own subtree.
         conflict_ids = sorted({
             uid for uid in (
-                int(ref.get("unique_id_number") or ref.get("id") or 0)
-                for ref in affected_refs
+                _ref_entry_id(ref) for ref in affected_refs
             )
             if uid and self._staging_model.is_dirty(uid)
         })
@@ -560,7 +562,7 @@ class IndexEditController(QObject):
         whole sweep and records a single command for it rather than one
         per reference.
         """
-        uid = int(ref.get("unique_id_number") or ref.get("id") or 0)
+        uid = _ref_entry_id(ref)
         if uid == 0:
             return False
 
@@ -1014,7 +1016,7 @@ class IndexEditController(QObject):
         entry_ids: list[int] = []
         seen: set[int] = set()
         for ref in self._collect_refs_from_node(target_item):
-            uid = int(ref.get("unique_id_number") or ref.get("id") or 0)
+            uid = _ref_entry_id(ref)
             if not uid or uid in seen:
                 continue
             seen.add(uid)
@@ -1714,9 +1716,11 @@ class IndexEditController(QObject):
             if _ref_entry_id(r) != entry_id
         ]
         sibling_col1.setData(remaining, role_uid)
-        sibling_col1.setText(
-            " ".join(f"[{_ref_entry_id(r)}]" for r in remaining) if remaining else ""
-        )
+        # **One answer, not two.** This string was composed here and inside
+        # the tree; step 9b made render_reference_column the single place it
+        # is built, which is what lets a host that supplies no per-reference
+        # label have its references numbered instead.
+        sibling_col1.setText(self._tree.render_reference_column(remaining))
 
     def _find_tree_node_by_path(self, parts: list[str]) -> QStandardItem | None:
         """

@@ -60,7 +60,7 @@ from bookindexcore.ui.help.controller import HelpController
 
 from bookindexcore.ui.style import AppStyleConfiguration
 from views.editor_tab import EditorTab
-from views.index_tree_view import IndexTreeView
+from views.index_tree_view import IndexTreeView, SourceCoordinate
 from views.project_sidebar_view import ProjectSidebarView
 from bookindexcore.ui.search.source import FileLineSource
 from bookindexcore.ui.search.window import AdvancedSearchWindow
@@ -341,7 +341,7 @@ class AppPipelineController(QObject):
         self.window.window_close_requested.connect(self.coordinate_application_shutdown)
         
         # --- Project Sidebar & Navigation Trees ---
-        self.index_tree_widget.coordinate_navigation_requested.connect(self.handle_index_navigation)
+        self.index_tree_widget.reference_activated.connect(self.handle_index_navigation)
         
         # Map direct file double-clicks to a dedicated single-argument slot contract
         self.file_tree_widget.file_requested.connect(self.handle_file_activation_request)
@@ -3287,38 +3287,40 @@ class AppPipelineController(QObject):
         print(f"Project Loading Failure: {err_msg}")
         QMessageBox.critical(self.window, "Project Loading Failure", f"An out-of-thread error occurred:\n{err_msg}")
 
-    @Slot(str, int, int, str, object, object, str, object)
-    def handle_index_navigation(
-        self,
-        path: str,
-        line: int,
-        col: int,
-        fallback: str,
-        absolute_position=None,
-        absolute_end=None,
-        macro_command: str = "index",
-        unique_id_number=None,
-    ):
+    @Slot(object)
+    def handle_index_navigation(self, reference):
         r"""
         Fires when the user clicks a "[uid]" reference link in the index
         tree's References column (IndexTreeView._unpack_delegate_payload).
 
-        The path/line/col/absolute_position/absolute_end/macro_command
-        arguments are a snapshot captured when this tree node was last
-        (re)populated (see IndexTreeView._populate_row_metadata) -- they go
-        stale the moment a rename or coordinate shift touches this entry
-        (IndexEditController._rewrite_single_reference /
-        EntryModifierModel.shift_coordinates_after both update only the
-        live EntryModifierModel cache, with no path back into every tree
-        node's own cached payload). unique_id_number lets this controller
-        re-resolve the entry's CURRENT location from that live cache before
-        navigating, so the highlighted span reflects the entry's actual
-        position rather than whatever it was when the tree was last built.
-        Falls back to the snapshot values if the uid is missing or no
-        longer present in the cache.
+        Takes one TreeReference. Its `location` is this application's own
+        SourceCoordinate, built by IndexTreeView.tree_reference_from_row, and
+        it is **a snapshot**: captured when this tree node was last
+        (re)populated, it goes stale the moment a rename or coordinate shift
+        touches this entry (IndexEditController._rewrite_single_reference /
+        EntryModifierModel.shift_coordinates_after both update only the live
+        EntryModifierModel cache, with no path back into every tree node's own
+        cached payload). So the entry id is resolved against that live cache
+        first and the snapshot is the fallback, which is exactly what this
+        method did before step 9b -- what has changed is that the tree no
+        longer carries the seven coordinate fields itself, nor passes the id
+        alongside them so that this could be done at all.
         """
-        if unique_id_number is not None and self.entry_modifier_model:
-            live_location = self.entry_modifier_model.get_location_metadata(int(unique_id_number))
+        if reference is None:
+            return
+
+        location = getattr(reference, "location", None) or SourceCoordinate()
+        path = location.file_path
+        line = location.line_number
+        col = location.column_offset
+        fallback = location.fallback_label
+        absolute_position = location.absolute_position
+        absolute_end = location.absolute_end
+        macro_command = location.macro_command
+
+        entry_id = getattr(reference, "entry_id", None)
+        if entry_id is not None and self.entry_modifier_model:
+            live_location = self.entry_modifier_model.get_location_metadata(int(entry_id))
             if live_location is not None:
                 path = live_location.get("file_path") or path
                 line = live_location.get("line_number") or line
@@ -3327,6 +3329,9 @@ class AppPipelineController(QObject):
                 absolute_position = live_location.get("absolute_position")
                 absolute_end = live_location.get("absolute_end")
                 macro_command = live_location.get("macro_command") or macro_command
+
+        if not path:
+            return
 
         if self.lc_ctrl:
             self.lc_ctrl.navigate_to_embedded_index_coordinate(

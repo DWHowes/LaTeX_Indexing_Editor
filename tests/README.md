@@ -878,13 +878,23 @@ correction someone did not want should cost one keystroke to reverse.
 
 ### `IndexTreeView` (view-layer logic)
 
-`append_entry`/`remove_last_entry`/`reinsert_entry` — the tree's own
-undo/redo for a fresh live insertion, plus `append_entry`'s
-`suppress_transaction`-gated DB-staging call, which no other test exercises
-with `suppress_transaction=False`. See `test_index_tree_view_undo_redo.py`,
-and [Ancestor pruning that ignores a node's own
-references](#ancestor-pruning-that-ignores-a-nodes-own-references) for the
-bug it found.
+**Two of these files moved into `bookindexcore` at extraction step 9b**, and
+the move is the point: they were this application's tests of a *shared*
+widget, which is how a shared widget acquires one host's assumptions. They
+are `bookindexcore/tests/ui/test_tree_undo_redo.py` (formerly
+`test_index_tree_view_undo_redo.py`: `append_entry` / `remove_last_entry` /
+`reinsert_entry`, and see [Ancestor pruning that ignores a node's own
+references](#ancestor-pruning-that-ignores-a-nodes-own-references) for the bug
+it found) and `.../test_tree_cross_reference_nodes.py`.
+
+`test_index_tree_sort_keys.py` **stays here**, and that is not an oversight:
+what it asserts is that `	extit{Titanic}` files under *Titanic* and
+`kant@	extbf{Kant}` under *kant*. Those are this dialect's answers, and the
+core ships no LaTeX dialect to ask.
+
+What is left in this application is the *binding*: `SourceCoordinate` and
+`tree_reference_from_row` in `views/index_tree_view.py`, which is where the
+seven coordinate keys the shared tree used to read for itself are read now.
 
 ### `context_menu_subsystem.py`
 

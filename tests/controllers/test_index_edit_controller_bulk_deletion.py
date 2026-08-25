@@ -93,8 +93,9 @@ def _set_node_refs(tree, parts: list[str], refs: list[dict]) -> QStandardItem:
     node = _get_or_create_path(tree.base_model.invisibleRootItem(), parts)
     parent = node.parent() or tree.base_model.invisibleRootItem()
     col1 = parent.child(node.row(), 1)
-    col1.setData(list(refs), Qt.ItemDataRole.UserRole + 1)
-    col1.setText(" ".join(f"[{r['unique_id_number']}]" for r in refs))
+    records = [tree.tree_reference_from_row(r) for r in refs]
+    col1.setData(records, Qt.ItemDataRole.UserRole + 1)
+    col1.setText(tree.render_reference_column(records))
     return node
 
 
