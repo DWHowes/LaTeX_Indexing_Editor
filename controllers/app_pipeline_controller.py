@@ -62,6 +62,7 @@ from bookindexcore.ui.style import AppStyleConfiguration
 from views.editor_tab import EditorTab
 from views.index_tree_view import IndexTreeView
 from views.project_sidebar_view import ProjectSidebarView
+from bookindexcore.ui.search.source import FileLineSource
 from bookindexcore.ui.search.window import AdvancedSearchWindow
 from bookindexcore.ui.dialogs.name_inversion_dialog import NameInversionDialog
 from bookindexcore.ui.dialogs.statistics_dialog import IndexStatisticsDialog
@@ -2529,18 +2530,53 @@ class AppPipelineController(QObject):
             except RuntimeError:
                 self._search_window = None
 
+        # **A source rather than a list of paths.** The shared search stopped
+        # assuming its content was files on disk when a second host arrived
+        # whose text is a zip of XML with no lines in it; `FileLineSource` is
+        # the shared adapter for hosts whose content really is text files,
+        # which this one's is.
         self._search_window = AdvancedSearchWindow(
-            db_file_paths_provider=self.scope_ctrl.get_active_search_scope,
+            source_provider=self._search_source,
             parent=None
         )
-        
-        self._search_window.navigate_to_target.connect(self.lc_ctrl.navigate_to_embedded_index_coordinate)
+
+        self._search_window.navigate_to_target.connect(self._navigate_to_search_hit)
         self._search_window.closed.connect(self._clear_search_window_reference)
         
         self._search_window.show()
         self._search_window.apply_theme_styles()
         self._search_window.raise_()
         self._search_window.activateWindow()
+
+    def _search_source(self):
+        """
+        The project's active files, as segments the shared search can read.
+
+        **None rather than an empty source when nothing is active**, so the
+        window can say "there is nothing open to search" instead of reporting
+        zero matches, which is true but useless: a pruned project and a term
+        that is genuinely absent are different answers.
+        """
+        paths = self.scope_ctrl.get_active_search_scope()
+        return FileLineSource(paths) if paths else None
+
+    def _navigate_to_search_hit(self, hit):
+        r"""
+        A shared `SearchHit` back into this application's coordinates.
+
+        The hit's `location` is whatever the source put there, and for
+        `FileLineSource` that is `(absolute path, 1-indexed line)`. The column
+        is the hit's offset within the line, plus one, because this editor
+        counts columns from one.
+
+        Search hits land on arbitrary prose rather than on the start of an
+        `\index{...}` macro, so whole-line highlighting is requested instead
+        of the index tree's macro-boundary detection. See
+        `EditorTab.jump_to_coordinates`.
+        """
+        path, line = hit.location
+        self.lc_ctrl.navigate_to_embedded_index_coordinate(
+            path, line, hit.offset + 1, hit.snippet, True)
 
     def _clear_search_window_reference(self):
         """Clears reference handles on window closure."""
