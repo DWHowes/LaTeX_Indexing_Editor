@@ -33,7 +33,7 @@ from controllers.app_pipeline_controller import AppPipelineController
 from controllers.document_io_controller import DocumentIOController
 from controllers.workspace_lifecycle_controller import WorkspaceLifecycleController
 from bookindexcore.ui.style import AppStyleConfiguration
-from bookindexcore.qt.watcher import ExternalFileWatcherEngine
+from bookindexcore.qt.watcher import TextFileWatcherEngine
 from controllers.project_scope_controller import ProjectScopeController
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -202,7 +202,7 @@ def booted_app(tmp_path_factory, qapp):
     doc_controller = DocumentIOController(backup_manager, text_sanitizer, editor_window.tabs, editor_window)
     editor_window.latex_index_controller.set_doc_io(doc_controller)
 
-    file_watcher_engine = ExternalFileWatcherEngine(editor_window)
+    file_watcher_engine = TextFileWatcherEngine(editor_window)
     lifecycle_controller = WorkspaceLifecycleController(
         text_sanitizer=text_sanitizer,
         file_watcher=file_watcher_engine,

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### The file watcher is now `TextFileWatcherEngine`
+
+Step 11e. The shared watcher read every changed file as UTF-8 text, which is
+right here and wrong for the Word editor, whose manuscripts are zips. The
+reading half is a subclass now, and this application takes it: nothing about
+its behaviour changes, and `file_reload_completed` still arrives with the new
+contents.
+
+Two of the base class's signals go unused here and say so in
+`KNOWN_DEAD_SIGNALS`: `file_changed` and `file_missing` are what a host that
+does not want the contents listens to.
+
 ### The entry window's heading fields come from bookindexcore
 
 Step 11d, and this application is again the one that loses code. Everything

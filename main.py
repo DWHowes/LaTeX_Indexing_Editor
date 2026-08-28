@@ -17,7 +17,7 @@ from controllers.app_pipeline_controller import AppPipelineController
 from controllers.document_io_controller import DocumentIOController
 from controllers.workspace_lifecycle_controller import WorkspaceLifecycleController
 from bookindexcore.ui.style import AppStyleConfiguration
-from bookindexcore.qt.watcher import ExternalFileWatcherEngine
+from bookindexcore.qt.watcher import TextFileWatcherEngine
 from models.file_tree_persistence import FileTreePersistence
 from controllers.project_scope_controller import ProjectScopeController
 
@@ -92,7 +92,7 @@ if __name__ == "__main__":
 
         # Initialize the background utility engine
         # This engine watches for external modification of project LaTeX files
-        file_watcher_engine = ExternalFileWatcherEngine(editor_window)
+        file_watcher_engine = TextFileWatcherEngine(editor_window)
         lifecycle_controller = WorkspaceLifecycleController(
             text_sanitizer=text_sanitizer,
             file_watcher=file_watcher_engine,

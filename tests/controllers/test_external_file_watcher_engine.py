@@ -15,7 +15,7 @@ just without the nondeterministic wait.
 """
 import os
 
-from bookindexcore.qt.watcher import ExternalFileWatcherEngine
+from bookindexcore.qt.watcher import TextFileWatcherEngine
 
 
 class _Recorder:
@@ -29,7 +29,7 @@ class _Recorder:
 def test_register_file_path_adds_it_to_the_watcher(tmp_path):
     f = tmp_path / "a.tex"
     f.write_text("original", encoding="utf-8")
-    engine = ExternalFileWatcherEngine()
+    engine = TextFileWatcherEngine()
 
     engine.register_file_path(str(f))
 
@@ -39,7 +39,7 @@ def test_register_file_path_adds_it_to_the_watcher(tmp_path):
 def test_register_is_idempotent(tmp_path):
     f = tmp_path / "a.tex"
     f.write_text("original", encoding="utf-8")
-    engine = ExternalFileWatcherEngine()
+    engine = TextFileWatcherEngine()
 
     engine.register_file_path(str(f))
     engine.register_file_path(str(f))
@@ -48,7 +48,7 @@ def test_register_is_idempotent(tmp_path):
 
 
 def test_register_empty_path_is_a_noop(tmp_path):
-    engine = ExternalFileWatcherEngine()
+    engine = TextFileWatcherEngine()
 
     engine.register_file_path("")
 
@@ -58,7 +58,7 @@ def test_register_empty_path_is_a_noop(tmp_path):
 def test_unregister_file_path_removes_it(tmp_path):
     f = tmp_path / "a.tex"
     f.write_text("original", encoding="utf-8")
-    engine = ExternalFileWatcherEngine()
+    engine = TextFileWatcherEngine()
     engine.register_file_path(str(f))
 
     engine.unregister_file_path(str(f))
@@ -71,7 +71,7 @@ def test_unregister_all_clears_every_tracked_path(tmp_path):
     b = tmp_path / "b.tex"
     a.write_text("a", encoding="utf-8")
     b.write_text("b", encoding="utf-8")
-    engine = ExternalFileWatcherEngine()
+    engine = TextFileWatcherEngine()
     engine.register_file_path(str(a))
     engine.register_file_path(str(b))
 
@@ -81,7 +81,7 @@ def test_unregister_all_clears_every_tracked_path(tmp_path):
 
 
 def test_pause_watching_blocks_the_watchers_signals(tmp_path):
-    engine = ExternalFileWatcherEngine()
+    engine = TextFileWatcherEngine()
 
     engine.pause_watching()
     assert engine._watcher.signalsBlocked() is True
@@ -94,7 +94,7 @@ class TestHandleExternalFileModification:
     def test_reads_the_new_content_and_emits_file_reload_completed(self, tmp_path):
         f = tmp_path / "a.tex"
         f.write_text("original", encoding="utf-8")
-        engine = ExternalFileWatcherEngine()
+        engine = TextFileWatcherEngine()
         engine.register_file_path(str(f))
         recorder = _Recorder()
         engine.file_reload_completed.connect(recorder.capture)
@@ -110,7 +110,7 @@ class TestHandleExternalFileModification:
     def test_unregistered_path_is_ignored(self, tmp_path):
         f = tmp_path / "a.tex"
         f.write_text("x", encoding="utf-8")
-        engine = ExternalFileWatcherEngine()
+        engine = TextFileWatcherEngine()
         recorder = _Recorder()
         engine.file_reload_completed.connect(recorder.capture)
 
@@ -121,7 +121,7 @@ class TestHandleExternalFileModification:
     def test_since_deleted_path_is_ignored(self, tmp_path):
         f = tmp_path / "a.tex"
         f.write_text("x", encoding="utf-8")
-        engine = ExternalFileWatcherEngine()
+        engine = TextFileWatcherEngine()
         engine.register_file_path(str(f))
         completed = _Recorder()
         failed = _Recorder()
@@ -146,7 +146,7 @@ class TestHandleExternalFileModification:
         """
         f = tmp_path / "a.tex"
         f.write_text("original", encoding="utf-8")
-        engine = ExternalFileWatcherEngine()
+        engine = TextFileWatcherEngine()
         engine.register_file_path(str(f))
         recorder = _Recorder()
         engine.file_reload_failed.connect(recorder.capture)

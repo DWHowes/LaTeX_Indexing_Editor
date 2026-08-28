@@ -142,9 +142,15 @@ def _collect_boot_time_signal_pairs(app):
 #: watches typing. A shared widget offering more than one host uses is not the
 #: same defect as a signal built here and never wired up, which is what this
 #: test exists to catch.
+#: The file watcher is the same story (step 11e). `file_changed` and
+#: `file_missing` are what a host whose files are *not* text listens to; this
+#: application listens to `file_reload_completed`, which arrives with the new
+#: contents, because a `.tex` file has contents worth handing over.
 KNOWN_DEAD_SIGNALS = {
     ("bookindexcore.ui.entry_window.levels.LevelFields", "committed"),
     ("bookindexcore.ui.entry_window.levels.LevelFields", "levels_edited"),
+    ("bookindexcore.qt.watcher.TextFileWatcherEngine", "file_changed"),
+    ("bookindexcore.qt.watcher.TextFileWatcherEngine", "file_missing"),
 }
 
 
