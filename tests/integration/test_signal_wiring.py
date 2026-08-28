@@ -133,7 +133,19 @@ def _collect_boot_time_signal_pairs(app):
 # Each gets its own xfail test below rather than being silently skipped by
 # the sweep, and the sweep itself excludes exactly these pairs so it isn't
 # reporting the same finding twice.
-KNOWN_DEAD_SIGNALS = set()
+#: Signals that are legitimately unconnected in *this* application.
+#:
+#: `LevelFields` is shared with the Word editor (step 11d), and two of its
+#: signals are for a host that wants them: `committed` is Return on the last
+#: level, which the Word editor turns into "make this entry" and this
+#: application answers with Ctrl+K instead; `levels_edited` is for a host that
+#: watches typing. A shared widget offering more than one host uses is not the
+#: same defect as a signal built here and never wired up, which is what this
+#: test exists to catch.
+KNOWN_DEAD_SIGNALS = {
+    ("bookindexcore.ui.entry_window.levels.LevelFields", "committed"),
+    ("bookindexcore.ui.entry_window.levels.LevelFields", "levels_edited"),
+}
 
 
 def _qualname(obj) -> str:

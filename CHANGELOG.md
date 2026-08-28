@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### The entry window's heading fields come from bookindexcore
+
+Step 11d, and this application is again the one that loses code. Everything
+about *typing a heading* moved to `bookindexcore.ui.entry_window`: the
+progressive levels, the sort key that follows until it is claimed, the typed
+sort key split with its undo, the per-field advice and its repair, and the
+completion helper, which was called `LatexEntryAutoCompleter` and contained
+nothing whatever about LaTeX. `views/latex_entry_auto_completer.py` is
+deleted; `latex_index_window.py` is about 400 lines lighter.
+
+**Nothing about the window changed on screen**, and its public shape is
+unchanged: `main_entry`, `sub1_entry`, `sub2_entry`, `sort_entries`,
+`show_sort_keys`, `get_sort_keys`, `reveal_sub1` and the rest still mean what
+they meant. They are views onto the shared fields now rather than widgets
+built here.
+
+What stayed is what is actually LaTeX's: which command wraps the entry, the
+`	extbf` and `	extit` buttons with the selection widening they need, the
+page-reference encap, and `get_entry_data`.
+
+**The tests split the same way.** What the shared fields do is tested in the
+core, against a dialect that is not LaTeX; what stays here is this
+application's own reading of them, such as a sort field following
+`	extit{The Quality of Mercy}` to *The Quality of Mercy*.
+
+Two of `LevelFields`'s signals are unconnected here and now say so in
+`KNOWN_DEAD_SIGNALS`: `committed` is Return on the last level, which the Word
+editor turns into "make this entry" and this application answers with Ctrl+K,
+and `levels_edited` is for a host that watches typing. A shared widget
+offering more than one host uses is not the defect that test hunts for.
+
 ### The tab close glyph comes from bookindexcore
 
 `build_tab_close_icon` moved to `bookindexcore.ui.window` at step 11c, because
