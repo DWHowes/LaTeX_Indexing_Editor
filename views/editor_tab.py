@@ -6,41 +6,11 @@ from PySide6.QtCore import QEvent, QTimer, Qt, Signal, QPointF
 from models.latex_highlighter import LatexHighlighter
 from bookindexcore.ui.style import AppStyleConfiguration
 from bookindexcore.ui.tab_find_dialog import TabFindDialog
+# Moved to bookindexcore at step 11c, because the Word editor's manuscript
+# tabs want the same glyph and the same meaning for it. Re-exported here so
+# the eight-line import in workspace_lifecycle_controller keeps working.
+from bookindexcore.ui.window import build_tab_close_icon
 
-
-def build_tab_close_icon(is_modified: bool, size: int = 14) -> QIcon:
-    """
-    Paints the tab close glyph: a white X inside a red square when the
-    document is clean, or a white circle inside a red square when it has
-    unsaved changes, so modified state is visible without reading tab text.
-    """
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
-
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QBrush(QColor(196, 43, 43)))
-    painter.drawRoundedRect(1, 1, size - 2, size - 2, 2, 2)
-
-    if is_modified:
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(255, 255, 255)))
-        center = size / 2
-        radius = size * 0.16
-        painter.drawEllipse(QPointF(center, center), radius, radius)
-    else:
-        white_pen = QPen(QColor(255, 255, 255))
-        white_pen.setWidthF(1.6)
-        white_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(white_pen)
-        margin = size * 0.32
-        painter.drawLine(QPointF(margin, margin), QPointF(size - margin, size - margin))
-        painter.drawLine(QPointF(size - margin, margin), QPointF(margin, size - margin))
-
-    painter.end()
-    return QIcon(pixmap)
 
 class EditorTab(QPlainTextEdit):
     """

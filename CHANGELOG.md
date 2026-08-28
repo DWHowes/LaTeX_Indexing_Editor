@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The tab close glyph comes from bookindexcore
+
+`build_tab_close_icon` moved to `bookindexcore.ui.window` at step 11c, because
+the Word editor's manuscript tabs want the same glyph and the same meaning for
+it. `views/editor_tab.py` re-exports it, so nothing that imports it from there
+had to change.
+
 ### The toolbar, the status bar and the sidebar move to bookindexcore
 
 Step 11a of the Word editor's interface alignment, and this application is the
