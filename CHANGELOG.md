@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### The toolbar, the status bar and the sidebar move to bookindexcore
+
+Step 11a of the Word editor's interface alignment, and this application is the
+one that loses code. `views/main_tool_bar.py` and `views/main_status_bar.py`
+are deleted; `ProjectSidebarView` is now a subclass of the shared
+`SidebarPanels` holding only what is genuinely this application's, which is
+which three panels it has, what they are called, and the fact that Edit
+Entries carries a second horizontal strip of its own.
+
+**Nothing about the window changed on screen**, and that was the test.
+
+The menu bar's shortcuts now come from `bookindexcore.ui.shortcuts` rather
+than from seventeen string literals, including this application's own four
+tool gestures: they are declared there as this application's, so that "is this
+key free?" has one place to ask when a third editor arrives.
+
+**Two defects fell out of the move.**
+
+`_handle_index_entry_window_toggle` called the toolbar's panel-state method
+with `is_visible`, a bool where a panel index was wanted, so showing the index
+entry window checked the *Index References* sidebar button and hiding it
+checked *Workspace Files*. The shared method is named for what it does, and
+the call read as nonsense the moment it was; nothing on the toolbar follows
+that toggle now.
+
+And the sidebar only ever told the toolbar which panel was in front when the
+toolbar itself had asked. Clicking a panel's own tab left the buttons showing
+the panel before it. **`test_signal_wiring` found it**, by asking why the
+shared sidebar's new `panel_shown` signal had no receiver: exactly the class
+of thing that test was written for.
+
 ### The index tree's References column, and one visible change
 
 `bookindexcore`'s index tree carried this application's shape and nothing

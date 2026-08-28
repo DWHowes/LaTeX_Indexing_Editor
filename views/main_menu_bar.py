@@ -2,6 +2,8 @@ from PySide6.QtWidgets import QMenuBar
 from PySide6.QtCore import Signal, Qt, Slot
 from PySide6.QtGui import QKeySequence, QAction
 
+from bookindexcore.ui import shortcuts
+
 from models.app_version import APP_NAME
 
 class MainMenuBar(QMenuBar):
@@ -55,7 +57,7 @@ class MainMenuBar(QMenuBar):
         # ownership of the returned QMenu and destroys the C++ object, taking
         # the whole File menu and its submenus with it.
         self.file_menu = file_menu = self.addMenu("&File")
-        open_action = file_menu.addAction("&Open Project", QKeySequence("Ctrl+O"))
+        open_action = file_menu.addAction("&Open Project", shortcuts.sequence(shortcuts.OPEN_PROJECT))
         open_action.triggered.connect(lambda: self.open_project_requested.emit())
 
         # Populated on demand rather than held as state here: the view owns no
@@ -66,24 +68,24 @@ class MainMenuBar(QMenuBar):
         self.recent_menu.aboutToShow.connect(lambda: self.recent_menu_about_to_show.emit())
         self.recent_menu_action = self.recent_menu.menuAction()
 
-        save_action = file_menu.addAction("&Save Project", QKeySequence("Ctrl+S"))
+        save_action = file_menu.addAction("&Save Project", shortcuts.sequence(shortcuts.SAVE))
         save_action.triggered.connect(lambda: self.save_project_requested.emit())
         
-        close_action = file_menu.addAction("&Close Project", QKeySequence("Ctrl+W"))
+        close_action = file_menu.addAction("&Close Project", shortcuts.sequence(shortcuts.CLOSE_PROJECT))
         close_action.triggered.connect(lambda: self.close_project_requested.emit())
         
         file_menu.addSeparator()
         
-        exit_action = file_menu.addAction("&Exit", self.window.close, QKeySequence("Alt+F4"))
+        exit_action = file_menu.addAction("&Exit", self.window.close, shortcuts.sequence(shortcuts.EXIT))
         exit_action.triggered.connect(lambda: self.close_project_requested.emit())
 
         # --- Edit Menu Dropdowns ---
         edit_menu = self.addMenu("&Edit")
-        self.find_action = edit_menu.addAction("&Find...", QKeySequence.StandardKey.Find)
+        self.find_action = edit_menu.addAction("&Find...", shortcuts.sequence(shortcuts.FIND))
         self.find_action.triggered.connect(lambda: self.find_action_triggered.emit())
         self.find_action.setEnabled(False)  # Disabled by default; only meaningful with a project open
         
-        adv_search_action = edit_menu.addAction("Advanced Search...", QKeySequence("Ctrl+Shift+F"))
+        adv_search_action = edit_menu.addAction("Advanced Search...", shortcuts.sequence(shortcuts.ADVANCED_SEARCH))
         adv_search_action.triggered.connect(lambda: self.advanced_search_requested.emit())
 
         edit_menu.addSeparator()
@@ -109,20 +111,20 @@ class MainMenuBar(QMenuBar):
         edit_menu.aboutToShow.connect(lambda: self.edit_menu_about_to_show.emit())
 
         edit_menu.addSeparator()
-        prefs_action = edit_menu.addAction("&Preferences...", QKeySequence("Ctrl+,"))
+        prefs_action = edit_menu.addAction("&Preferences...", shortcuts.sequence(shortcuts.PREFERENCES))
         prefs_action.triggered.connect(lambda: self.preferences_requested.emit())
 
         # --- View Menu Dropdowns ---
         view_menu = self.addMenu("&View")
         
         # Left Sidebar Focus Controls
-        toggle_file_action = view_menu.addAction("Focus &File Pane", QKeySequence("Ctrl+B"))
+        toggle_file_action = view_menu.addAction("Focus &File Pane", shortcuts.sequence(shortcuts.FOCUS_FILES))
         toggle_file_action.triggered.connect(lambda: self.toggle_file_sidebar_requested.emit())
         
-        toggle_idx_action = view_menu.addAction("Focus &Index Pane", QKeySequence("Ctrl+Shift+I"))
+        toggle_idx_action = view_menu.addAction("Focus &Index Pane", shortcuts.sequence(shortcuts.FOCUS_INDEX))
         toggle_idx_action.triggered.connect(lambda: self.toggle_index_sidebar_requested.emit())
         
-        edit_list_tab_action = view_menu.addAction("Focus Edit &Entries Pane", QKeySequence("Ctrl+E"))
+        edit_list_tab_action = view_menu.addAction("Focus Edit &Entries Pane", shortcuts.sequence(shortcuts.FOCUS_ENTRIES))
         edit_list_tab_action.triggered.connect(lambda: self.toggle_edit_list_requested.emit())
         
         view_menu.addSeparator()
@@ -130,7 +132,7 @@ class MainMenuBar(QMenuBar):
         # Right Pane Index Creation Window Toggle Control (Ctrl+\ remain untouched)
         self.index_entry_action = view_menu.addAction(
             "Toggle Index &Entry Window", 
-            QKeySequence(Qt.Modifier.CTRL | Qt.Key.Key_Backslash)
+            shortcuts.sequence(shortcuts.TOGGLE_ENTRY_WINDOW)
         )
         self.index_entry_action.triggered.connect(lambda: self.toggle_entry_window_requested.emit())
         # Disable it by default on application startup (since no project is open yet)
@@ -138,15 +140,15 @@ class MainMenuBar(QMenuBar):
 
         # Tools menu dropdowns
         tools_menu = self.addMenu("&Tools")
-        self.head_note_action = tools_menu.addAction("Create Head &Note...", QKeySequence("Ctrl+Shift+H"))
+        self.head_note_action = tools_menu.addAction("Create Head &Note...", shortcuts.sequence(shortcuts.HEAD_NOTE))
         self.head_note_action.triggered.connect(lambda: self.add_head_note_requested.emit())
         # Disable it by default on application startup (since no project is open yet)
         self.head_note_action.setEnabled(False)
 
-        self.create_latex_command_action = tools_menu.addAction("Create &LaTeX Command...", QKeySequence("Ctrl+Alt+C"))
+        self.create_latex_command_action = tools_menu.addAction("Create &LaTeX Command...", shortcuts.sequence(shortcuts.CREATE_COMMAND))
         self.create_latex_command_action.triggered.connect(lambda: self.create_latex_command_requested.emit())
 
-        self.manage_project_commands_action = tools_menu.addAction("Manage Project &Commands...", QKeySequence("Ctrl+Alt+M"))
+        self.manage_project_commands_action = tools_menu.addAction("Manage Project &Commands...", shortcuts.sequence(shortcuts.MANAGE_COMMANDS))
         self.manage_project_commands_action.triggered.connect(lambda: self.manage_project_commands_requested.emit())
         # Disable it by default on application startup (since no project is open yet)
         self.manage_project_commands_action.setEnabled(False)
@@ -175,7 +177,7 @@ class MainMenuBar(QMenuBar):
         tools_menu.addSeparator()
 
         # Ctrl+B is already bound to "Focus File Pane" above; use a distinct shortcut.
-        self.create_rtf_file_action = tools_menu.addAction("Create &Rtf File", QKeySequence("Ctrl+Alt+R"))
+        self.create_rtf_file_action = tools_menu.addAction("Create &Rtf File", shortcuts.sequence(shortcuts.CREATE_RTF))
         self.create_rtf_file_action.triggered.connect(lambda: self.create_rtf_file_requested.emit())
 
         tools_menu.addSeparator()
@@ -249,7 +251,7 @@ class MainMenuBar(QMenuBar):
         # above) -- help content is fixed relative to the app's own
         # install location, so it's available with no project open.
         help_menu = self.addMenu("&Help")
-        self.help_contents_action = help_menu.addAction("&Contents...", QKeySequence("F1"))
+        self.help_contents_action = help_menu.addAction("&Contents...", shortcuts.sequence(shortcuts.HELP_CONTENTS))
         self.help_contents_action.triggered.connect(lambda: self.help_contents_requested.emit())
 
         help_menu.addSeparator()
@@ -261,7 +263,7 @@ class MainMenuBar(QMenuBar):
         # --- Global Action Container Tracking ---
         # Free-floating action container tracking the dark mode shortcut globally
         self.dark_mode_action = QAction(self)
-        self.dark_mode_action.setShortcut(QKeySequence("Ctrl+Shift+D"))
+        self.dark_mode_action.setShortcut(shortcuts.sequence(shortcuts.DARK_MODE))
         self.dark_mode_action.triggered.connect(lambda: self.toggle_dark_mode_requested.emit())
         self.addAction(self.dark_mode_action)
 

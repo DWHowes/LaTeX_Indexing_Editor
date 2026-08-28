@@ -415,6 +415,14 @@ class AppPipelineController(QObject):
 
         # --- Toolbar Controls ---
         self.window.tool_bar.sidebar_panel_requested.connect(self._orchestrate_sidebar_focus)
+        # And the other direction, which was missing: a panel brought forward
+        # by clicking its own tab left the toolbar's buttons showing the panel
+        # before it. The shared sidebar says which panel is in front however
+        # it got there, and `update_panel_state` does not echo, so the two
+        # cannot chase each other. Found by test_signal_wiring, which asked
+        # why the new signal had no receiver.
+        self.sidebar_view_panel.panel_shown.connect(
+            self.window.tool_bar.update_panel_state)
         self.window.tool_bar.dark_mode_toggle_requested.connect(self._handle_dark_mode_toggle)
         
         self.window.tool_bar.font_family_changed.connect(self._handle_font_family_change)
@@ -3214,7 +3222,7 @@ class AppPipelineController(QObject):
     @Slot(int)
     def _orchestrate_sidebar_focus(self, panel_index: int):
         self.sidebar_view_panel.bring_panel_to_foreground(panel_index)
-        self.window.tool_bar.update_toolbar_radio_state(panel_index)
+        self.window.tool_bar.update_panel_state(panel_index)
 
     @Slot(bool)
     def _handle_dark_mode_toggle(self, is_dark: bool):
@@ -3345,6 +3353,12 @@ class AppPipelineController(QObject):
     def _handle_index_entry_window_toggle(self):
         if not self.window.latex_index_window:
             return
-        is_visible = self.window.latex_index_window.toggle_view_visibility()
-        self.window.tool_bar.update_toolbar_radio_state(is_visible)
+        # **Nothing on the toolbar follows this.** It used to call the
+        # toolbar's panel-state method with `is_visible`, a bool where a panel
+        # index was wanted, so showing the entry window checked the *Index
+        # References* sidebar button and hiding it checked *Workspace Files*.
+        # Found at step 11a while moving the toolbar into bookindexcore: the
+        # shared method is named for what it does, and the call read as
+        # nonsense the moment it was.
+        self.window.latex_index_window.toggle_view_visibility()
         
