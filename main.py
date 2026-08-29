@@ -18,6 +18,7 @@ from controllers.document_io_controller import DocumentIOController
 from controllers.workspace_lifecycle_controller import WorkspaceLifecycleController
 from bookindexcore.ui.style import AppStyleConfiguration
 from bookindexcore.qt.watcher import TextFileWatcherEngine
+from bookindexcore.ui.window import WindowLayoutState
 from models.file_tree_persistence import FileTreePersistence
 from controllers.project_scope_controller import ProjectScopeController
 
@@ -127,14 +128,13 @@ if __name__ == "__main__":
         # before QSettings is readable -- see SessionLogger.set_log_folder_name.
         pipeline_controller.apply_general_preferences(preferences_payload)
 
-        geometry = preferences_payload.get("geometry")
-        state = preferences_payload.get("state")
-        splitter_state = preferences_payload.get("splitter_state")
-
-        if geometry or state:
-            editor_window.restore_layout_state(geometry, state)
-        if splitter_state:
-            editor_window.layout_splitter.restoreState(splitter_state)
+        # How the window was left: size, place and the sidebar divider. The
+        # shared helper does this for both editors now (step 11f), and
+        # `migrate_layout_state` carries an existing layout over from this
+        # application's own key names so that nobody's screen is reset once.
+        preferences_model.migrate_layout_state()
+        WindowLayoutState(preferences_model.settings).restore(
+            editor_window, {"main": editor_window.layout_splitter})
 
         exit_code = app.exec()
 

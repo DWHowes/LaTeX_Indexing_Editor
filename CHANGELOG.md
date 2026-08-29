@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### The layout is remembered through the shared helper
+
+Step 11f. Saving and restoring the window's geometry and the sidebar divider
+was done here in three places, with this application's own hex encoding; the
+Word editor needed the same thing, so it moved to
+`bookindexcore.ui.window.WindowLayoutState`.
+
+**An existing layout is carried over.** This application stored the three
+values under `window_geometry`, `window_state` and `splitter_state`; the shared
+helper keeps them under a `layout/` prefix. `migrate_layout_state` moves them
+once, because otherwise an indexer's own division of the screen would be
+thrown away on the first launch after the change, with nothing to say why.
+
+The hex round trip's tests went with the code. What stays here is the
+migration, which is this application's own.
+
 ### The file watcher is now `TextFileWatcherEngine`
 
 Step 11e. The shared watcher read every changed file as UTF-8 text, which is

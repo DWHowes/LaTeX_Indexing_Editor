@@ -141,6 +141,14 @@ class TestLoadApplicationPreferences:
 
 
 class TestLayoutStateRoundTrip:
+    """
+    The hex round trip itself moved to `bookindexcore.ui.window` at step 11f,
+    where it is tested against a window and a splitter rather than against a
+    blob. What stays here is the part that is this application's own: an
+    existing layout, stored under this application's key names since long
+    before the shared helper existed, has to survive the change.
+    """
+
     def test_geometry_round_trips_through_hex_encoding(self, qtbot):
         prefs = PreferencesPersistence()
         original = QByteArray(b"some binary geometry data")
@@ -159,6 +167,31 @@ class TestLayoutStateRoundTrip:
         loaded = prefs.load_application_preferences()
 
         assert bytes(loaded["state"].data()) == b"some window state blob"
+
+    def test_an_existing_layout_moves_to_the_shared_keys(self, qtbot):
+        """
+        Without this an indexer's own division of the screen is thrown away
+        once, on the first launch after the change, and nothing says why.
+        """
+        prefs = PreferencesPersistence()
+        prefs.settings.setValue("window_geometry", "abcd")
+        prefs.settings.setValue("splitter_state", "ef01")
+        prefs.settings.remove("layout/geometry")
+
+        prefs.migrate_layout_state()
+
+        assert prefs.settings.value("layout/geometry") == "abcd"
+        assert prefs.settings.value("layout/splitter/main") == "ef01"
+        assert prefs.settings.value("window_geometry") is None
+
+    def test_it_does_not_overwrite_a_layout_already_moved(self, qtbot):
+        prefs = PreferencesPersistence()
+        prefs.settings.setValue("layout/geometry", "beef")
+        prefs.settings.setValue("window_geometry", "abcd")
+
+        prefs.migrate_layout_state()
+
+        assert prefs.settings.value("layout/geometry") == "beef"
 
 
 class TestProjectContextAndVisualPreferences:

@@ -336,6 +336,32 @@ class PreferencesPersistence(QObject):
 
         self.settings.sync()
 
+    def migrate_layout_state(self) -> None:
+        """
+        Move a layout stored under this application's own key names into the
+        shared ones. Step 11f.
+
+        `bookindexcore.ui.window.WindowLayoutState` keeps the window geometry
+        and each named splitter under a `layout/` prefix, and it is what both
+        editors use now. This application stored the same three things under
+        `window_geometry`, `window_state` and `splitter_state` at the root, so
+        without this an indexer's own division of the screen would be silently
+        thrown away once, on the first launch after the change.
+
+        Runs once: it does nothing when the shared keys already hold anything.
+        """
+        if self.settings.value("layout/geometry") is not None:
+            return
+        for old_key, new_key in (("window_geometry", "layout/geometry"),
+                                 ("window_state", "layout/state"),
+                                 ("splitter_state", "layout/splitter/main")):
+            stored = self.settings.value(old_key)
+            if stored is None:
+                continue
+            self.settings.setValue(new_key, stored)
+            self.settings.remove(old_key)
+        self.settings.sync()
+
     def serialize_layout_state(self, closure_payload: dict):
         if "geometry" in closure_payload:
             geom = closure_payload["geometry"]

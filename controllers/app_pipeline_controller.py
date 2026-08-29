@@ -59,6 +59,7 @@ from models.app_version import app_identity
 from bookindexcore.ui.help.controller import HelpController
 
 from bookindexcore.ui.style import AppStyleConfiguration
+from bookindexcore.ui.window import WindowLayoutState
 from views.editor_tab import EditorTab
 from views.index_tree_view import IndexTreeView, SourceCoordinate
 from views.project_sidebar_view import ProjectSidebarView
@@ -2765,12 +2766,10 @@ class AppPipelineController(QObject):
         self._load_thread = None
         self.worker = None
         
-        # Save window geometry before closing
-        self.prefs.serialize_layout_state({
-            "geometry": self.window.saveGeometry(),
-            "state": self.window.saveState(),
-            "splitter_state": self.window.layout_splitter.saveState()
-        })   
+        # How the window was left, through the shared helper both editors use
+        # since step 11f.
+        WindowLayoutState(self.prefs.settings).save(
+            self.window, {"main": self.window.layout_splitter})
 
         self._force_application_exit()
 
