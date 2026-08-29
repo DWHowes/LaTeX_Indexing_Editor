@@ -22,7 +22,8 @@ wording.
 
 from PySide6.QtWidgets import QMessageBox
 
-from bookindexcore.model.commands import MacroEdit, edit_command
+from models.command_edits import macro_edit
+from bookindexcore.model.commands import edit_command
 from bookindexcore.model.proposals import ChangeSet, ProposedChange
 from bookindexcore.ui.preview_dialog import PreviewDialog
 
@@ -169,7 +170,7 @@ class BulkRepairController:
             if new_macro == current:
                 continue
 
-            edits.append(MacroEdit(
+            edits.append(macro_edit(
                 change.key, container, start, current, new_macro, command_name))
 
         if not edits:

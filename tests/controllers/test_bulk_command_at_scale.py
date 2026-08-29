@@ -61,7 +61,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import QTabWidget
 
-from bookindexcore.model.commands import EDIT, MacroEdit, edit_command
+from models.command_edits import macro_edit
+from bookindexcore.model.commands import EDIT, edit_command
 from bookindexcore.qt.staging import QtIndexEditStagingModel
 from bookindexcore.session.backup import SessionBackupManager
 from bookindexcore.util.text import TextSanitizer
@@ -141,7 +142,7 @@ def _rename_command(rows, path, *, suffix):
     for row in rows:
         before = f"\\index{{{row['heading_raw_text']}}}"
         after = f"\\index{{{row['heading_raw_text']}{suffix}}}"
-        edits.append(MacroEdit(
+        edits.append(macro_edit(
             row["unique_id_number"], str(path), row["absolute_position"],
             before, after, "index",
         ))
@@ -214,7 +215,7 @@ class TestABulkCommandAtScale:
         controller, _entry_model, rows = _stack(qtbot, path)
 
         edits = list(_rename_command(rows, path, suffix="-renamed").edits)
-        poisoned = edits[:50] + [MacroEdit(
+        poisoned = edits[:50] + [macro_edit(
             rows[50]["unique_id_number"], str(path),
             rows[50]["absolute_position"],
             "\\index{THIS IS NOT WHAT THE FILE SAYS}", "\\index{X}", "index",
