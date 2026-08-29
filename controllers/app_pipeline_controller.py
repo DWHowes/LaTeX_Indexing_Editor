@@ -15,11 +15,13 @@ from models.latex_record_mapping import (
     command_of, end_of, line_of, position_of, reference_from_row,
     row_from_reference,
 )
+from models.command_edits import (
+    edit_command_name, edit_end, edit_position, macro_edit,
+)
 from bookindexcore.model.commands import (
     DEFAULT_LIMIT,
     EntrySnapshot,
     IndexCommandStack,
-    MacroEdit,
     insertion_command,
 )
 from views.entry_modifier_list import set_encap_style_values
@@ -854,7 +856,7 @@ class AppPipelineController(QObject):
         if not macro_text:
             return
 
-        edit = MacroEdit(
+        edit = macro_edit(
             entry_id=entry_id,
             file_path=file_path,
             absolute_position=position,

@@ -11,11 +11,13 @@ from models.latex_record_mapping import (
     command_of, end_of, position_of, row_from_reference,
 )
 from bookindexcore.model.records import IndexReference
+from models.command_edits import (
+    edit_command_name, edit_end, edit_position, macro_edit,
+)
 from bookindexcore.model.commands import (
     EntrySnapshot,
     copy_record,
     HeadingChange,
-    MacroEdit,
     deletion_command,
     edit_command,
 )
@@ -630,7 +632,7 @@ class IndexEditController(QObject):
 
         if recorder is not None and old_macro:
             recorder.append((
-                MacroEdit(uid, file_path, abs_pos, old_macro, new_macro, command_name),
+                macro_edit(uid, file_path, abs_pos, old_macro, new_macro, command_name),
                 HeadingChange(uid, current_heading, new_heading),
             ))
 
@@ -898,7 +900,7 @@ class IndexEditController(QObject):
         if old_macro:
             self.command_recorded.emit(edit_command(
                 "Edit index entry",
-                [MacroEdit(entry_id, file_path, abs_pos, old_macro, new_macro, command_name)],
+                [macro_edit(entry_id, file_path, abs_pos, old_macro, new_macro, command_name)],
                 [HeadingChange(entry_id, old_heading, new_canonical_heading)],
             ))
 
@@ -972,7 +974,7 @@ class IndexEditController(QObject):
         if snapshot is not None and old_macro:
             self.command_recorded.emit(deletion_command(
                 "Delete index entry",
-                [MacroEdit(entry_id, file_path, abs_pos, old_macro, "", command_name)],
+                [macro_edit(entry_id, file_path, abs_pos, old_macro, "", command_name)],
                 [snapshot],
             ))
         return True
@@ -1324,13 +1326,13 @@ class IndexEditController(QObject):
         span no longer holds what was recorded aborts, and the caller rolls
         back whatever the command had already applied.
         """
-        file_path = edit.file_path
-        position = edit.absolute_position
+        file_path = edit.locator.container
+        position = edit_position(edit)
 
-        if edit.before_text:
+        if edit.before:
             record = self._entry_model.get_record(edit.entry_id)
             if record is not None:
-                if not self._write_span(edit.entry_id, edit.before_text, edit.after_text):
+                if not self._write_span(edit.entry_id, edit.before, edit.after):
                     return False
                 return True
 
@@ -1342,24 +1344,24 @@ class IndexEditController(QObject):
             # through `backend.apply`**, and it is here because identity is
             # what the backend needs and identity is exactly what a record
             # that no longer exists cannot supply.
-            old_end = position + len(edit.before_text)
+            old_end = position + len(edit.before)
             current = self._doc_io.read_macro_span(file_path, position, old_end)
-            if current != edit.before_text:
+            if current != edit.before:
                 print(
                     f"[UNDO GUARD] span at {position} in {os.path.basename(file_path)} "
-                    f"holds {current!r}, expected {edit.before_text!r} — aborting"
+                    f"holds {current!r}, expected {edit.before!r} — aborting"
                 )
                 return False
             delta = self._doc_io.rewrite_macro_span(
-                file_path, position, old_end, edit.after_text,
-                expected_macro_name=edit.command_name,
+                file_path, position, old_end, edit.after,
+                expected_macro_name=edit_command_name(edit),
             )
             if delta is None:
                 return False
             self.note_external_shift(file_path, position, delta)
             return True
 
-        if not self.place_macro(file_path, position, edit.after_text).ok:
+        if not self.place_macro(file_path, position, edit.after).ok:
             return False
         return True
 
@@ -1373,7 +1375,7 @@ class IndexEditController(QObject):
             if not self._apply_macro_edit(edit.inverted()):
                 print(
                     "[UNDO GUARD] rollback of a partially applied command failed — "
-                    f"{os.path.basename(edit.file_path)} may need a resync"
+                    f"{os.path.basename(edit.locator.container)} may need a resync"
                 )
 
     def _recreate_entry(self, snapshot, command) -> None:
@@ -1394,10 +1396,10 @@ class IndexEditController(QObject):
         # macro, not from the snapshot: everything around it may have
         # moved between the deletion and this restore.
         for edit in command.edits:
-            if edit.entry_id == snapshot.entry_id and edit.after_text:
+            if edit.entry_id == snapshot.entry_id and edit.after:
                 record.locator = record.locator.with_hint(
-                    absolute_position=edit.absolute_position,
-                    absolute_end=edit.absolute_end,
+                    absolute_position=edit_position(edit),
+                    absolute_end=edit_end(edit),
                 )
                 break
 
