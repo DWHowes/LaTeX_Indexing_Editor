@@ -378,7 +378,17 @@ class LatexDialect:
     def parse_xref(self, stored: str) -> Optional[XRefSpec]:
         return grammar.parse_encap_xref(grammar.encap_from_stored(stored))
 
-    def build_xref(self, kind: str, target: str) -> str:
+    def build_xref(self, kind: str, target: str, *, labels=None) -> str:
+        r"""
+        `labels` is accepted and **ignored**, which is the honest answer here.
+
+        `xref_label_owner` is `XREF_LABEL_DOCUMENT` for LaTeX: makeindex emits
+        `\see{target}{page}` and the words in front of it live in a macro the
+        *author* controls. A project's chosen wording cannot reach the page
+        from here, so pretending to accept one would be promising what this
+        format cannot deliver. The Presentation page already renders those
+        fields read-only for this answer.
+        """
         return grammar.build_encap_xref(kind, target)
 
     # -- presentation -------------------------------------------------------

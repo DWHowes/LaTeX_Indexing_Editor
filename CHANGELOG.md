@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### `build_xref` accepts the cross-reference labels, and ignores them
+
+The shared protocol's `build_xref` now takes an optional `labels` mapping, so a
+project's chosen wording for *see* and *see also* can reach the field in a host
+that prints it. This is not such a host: `xref_label_owner` here is
+`XREF_LABEL_DOCUMENT`, because makeindex emits `\see{target}{page}` and the
+words live in a macro the **author** controls.
+
+So the argument is accepted and ignored, and the docstring says why. Pretending
+to honour it would promise what LaTeX cannot deliver, and the Presentation page
+already renders those two fields read-only for this answer. The new conformance
+law is skipped for the same reason: it applies only to a dialect declaring the
+label is ours.
+
+
 ### The editor tab's keystroke policy moved to bookindexcore
 
 The Word editor's manuscript view had no visible caret, because it used
