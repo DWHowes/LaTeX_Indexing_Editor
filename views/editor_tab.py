@@ -10,9 +10,13 @@ from bookindexcore.ui.tab_find_dialog import TabFindDialog
 # tabs want the same glyph and the same meaning for it. Re-exported here so
 # the eight-line import in workspace_lifecycle_controller keeps working.
 from bookindexcore.ui.window import build_tab_close_icon
+# The keystroke policy moved to bookindexcore when the Word editor needed a
+# visible caret in its manuscript view and found this application had solved
+# it years earlier. It also closes the drop path, which this class did not.
+from bookindexcore.ui.text_view import ReadOnlyTextMixin
 
 
-class EditorTab(QPlainTextEdit):
+class EditorTab(ReadOnlyTextMixin, QPlainTextEdit):
     """
     High-performance text layout editor sheet container.
     Strict MVC Compliance: Standardized entirely on a public 'file_path' property contract.
@@ -26,8 +30,9 @@ class EditorTab(QPlainTextEdit):
 
         self.syntax_highlighter = None  # Placeholder for the syntax highlighter instance
 
-        self.setReadOnly(False)   # kept editable so cursor blinks
-        self.setCursorWidth(1)
+        # Editable to Qt so the caret blinks, closed to the user by the
+        # mixin's whitelist. See bookindexcore.ui.text_view for why.
+        self.install_read_only_caret()
 
         # Mirrors of the index command stack's state, pushed in by
         # AppPipelineController._refresh_undo_actions. The context menu
@@ -404,45 +409,24 @@ class EditorTab(QPlainTextEdit):
         super().resizeEvent(event)
         self.reposition_find_dialog()
 
-    def keyPressEvent(self, event):
-        key = event.key()
-        ctrl = event.modifiers() & Qt.KeyboardModifier.ControlModifier
+    def handle_reserved_key(self, event) -> bool:
+        """
+        Ctrl+Z and Ctrl+Y are the **index's** undo, not the document's.
 
-        if key == Qt.Key.Key_Escape:
-            cursor = self.textCursor()
-            if cursor.hasSelection():
-                cursor.clearSelection()
-                self.setTextCursor(cursor)
-            event.accept()
-            return
-
-        # Undo/redo are the index's, not the document's. super() is
-        # deliberately NOT called here: the controller reverses the whole
-        # operation -- macro text, DB row, coordinates and views together
-        # -- and a document-level undo running first would fight it.
-        if ctrl and key == Qt.Key.Key_Z:
+        The controller reverses the whole operation together -- macro text, DB
+        row, coordinates and views -- and a document-level undo running first
+        would fight it. Claimed here so the mixin's whitelist never sees them.
+        """
+        ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        if ctrl and event.key() == Qt.Key.Key_Z:
             self.undo_performed.emit()
             event.accept()
-            return
-
-        if ctrl and key == Qt.Key.Key_Y:
+            return True
+        if ctrl and event.key() == Qt.Key.Key_Y:
             self.redo_performed.emit()
             event.accept()
-            return
-
-        # Whitelist: navigation, selection, copy, select-all, find
-        allowed_keys = {
-            Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
-            Qt.Key.Key_Home, Qt.Key.Key_End, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown,
-        }
-        allowed_ctrl = {Qt.Key.Key_C, Qt.Key.Key_A, Qt.Key.Key_F}
-
-        if key in allowed_keys:
-            super().keyPressEvent(event)
-        elif ctrl and key in allowed_ctrl:
-            super().keyPressEvent(event)
-        else:
-            event.ignore()
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Undo/redo belong to the index, not to the document

@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+### The editor tab's keystroke policy moved to bookindexcore
+
+The Word editor's manuscript view had no visible caret, because it used
+`setReadOnly(True)` and Qt draws no cursor in a read-only widget. This
+application had solved that years ago -- keep the widget editable, whitelist
+the keys -- with the reason sitting beside the call as `# kept editable so
+cursor blinks`. So the policy is now
+`bookindexcore.ui.text_view.ReadOnlyTextMixin` and both hosts use it. Forty
+lines of whitelist here become nineteen: `handle_reserved_key`, which claims
+Ctrl+Z and Ctrl+Y for the **index's** command stack before the whitelist sees
+them, because the document's undo is not the index's undo.
+
+**The move closes a hole this class had.** Nothing guarded
+`insertFromMimeData`, so text **dragged in from another window** was inserted
+regardless: the keyboard was locked down and the context menu offered no
+paste, and a drag went straight past both. It is refused now, and the mixin's
+tests run against `QPlainTextEdit` and `QTextEdit` alike.
+
+A mixin rather than one shared base class, and that was measured rather than
+argued. `QPlainTextEdit` ignores `QTextBlockFormat.leftMargin`, which the Word
+view needs for its indents; and `QTextEdit` takes **2.36s against 0.05s** for
+four cursor seeks over a 5 MB, 40,000-line document, which is an ordinary
+`.tex` and the gesture this application is built on. Neither base serves both.
+
+### The entry window's title bar is now the shared one
+
+`EntryWindowTitleBar` moved to `bookindexcore.ui.entry_window`, fifty-nine
+lines lighter here. It closed its parent dock directly, which is right for a
+dock and useless for the Word editor's entry window, a pane in a splitter. It
+reports the gesture now and the dock connects `close_requested` to `close`.
+
+### `MainToolBar.line_spacing_changed` is pinned as legitimately unconnected
+
+The shared toolbar grew a paragraph-spacing picker for the Word editor.
+`test_every_boot_time_signal_has_a_connected_receiver` caught it at boot with
+no receiver here **in the same run it was added**, which is the whole reason
+that test exists. The right answer was not to exempt the signal but to make
+the control declared: the picker is built only for a host that asks for it,
+because spacing means something in a view of prose and nothing in a view of
+`.tex` source, where a paragraph is a run of lines the author broke where they
+chose. The signal is still on the shared class, so it is pinned in
+`KNOWN_DEAD_SIGNALS` with that reason, beside `LevelFields.committed` and the
+watcher's two.
+
+
 ### The layout is remembered through the shared helper
 
 Step 11f. Saving and restoring the window's geometry and the sidebar divider

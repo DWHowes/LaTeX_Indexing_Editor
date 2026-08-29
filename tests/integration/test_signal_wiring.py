@@ -146,11 +146,21 @@ def _collect_boot_time_signal_pairs(app):
 #: `file_missing` are what a host whose files are *not* text listens to; this
 #: application listens to `file_reload_completed`, which arrives with the new
 #: contents, because a `.tex` file has contents worth handing over.
+#: `MainToolBar.line_spacing_changed` is the third of the kind, and this test
+#: is what made it one. The picker behind it is built only for a host that
+#: passes `line_spacing=True`, because paragraph spacing means something in a
+#: view of prose -- the Word editor's manuscript -- and nothing in a view of
+#: `.tex` source, where a paragraph is a run of lines the author broke where
+#: they chose. It was added unconditionally first, this test caught it at
+#: once, and the control became declared rather than the signal becoming
+#: exempt. The entry stands for the signal, which is still on the shared
+#: class; the spinbox does not exist in this application at all.
 KNOWN_DEAD_SIGNALS = {
     ("bookindexcore.ui.entry_window.levels.LevelFields", "committed"),
     ("bookindexcore.ui.entry_window.levels.LevelFields", "levels_edited"),
     ("bookindexcore.qt.watcher.TextFileWatcherEngine", "file_changed"),
     ("bookindexcore.qt.watcher.TextFileWatcherEngine", "file_missing"),
+    ("bookindexcore.ui.window.tool_bar.MainToolBar", "line_spacing_changed"),
 }
 
 

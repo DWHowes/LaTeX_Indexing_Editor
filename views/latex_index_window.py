@@ -36,69 +36,12 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QEvent, Qt, Signal, QSize, Slot, QSettings
 
-from bookindexcore.ui.entry_window import LevelFields, SortKeyLineEdit
+from bookindexcore.ui.entry_window import (
+    EntryWindowTitleBar, LevelFields, SortKeyLineEdit,
+)
 from bookindexcore.ui.style import AppStyleConfiguration
 from models import index_syntax_check as syntax
 from models.latex_dialect import LATEX_DIALECT as dialect
-
-
-class EntryWindowTitleBar(QWidget):
-    """
-    Custom title bar designed specifically to replace native QDockWidget header strips.
-    Enables absolute layout control, allowing custom text placement and larger close buttons.
-    """
-    def __init__(self, title_text: str, parent_dock: QWidget = None):
-        super().__init__(parent_dock)
-        self.parent_dock = parent_dock
-
-        self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(5, 2, 5, 2)
-        self.layout.setSpacing(10)
-
-        self.title_label = QLabel(title_text)
-
-        self.close_button = QPushButton("×")
-        self.close_button.setToolTip("Close panel")
-        self.close_button.setFixedSize(QSize(28, 28))
-        self.close_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-
-        self.layout.addWidget(self.title_label)
-        self.layout.addStretch()
-        self.layout.addWidget(self.close_button)
-
-        if self.parent_dock:
-            self.close_button.clicked.connect(self.parent_dock.close)
-
-        broker = AppStyleConfiguration.event_broker()
-        broker.theme_mutated.connect(self.refresh_theme_presentation)
-
-        init_dark = bool(broker.property("is_dark_mode") == True)
-        self.refresh_theme_presentation(init_dark)
-
-    @Slot(bool)
-    def refresh_theme_presentation(self, is_dark_mode: bool) -> None:
-        text_color = "#FFFFFF" if is_dark_mode else "#000000"
-        self.title_label.setStyleSheet(f"font-weight: bold; color: {text_color};")
-        self.close_button.setStyleSheet(f"""
-            QPushButton {{
-                font-family: 'Verdana', 'Segoe UI', sans-serif;
-                font-size: 20px;
-                font-weight: bold;
-                color: {text_color};
-                background-color: transparent;
-                border: none;
-                border-radius: 4px;
-                padding-bottom: 2px;
-            }}
-            QPushButton:hover {{
-                background-color: #e81123;
-                color: white;
-            }}
-            QPushButton:pressed {{
-                background-color: #f1707a;
-                color: white;
-            }}
-        """)
 
 
 class LatexIndexWindow(QDockWidget):
@@ -124,7 +67,11 @@ class LatexIndexWindow(QDockWidget):
         self.setFeatures(QDockWidget.NoDockWidgetFeatures)
         self.setAllowedAreas(Qt.BottomDockWidgetArea)
 
-        self.custom_title_bar = EntryWindowTitleBar(title, parent_dock=self)
+        # The bar moved into bookindexcore at the Word editor's request and
+        # no longer closes anything itself: it reports the gesture, and a
+        # dock is one of the two things that gesture can mean.
+        self.custom_title_bar = EntryWindowTitleBar(title, self)
+        self.custom_title_bar.close_requested.connect(self.close)
         self.setTitleBarWidget(self.custom_title_bar)
 
         self.last_focused_field = None
