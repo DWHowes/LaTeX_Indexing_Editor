@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### Undo records are `SourceEdit`s now, and nothing else changed
+
+`MacroEdit` was the shared undo record and every field of it was this
+application's: a character offset, a file path, and the name of the macro being
+rewritten. The Word editor has none of those, so the shared stack was
+unusable there. Those values are not gone, they have moved into the locator's
+**hint**, which is where a backend's private accounting has belonged since
+Phase 3.
+
+`models/command_edits.py` is the whole adaptation: `macro_edit()` builds the
+`SourceEdit`, and `edit_position`, `edit_end` and `edit_command_name` read the
+three values back out. Five construction sites and fifteen field reads convert
+mechanically.
+
+**The scope estimated 181 references across 16 files, and that was wrong.** It
+counted `absolute_position` everywhere, almost all of it the entry model's own
+legitimate use: this application's backend really does have character offsets
+and keeps them. The command path touches seven constructions and fifteen reads.
+
+**One finding worth the name.** The helpers were first called `position_of` and
+`end_of` -- and this application already has functions of exactly those names,
+for *records*, in the LaTeX codec. Importing a second pair shadowed them in two
+controllers and produced nine failures whose message named
+`'IndexReference' object has no attribute 'after'`, a type the change had never
+touched. The prefix on `edit_position` says which of the two a reader is
+looking at.
+
+Suite 1,731, green, with no behavioural change.
+
+
 ### `build_xref` accepts the cross-reference labels, and ignores them
 
 The shared protocol's `build_xref` now takes an optional `labels` mapping, so a
