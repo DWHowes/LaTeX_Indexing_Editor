@@ -33,7 +33,12 @@ def test_register_file_path_adds_it_to_the_watcher(tmp_path):
 
     engine.register_file_path(str(f))
 
-    assert str(f) in engine._watcher.files() or engine._watcher.files() == [str(f)]
+    # **Through the engine, not through Qt.** Qt holds its paths with forward
+    # slashes whatever spelling it was given, and on Windows a path registered
+    # natively is accepted and then never reported on -- which is why the core
+    # now converts at that boundary and converts back here. Asserting on Qt's
+    # own list is asserting on the spelling rather than on the watching.
+    assert engine.watched_paths() == [os.path.normpath(str(f))]
 
 
 def test_register_is_idempotent(tmp_path):

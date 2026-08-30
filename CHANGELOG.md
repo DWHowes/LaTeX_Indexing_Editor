@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### The file watcher was dead on Windows, and this application never knew
+
+Fixed in bookindexcore: `QFileSystemWatcher` accepts a path spelled with
+backslashes, lists it in `files()` afterwards, and then never reports a write
+to it. The engine registered exactly that, so **reloading a .tex file changed
+underneath you has not worked on this platform**. The core now speaks Qt's
+own spelling at that boundary and the platform's everywhere else.
+
+The only change here is one test, which asserted on Qt's internal list rather
+than on `watched_paths()` and so was asserting on the spelling instead of on
+the watching. Nothing in the application changed.
+
 ### Undo records are `SourceEdit`s now, and nothing else changed
 
 `MacroEdit` was the shared undo record and every field of it was this
