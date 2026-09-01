@@ -645,6 +645,10 @@ class AppPipelineController(QObject):
             resuggest=lambda name, language: self._rule_only_inversion(
                 name, language).rule_suggestion,
             compound_surnames=self.presentation_prefs.names().compound_surnames,
+            # The list is this project's, so the note about the
+            # authority's capitalisation is built from the rules that
+            # will actually file the heading.
+            cased_prefixes=self.presentation_prefs.names().cased_filing_prefixes,
             # Offered, never applied. The record gives the language the person
             # is associated with rather than the language of the name, and it
             # carries no region -- so a Flemish name arrives as plain Dutch,

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### The inversion dialog is told which prefixes are read for their case
+
+The core's N3 finding I puts a note under the authority's value saying that
+its capital letter is not evidence: LC capitalises the first word of every
+heading by rule, so its records cannot show whether a person preferred a
+lowercase letter, and that case is exactly what tells `Al Thani` from
+`al Turabi`.
+
+The note fires only where this project's own `cased_filing_prefixes` says the
+case decides the filing, so the dialog takes the list rather than reaching
+for it, and this controller passes it beside `compound_surnames`. A host that
+never passed it would show the note on nothing, which looks exactly like a
+project with nothing to warn about, so there is a test for the passing and
+not only for the note.
+
 ### One inversion test moved from asserting an answer to asserting a delivery
 
 The core's N3 finding B gave the cascade a general filial rule that reads a

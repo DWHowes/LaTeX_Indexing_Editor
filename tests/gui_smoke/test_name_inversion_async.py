@@ -47,7 +47,7 @@ def _captured_dialogs(monkeypatch, pipeline):
     class _FakeDialog:
         def __init__(self, original_name, authority_value, rule_value, parent=None,
                      language=UNSTATED, resuggest=None, compound_surnames=(),
-                     language_from_authority=UNSTATED):
+                     cased_prefixes=(), language_from_authority=UNSTATED):
             self.original_name = original_name
             self.authority_value = authority_value
             self.rule_value = rule_value
@@ -56,6 +56,7 @@ def _captured_dialogs(monkeypatch, pipeline):
             self.language = language
             self.resuggest = resuggest
             self.compound_surnames = compound_surnames
+            self.cased_prefixes = cased_prefixes
             self.language_from_authority = language_from_authority
             self.accepted = _FakeSignal()
             self.rejected = _FakeSignal()
@@ -290,6 +291,30 @@ class TestTheLanguageReachesTheDialog:
         resuggest("Isa bin Sulman", UNSTATED)
         resuggest("Isa bin Sulman", "de")
         assert asked == [UNSTATED, "de"]
+
+
+class TestTheCasedPrefixesReachTheDialog:
+    """
+    The core's N3 finding I put a note under the authority's value saying
+    that its capital letter is not evidence -- LC capitalises the first word
+    of every heading by rule. The note fires only where the case decides the
+    filing, which the project's own `cased_filing_prefixes` is what says.
+
+    **This is the wiring test.** The dialog takes the list rather than
+    reaching for it, so a host that never passes it shows the note on
+    nothing, which looks exactly like a project with nothing to warn about.
+    """
+
+    def test_the_project_s_own_list_is_passed(self, pipeline, name_index,
+                                              monkeypatch, qtbot):
+        model, index = name_index
+        dialogs = _captured_dialogs(monkeypatch, pipeline)
+
+        pipeline._handle_index_name_inversion_request(index)
+        qtbot.waitUntil(lambda: bool(dialogs), timeout=5000)
+
+        assert dialogs[0].cased_prefixes ==             pipeline.presentation_prefs.names().cased_filing_prefixes
+        assert dialogs[0].cased_prefixes
 
 
 class TestAStatedLanguageOutlivesTheBook:
