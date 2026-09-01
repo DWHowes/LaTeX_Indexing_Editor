@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### A Spanish or Portuguese name with two given names inverts correctly
+
+No code here changed. The core's N3 finding O replaced a guess in the Iberian
+walk: a name with three or more tokens in front of an internal `de` kept only
+the **first** as a forename, so `Maria Luisa Rivera de Montoya` came back
+`Luisa Rivera de Montoya, Maria`. It now starts the surname at the token
+before the connector, which is what Cronshaw prints and what the widow rule
+beside it already did.
+
+The widow rule itself matched `viuda` and never the commoner `vda.`, and that
+is fixed with it.
+
 ### A name marked Chinese, Korean, Vietnamese, Hmong or Thai files differently
 
 No code here changed, but the headings this application suggests did. The
