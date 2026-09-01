@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### The inversion cascade moved into the core, and this application adopted it
+
+Five methods here did the whole of it -- `_refresh_name_rules`,
+`reopen_name_database`, `invert_name`, `_rule_only_inversion`,
+`invert_name_async` -- plus the executor and the shutdown order beside them,
+about 110 lines. **None of it was about LaTeX**, and the Word editor was about
+to need every line, so it is
+`bookindexcore.naming.service.NameInversionService` now and this controller
+delegates. `name_inverter` is a property over the service's, so nothing that
+used the name had to change.
+
+**Nothing here behaves differently and the suite is unchanged at 1,731**,
+which was the test: the second caller fixes the core and adapts every host,
+and the host that already worked is the one that proves the interface did not
+have to bend.
+
+Two things arrive with it, both from the core:
+
+- an authority lookup switched **off** no longer stops the application
+  remembering the indexer's corrections, because the name database is no
+  longer opened only when VIAF is;
+- the Presentation page grows the tables that had no control anywhere: the
+  Arabic ones, the epithet and place-of-origin words, the cased filing
+  prefixes, the generational suffixes and the Mac/Mc switch.
+
 ### The file watcher was dead on Windows, and this application never knew
 
 Fixed in bookindexcore: `QFileSystemWatcher` accepts a path spelled with

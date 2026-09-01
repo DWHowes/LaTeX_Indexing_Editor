@@ -2,7 +2,7 @@ import os
 from shiboken6 import isValid  # PySide6 C++ lifetime validator
 from pathlib import Path
 from typing import Optional, Callable
-from concurrent.futures import ThreadPoolExecutor
+
 
 from PySide6.QtCore import (
     QObject, Slot, QModelIndex, QPersistentModelIndex, Qt, Signal, QTimer
@@ -35,7 +35,8 @@ from models.latex_command_registry_model import LatexCommandRegistryModel
 from bookindexcore.ui.theme.config_model import ThemeConfigModel
 from models.entry_modifier_model import EntryModifierModel
 from bookindexcore.qt.staging import QtIndexEditStagingModel
-from bookindexcore.naming.inverter import NameInverter, NameInversionResult
+from bookindexcore.naming.inverter import NameInversionResult
+from bookindexcore.naming.service import NameInversionService
 from bookindexcore.style.languages import UNSTATED
 
 from controllers.index_tree_controller import IndexTreeController
@@ -111,11 +112,19 @@ class AppPipelineController(QObject):
         self.lc_ctrl = lifecycle_controller
         self.scope_ctrl = scope_controller
         self.session_logger = session_logger
-        self.name_inverter = name_inverter
-        self.worker = worker  
+        self.worker = worker
 
-        # Executor for background VIAF lookups
-        self._executor = ThreadPoolExecutor(max_workers=2)
+        # **The cascade, its thread and its lifetime, from the core.** All
+        # three used to be written out here; they moved into
+        # `bookindexcore.naming.service` when the Word editor became the
+        # second caller. The rules are read through a callable rather than
+        # handed over, because they move under it from three directions and a
+        # record built once at startup keeps the package defaults for the
+        # session -- which is exactly the defect Part 5 of the name work
+        # found here.
+        self._names = NameInversionService(
+            rules_source=lambda: self.presentation_prefs.names(),
+            inverter=name_inverter)
 
         self.name_inversion_completed.connect(self._apply_inverted_name, Qt.ConnectionType.QueuedConnection)
         self.name_lookup_finished.connect(
@@ -2644,114 +2653,78 @@ class AppPipelineController(QObject):
             print(f"SHUTDOWN CRITICAL FAILURE: {shutdown_err}. Executing hard exit bypass.")
             self._force_application_exit()
 
-    def _refresh_name_rules(self) -> None:
-        r"""
-        Hand the inverter the rules this project is actually working to.
+    # -- the inversion cascade, which now lives in the core -----------------
+    #
+    # **These five methods were the whole of it, and none of them was about
+    # LaTeX.** Handing the cascade the rules in force, running the lookup off
+    # the UI thread, falling back to a rules-only answer, rebuilding after the
+    # database moves, and stopping the pool before the connection closes: all
+    # of that moved into `bookindexcore.naming.service` when the Word editor
+    # became the second caller, on the rule this project keeps -- fix the
+    # core, adapt every host, move the tests with it.
+    #
+    # What is left here is delegation and the two names this application's own
+    # code and tests already use.
 
-        **The inverter is built once, at startup, before any project is
-        open**, so it took ``NameRules()`` -- the package defaults -- and kept
-        them. Nothing ever gave it the project's. Every table on the
-        Presentation page was therefore edited into a record the inversion
-        cascade never read: a name added to *Direct order* still inverted, a
-        particle removed from the list was still absorbed.
+    @property
+    def name_inverter(self):
+        """The cascade the service is holding, or None."""
+        return self._names.inverter if self._names is not None else None
+
+    @name_inverter.setter
+    def name_inverter(self, value) -> None:
+        if self._names is not None:
+            self._names.inverter = value
+
+    def _refresh_name_rules(self) -> None:
+        """
+        Hand the cascade the rules this project is actually working to.
 
         Read at the point of use rather than pushed on change, because the
-        rules can move under this object from three directions -- the
-        preferences dialog, opening a project, closing one -- and a push would
-        have to be wired to all three and stay wired.
+        rules move under it from three directions -- the preferences dialog,
+        opening a project, closing one -- and a push would have to be wired to
+        all three and stay wired. **That is not a preference**: the inverter
+        used to be built at startup with the package defaults and keep them,
+        so every table on the Presentation page was edited into a record the
+        cascade never read.
         """
-        if self.name_inverter is None:
-            return
-        try:
-            self.name_inverter.rules = self.presentation_prefs.names()
-        except Exception as exc:
-            print(f"[NAME INVERSION] Could not read the project's name rules: {exc}")
+        self._names.refresh_rules()
 
     def reopen_name_database(self, path: str = "") -> None:
         """
-        Point the inverter at the name database's new home.
+        Point the cascade at the name database's new home.
 
-        Called after the Preferences page has moved the file. A relocation is
-        a file move, and the connection this object is holding is to the path
-        that used to exist -- sqlite keeps a deleted file open quite happily,
-        so without this every correction for the rest of the session would go
-        into a file nothing will ever read again.
-
-        The path is reported rather than obeyed: ``bookindexcore`` resolves
-        where the database is, and an application taking a path from a signal
-        and connecting to it directly is the arrangement this replaced.
+        Called after the Preferences page has moved the file. SQLite keeps a
+        deleted file open quite happily, so without this every correction for
+        the rest of the session would go into a file nothing will ever read
+        again. The path is reported rather than obeyed: `bookindexcore`
+        resolves where the database is.
         """
-        if self.name_inverter is None:
-            return
-        try:
-            rules, enabled = self.name_inverter.rules, self.name_inverter.viaf_enabled
-            self.name_inverter.close()
-            self.name_inverter = NameInverter.shared(
-                viaf_enabled=enabled, rules=rules)
-            print(f"[NAME INVERSION] Name database reopened at {path or 'its new location'}.")
-        except Exception as exc:
-            print(f"[NAME INVERSION] Could not reopen the name database: {exc}")
+        self._names.reopen()
+        print(f"[NAME INVERSION] Name database reopened at "
+              f"{path or 'its new location'}.")
 
     def invert_name(self, name: str, locale: Optional[str] = None,
                     prefer_authority: bool = True) -> NameInversionResult:
-        """Synchronous inversion -- safe for background work or unit tests.
-
-        Returns the whole NameInversionResult rather than a string: callers
-        need the authority heading and the rule-based suggestion separately in
-        order to offer both.
-        """
-        self._refresh_name_rules()
-        if self.name_inverter:
-            return self.name_inverter.invert(name, locale=locale, prefer_authority=prefer_authority)
-
-        # No inverter configured: still give a rule-based answer, but never
-        # reach for the network.
-        fallback = NameInverter(viaf_enabled=False)
-        try:
-            return fallback.invert(name, locale=locale, prefer_authority=False)
-        finally:
-            fallback.close()
+        """Synchronous inversion -- safe for background work or unit tests."""
+        return self._names.invert(name, language=locale or UNSTATED,
+                                  prefer_authority=prefer_authority)
 
     def _rule_only_inversion(self, name: str, locale: Optional[str] = None) -> NameInversionResult:
         """Offline last resort. Never raises, never touches the network."""
-        try:
-            return self.invert_name(name, locale=locale, prefer_authority=False)
-        except Exception:
-            return NameInversionResult(
-                display_value=name, authority_term=None,
-                rule_suggestion=name, used_authority=False)
+        return self._names.rule_only(name, locale or UNSTATED)
 
     def invert_name_async(self, name: str, callback: Callable[[NameInversionResult], None],
                           locale: Optional[str] = None, prefer_authority: bool = True) -> None:
-        """Run inversion, including the network lookup, off the UI thread.
+        """
+        Run inversion, including the network lookup, off the UI thread.
 
         `callback` runs on a worker thread and always receives a
-        NameInversionResult -- on failure it gets the rule-based inversion
-        rather than a bare string, so callers have one shape to handle. Marshal
-        to the UI thread before touching any widget.
+        `NameInversionResult`. Marshal to the UI thread before touching any
+        widget.
         """
-        if not self.name_inverter:
-            callback(self._rule_only_inversion(name, locale))
-            return
-
-        # Before the submit, not inside the worker: reading settings is the UI
-        # thread's business, and the rules have to be in place before the
-        # cascade runs on the other side of it.
-        self._refresh_name_rules()
-        future = self._executor.submit(self.name_inverter.invert, name, locale, prefer_authority)
-
-        def _done(fut):
-            try:
-                result = fut.result()
-            except Exception as exc:
-                print(f"[NAME INVERSION] Lookup failed for {name!r}: {exc}")
-                result = self._rule_only_inversion(name, locale)
-            try:
-                callback(result)
-            except Exception as exc:
-                print(f"[NAME INVERSION] Callback failed for {name!r}: {exc}")
-
-        future.add_done_callback(_done)
+        self._names.invert_async(name, callback, language=locale or UNSTATED,
+                                 prefer_authority=prefer_authority)
 
     def safely_terminate_application_lifecycle(self) -> None:
         """Ensures background worker threads are fully closed out before shutdown."""
@@ -2781,18 +2754,13 @@ class AppPipelineController(QObject):
         except Exception:
             pass
 
-        # Stop the pool before the cache connection goes away. Closing first
-        # left an in-flight lookup writing to a closed database. wait=False so
-        # a hung network call cannot stall the exit; a late write lands on a
-        # closed connection and is swallowed by NameInverter's own guards.
+        # The pool stops before the database connection does, and the service
+        # owns that order: closing the other way round leaves an in-flight
+        # lookup writing a correction into a closed connection, where the
+        # inverter's own guards swallow it and the indexer's decision is gone
+        # with nothing reported anywhere.
         try:
-            self._executor.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            pass
-
-        try:
-            if self.name_inverter:
-                self.name_inverter.close()
+            self._names.close()
         except Exception:
             pass
 
