@@ -273,7 +273,23 @@ class TestTheLanguageReachesTheDialog:
         resuggest = dialogs[0].resuggest
         assert resuggest is not None
         assert resuggest("Isa bin Sulman", "ar") == "Isa bin Sulman"
-        assert resuggest("Isa bin Sulman", UNSTATED) == "bin Sulman, Isa"
+
+        # **The language reaches the rules; it no longer changes this
+        # answer.** The core's N3 finding B gave the cascade a general filial
+        # rule that reads the connector's case for every name, so an unmarked
+        # `Isa bin Sulman` files in direct order too and what a stated `ar`
+        # decides is which rule owns it. The assertion moved to the delivery
+        # for that reason -- which is what this test's name claims anyway.
+        asked = []
+        original = pipeline._names.rule_only
+        monkeypatch.setattr(
+            pipeline._names, "rule_only",
+            lambda name, locale: (asked.append(locale)
+                                  or original(name, locale)))
+
+        resuggest("Isa bin Sulman", UNSTATED)
+        resuggest("Isa bin Sulman", "de")
+        assert asked == [UNSTATED, "de"]
 
 
 class TestAStatedLanguageOutlivesTheBook:

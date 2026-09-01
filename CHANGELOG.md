@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### One inversion test moved from asserting an answer to asserting a delivery
+
+The core's N3 finding B gave the cascade a general filial rule that reads a
+lowercase connector's case for every name, not only where an entry states
+Arabic. `test_the_dialog_is_given_a_way_to_re_ask_the_rules` proved that a
+language change re-asks the rules by showing that the answer changed for
+`Isa bin Sulman`, and the answer no longer does: the name files in direct
+order either way, and what a stated language now decides is which rule owns
+it.
+
+The test's own name is "is given a way to re-ask the rules", so it asserts
+that now, spying on `rule_only` and checking the locale it is handed. **A
+test whose vehicle is a worked example is testing two things**, the plumbing
+and the answer, and it fails when either moves. Nothing in this application
+changed.
+
 ### The inversion cascade moved into the core, and this application adopted it
 
 Five methods here did the whole of it -- `_refresh_name_rules`,
