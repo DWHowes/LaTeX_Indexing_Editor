@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### A name marked Chinese, Korean, Vietnamese, Hmong or Thai files differently
+
+No code here changed, but the headings this application suggests did. The
+core's N3 findings F, G, H and M replaced the CJK boolean with a per-language
+declaration of the **heading form**, and the shared Presentation page has a
+row for each: `Mao Zedong` marked `zh` now suggests `Mao, Zedong` rather than
+being left alone, Thai and Vietnamese are left as written rather than
+inverted, and a Japanese name inverts like any other because in a
+Western-language book it is given in Western order.
+
+An unmarked name is unaffected: no rule reading the string can tell
+`Mao Zedong` from an English name of the same shape, which is what the
+per-entry language and the direct-order table are both for.
+
 ### The inversion dialog is told which prefixes are read for their case
 
 The core's N3 finding I puts a note under the authority's value saying that
