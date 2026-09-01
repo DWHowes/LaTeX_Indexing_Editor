@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### The core wiring sweep, ported from the Word editor
+
+`probes/probe_core_wiring.py` measures which of `bookindexcore`'s capabilities
+this application actually reaches, in the four shapes the "added but not wired
+in" fault takes: a core module with no caller, a preferences key collected and
+stored by nothing, a store written and never read back, and a signal or page
+the shared window offers that nothing here takes. It reports rather than
+asserts, and declares the answers that are deliberately negative so the list
+stays short enough to read. `probes/core_wiring_sweep.md` is the first run.
+
+Three things the port had to change, and one it improved. This host is three
+directories and a `main.py` rather than one package under `src/`; the LaTeX
+pages' keys are a dataclass rather than a defaults dict; and **the General tab
+has no defaults dict at all**, so the probe parses
+`update_general_preferences` for the keys it writes. That last is the better
+measurement of the three: it reads the code that does the storing, so a key
+dropped from the method shows up the day it is dropped, where a declared dict
+would go on promising it.
+
+**The first run found that the Table of Authorities is built here and cannot
+be reached.** The shared Authorities page shows, collects its two keys on OK,
+and nothing stores either or populates the page, so a citation standard set by
+an indexer goes nowhere and the page's construction default is written over it
+next time. Following that turned up `controllers/toa_controller.py`, which has
+no caller anywhere in this application: the emission code is written and
+tested and there is no route to it from the interface. Reported, not repaired;
+wiring it is scoped work.
+
+Two shared dialogs are also unreached: the standalone heading-language dialog,
+so a language can be stated here only while inverting a name, and
+`ui.progress_dialog`, where the compile step builds Qt's own instead.
+
 ### A Spanish or Portuguese name with two given names inverts correctly
 
 No code here changed. The core's N3 finding O replaced a guess in the Iberian
