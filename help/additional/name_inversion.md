@@ -88,6 +88,60 @@ Your choice fills in a list of words on **Preferences → Sorting**, under *By l
 
 None of this touches a heading you have not given a language to.
 
+## Irish names, and the one choice you have to make
+
+Irish surnames carry a prefix, and the prefix changes with the sex and marital
+status of the person: *Seán Ó Ceallaigh*, his wife *Uí Cheallaigh*, his
+unmarried daughter *Ní Cheallaigh*, with the same three answers again in
+*Mac*, *Mhic* and *Nic*. The letter after the prefix changes too, which is why
+one family can end up in three places in an index.
+
+There are two published conventions and **Preferences → Presentation** asks
+which one this project follows.
+
+- **On the prefix** — *Ó Súilleabháin, Seán*, filed under **Ó**. This is what
+  AACR2 and *Chicago* require, what most Irish libraries do, and what this
+  application does unless you say otherwise. It is also what you already do
+  with *O'Brien* and *MacDonald*.
+- **On the main word** — *Súilleabháin, Seán Ó*, filed under **S**. A real
+  minority convention: MacLysaght's *Surnames of Ireland* files this way, and
+  it spreads out the pile of entries under O and Mac.
+
+The setting governs *Mac* along with the rest, so an index cannot end up
+filing *Mac Tomáis* one way and *Mhic Thomáis* the other.
+
+**If you choose the main word**, a second setting on **Preferences → Sorting**
+is turned on for you: an Irish woman's name is then filed on the form of the
+element without the lenition, so *Cheallaigh, Máire Ní* files at *ceallaigh*
+beside her father instead of two letters away. It knows the surnames where the
+*h* is part of the name and not a mutation, so *Mac Bhroin* and *Nic Bhroin*
+stay together too.
+
+### A lower-case mac is not a surname
+
+*Fergus mac Léti* is older than surnames — the *mac* means a literal "son of"
+— so the name is left exactly as it is and files under **F**. Written with a
+capital, *Mac* is a surname prefix and the name inverts. The capital letter is
+the whole of the difference, and the words this applies to are listed on
+**Preferences → Presentation**.
+
+### Mc and Mac
+
+By default they file where they are spelled, which is what *Chicago* asks for,
+so *McMahon* and *MacMahon* sit apart. **Preferences → Sorting** has a setting
+that files *Mc* as *Mac* so the two sit together; some indexing programs do
+this by default and some do not, and a cross-reference is the other remedy.
+
+### The women's forms
+
+If the index contains both *Ní Cheallaigh, Máire* and *Ó Ceallaigh, Seán*,
+**Check Index** can point it out, under *Irish wife's or daughter's form
+beside the masculine*. It is switched off until you ask for it, and it never
+changes anything: most Irish cataloguing practice would refer from her form to
+his, and the indexer who wrote the standard article on this argues that an
+index entry refers to a specific woman and her own form should stand. Both are
+defensible, so the decision stays yours.
+
 ## See also
 
 - [Editing Entries in the Table](../entry_table/editing.md)
