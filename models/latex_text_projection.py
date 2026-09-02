@@ -71,9 +71,32 @@ __all__ = ["ESCAPED_LITERALS", "OPAQUE_MACROS", "project", "projected_lines"]
 #: length is unchanged and the offsets stay exact -- `\&` becomes ` &`. The
 #: leading space is harmless: it falls where a backslash was, between words,
 #: and `display_for` folds whitespace runs anyway.
+#: **The named ones were missing and a real book found it**, which is the
+#: same story one paragraph up told about the ampersand. Running the Table of
+#: Authorities over a LaTeX manuscript on 1 September 2026 showed
+#: `42 U.S.C. \S 2000e` projecting to `42 U.S.C.    2000e`: the section sign
+#: gone, and with it the one character that says *statute*. Given the sign the
+#: parser reads that as a statute; given the projection it reads it as a case
+#: with no parties and files *42 U.S.C. 2000* in the Table of Cases.
+#:
+#: `\S` and `\P` are the two that matter here -- section and paragraph are
+#: how legislation is cited in US, Canadian and German practice -- and the
+#: rest are on the same footing: a control word that prints one ordinary
+#: character a reader sees.
 ESCAPED_LITERALS = {
     r"\&": "&", r"\%": "%", r"\$": "$", r"\#": "#",
     r"\_": "_", r"\{": "{", r"\}": "}",
+    # Named, and the reason this list grew.
+    r"\S": "§", r"\P": "¶",
+    r"\textsection": "§", r"\textparagraph": "¶",
+    r"\dag": "†", r"\ddag": "‡",
+    r"\textdagger": "†", r"\textdaggerdbl": "‡",
+    r"\pounds": "£", r"\textsterling": "£",
+    r"\texteuro": "€", r"\textdegree": "°",
+    r"\copyright": "©", r"\textcopyright": "©",
+    r"\textregistered": "®", r"\texttrademark": "™",
+    r"\textemdash": "—", r"\textendash": "–",
+    r"\ldots": "…", r"\textellipsis": "…",
 }
 
 #: A control sequence: a backslash and letters, or a backslash and one

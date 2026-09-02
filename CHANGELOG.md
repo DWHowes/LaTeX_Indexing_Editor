@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+### A named symbol macro keeps its character in the projection
+
+`ESCAPED_LITERALS` held the seven *escaped punctuation* forms and none of the
+**named** ones, so `\S` was blanked with the rest of the markup:
+
+    42 U.S.C. \S 2000e   ->   42 U.S.C.    2000e
+
+Given a real section sign the citation parser reads that as a **statute**.
+Given the projection it read the remains as a **case with no parties** and
+filed *42 U.S.C. 2000* in the Table of Cases.
+
+**Nothing failed.** The parse was clean, the projection kept its length
+contract, the suite was green, and the table looked plausible. It is the same
+story the ampersand told in that module's own docstring one class of macro
+along, and it was found the same way: by running the pass over a real book,
+not by a test.
+
+`\S` and `\P` are the two that matter, section and paragraph being how
+legislation is cited in US, Canadian and German practice; the rest of the
+named symbols went in with them, on the same footing. The character is placed
+at the end of the span it replaces, so the length contract holds.
+
+Three regression tests, and **one of them is a guard**: writing this fix
+through a shell heredoc put a tab character into four of the new keys, and
+nothing failed then either. A malformed key never matches, which is the
+quietest way for a lookup table to lose an entry, and it was caught by the
+test beside it that asserted an actual projection.
+
+### The Table of Authorities, measured on a real project
+
+The indexer supplied a LaTeX thesis of 30 files and 698,289 characters. It is
+a sociology book rather than a legal one, so what this measures is the
+machinery, not the recall.
+
+- **0.5 seconds per million characters.** The Word editor's equivalent pass
+  took 224 seconds on about a million; this is roughly **450 times faster**,
+  because it reads plain files and computes offsets where the other drives
+  Word through COM. The progress dialog is belt and braces now rather than a
+  necessity.
+- **The projection holds up on real markup**: 698,289 source characters to
+  695,359 non-blank projected, reading as clean prose.
+- **0 authorities found and 0 false positives**, against 20
+  years-in-parentheses, 9 uses of *v.* in prose and 227 `\citep` calls. Zero
+  is the right answer for this book, and the absence of spurious rows is the
+  useful half of it.
+
+Recall on a legal text remains unmeasured, and is now the only part that is.
+
 ### A name's language can be stated without a lookup
 
 **Set name language...**, beside *Invert name* on the entry table's context

@@ -66,6 +66,22 @@ class _Backend:
         return self._files[container]
 
 
+def _readable(item) -> str:
+    """
+    An unrecognised authority as a person would read it.
+
+    **The first real run printed the dataclass repr**, which was three lines
+    of `ReporterCite(volume=..., reporter=..., page=...)` per row and unusable
+    as a report. What the indexer needs is the text the book actually
+    contained, which is on the occurrence.
+    """
+    for occurrence in getattr(item, "occurrences", ()) or ():
+        source = getattr(occurrence, "source_text", "")
+        if source:
+            return " ".join(source.split())
+    return " ".join(str(item).split())[:120]
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("files", nargs="+", help="the project's .tex files")
@@ -117,7 +133,7 @@ def main(argv=None) -> int:
     print(f"  {len(plan.unknown)} abbreviation(s) no citation table "
           f"recognises")
     for item in list(plan.unknown)[:10]:
-        print(f"    {item}")
+        print(f"    {_readable(item)}")
     print()
 
     print(f"The table, first {args.rows} rows")

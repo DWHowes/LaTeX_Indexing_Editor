@@ -89,6 +89,56 @@ class TestTheProjection:
         assert project("a\nb") == "a\nb"
         assert "\n" in project("\\textit{a\nb}")
 
+    def test_a_named_symbol_macro_keeps_its_character(self):
+        r"""
+        **Found by running the pass over a real book**, 1 September 2026, and
+        it is the ampersand story a second time: `ESCAPED_LITERALS` held the
+        seven *escaped punctuation* forms and none of the **named** ones, so
+        `\S` was blanked with the rest of the markup.
+
+        `42 U.S.C. \S 2000e` projected to `42 U.S.C.    2000e` -- the section
+        sign gone, and with it the one character that says *statute*. The
+        parser then read the remains as a **case** with no parties and filed
+        *42 U.S.C. 2000* in the Table of Cases. Nothing failed: the parse was
+        clean and the table looked plausible.
+
+        `\S` and `\P` are the two that matter for a table of authorities,
+        because section and paragraph are how legislation is cited in US,
+        Canadian and German practice.
+        """
+        assert project(r"\S 4") == " § 4"
+        assert project(r"\P 2") == " ¶ 2"
+        assert project("\\textsection 4") == "           § 4"
+
+    def test_the_section_sign_is_what_makes_it_a_statute(self):
+        r"""
+        The end of the same finding, asserted where it is visible: with the
+        sign it is a statute, and the whole point of keeping the character is
+        that the parser is already right about it.
+        """
+        text = project(r"The Civil Rights Act of 1964, 42 U.S.C. \S 2000e.")
+        found = CitationParser(BLUEBOOK).parse(text)
+
+        assert [citation.category for citation in found] == ["statute"]
+
+    def test_every_literal_is_a_control_sequence(self):
+        """
+        A guard, after a hand-edit put a **tab character** into four of these
+        keys: a backslash-t written through a shell heredoc was interpreted
+        before Python ever saw it, so `\\textsection` and its three neighbours
+        arrived as tab-plus-`extsection`.
+
+        **Nothing failed.** A malformed key simply never matches, which is
+        the quietest way for this table to lose an entry, and the suite stayed
+        green through all four. It was caught by the test above it, which
+        asserted an actual projection.
+        """
+        from models.latex_text_projection import ESCAPED_LITERALS
+
+        assert all(key.startswith("\\") and len(key) > 1
+                   for key in ESCAPED_LITERALS)
+        assert all(len(value) == 1 for value in ESCAPED_LITERALS.values())
+
     def test_a_comment_is_not_prose(self):
         found = CitationParser(BLUEBOOK).parse(project(
             "% Roe v. Wade, 410 U.S. 113 (1973) in a comment\nreal text"))
