@@ -247,6 +247,12 @@ STORES = (
     ("check_index_prefs", "CHECK_INDEX_DEFAULTS"),
     ("sort_prefs", "SORT_PREFS_DEFAULTS"),
     ("presentation_prefs", "PRESENTATION_DEFAULTS"),
+    # Added 1 September 2026 with the store itself. The probe reported this
+    # page's two keys as dropped on its first run, which was right: there was
+    # no store. Adding one is exactly half the fix, and this line is the
+    # other half -- **a store this list does not name is a store the probe
+    # cannot see**, and would go on reporting a gap that had been closed.
+    ("toa_prefs", "TOA_DEFAULTS"),
 )
 
 #: The dataclass holding the LaTeX pages' own keys. **The second thing the

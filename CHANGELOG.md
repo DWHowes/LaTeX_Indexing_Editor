@@ -2,6 +2,71 @@
 
 ## Unreleased
 
+### The Table of Authorities is reachable
+
+Built at T3b, tested by nothing, reachable from nothing, and shown as present
+the whole time by a preferences page that stored nothing. Found by
+`probes/probe_core_wiring.py` on its first run.
+
+**`Tools -> Build Table of Authorities...`** reads the project for citations,
+shows the plan, and writes an `\index` macro for every authority the indexer
+keeps, as one undoable command. Five pieces, and each was missing:
+
+- **`models/toa_prefs.py`**, the store. Project-scoped like the sort and
+  Check Index settings, which is the one place this deliberately differs from
+  the Word editor's flat one: *the citation standard is a property of the
+  book*, and an indexer who sets McGill on one manuscript must not find it
+  following them into the next. The shipped default is the core's own
+  `DEFAULT_SYSTEM`, because the shared page offers that first and the two have
+  to agree or a book would be parsed under one standard while the page said
+  another.
+- **The preferences wiring.** `populate_authorities_fields` on the way in,
+  `toa_prefs.save` on the way out. The page had been collecting its two keys
+  on OK and handing them to nothing, so a standard an indexer chose went
+  nowhere *and* the construction default was written over it next time.
+- **The menu action**, and the handler behind it. It reads the standard from
+  the project rather than choosing one, shows the review dialog before
+  anything is written, and marks the project dirty only when something was.
+- **A review surface.** `ToaReviewDialog` is shared now: it lists the
+  authorities rather than the macros, because a book plans hundreds of macros
+  for a few dozen authorities, and what is ticked is an authority, so
+  unticking one drops every macro that would have been written for it.
+- **Progress and cancel.** `build_plan` gained `on_progress` and
+  `should_cancel`, counted in containers, and the shared `ProgressDialog`
+  drives them. *A pass with no progress is indistinguishable from a hang.* A
+  cancelled run returns an **empty** plan and not a partial one: a table of
+  authorities is judged on completeness, so half a table is not a smaller
+  table, it is a wrong one.
+
+**The house style acts rather than being recorded.** `build_plan` takes
+`house` and reads it through the core's new `arrangement_for`, so a publisher
+profile decides the arrangement and nothing earlier -- it cannot cost an
+indexer a citation. Storing a key that acted on nothing would have been the
+same defect the sweep exists to report, one layer down.
+
+**The preamble goes into the generated block, not only into a message.** The
+macros are inert without `\makeindex` and `\printindex` lines, and an indexer
+who reads a summary and closes it has still built a table that will not print.
+`IndexPrefsData` gained `toa_declarations` and `toa_printindex`, written by
+the run: they cannot be derived from the settings, because which declarations
+a book needs depends on which categories it actually cites. The `\printindex`
+calls sit **outside** the multicols wrapper -- a table of authorities is a
+short list read by looking up a case name, and setting it in two columns
+because the subject index wanted them is a decision nobody made.
+
+**`controllers/toa_controller.py` has tests now**, and had none. The one that
+matters is the refusal: a backend refuses an edit whose span no longer reads
+as expected, and one refused citation is a citation missing from the table,
+not a reason to abandon the other four hundred.
+
+**The end-to-end pass is unverified and this is the notice.** There is no
+LaTeX corpus on the machine this was built on, so every test above runs over
+a fixture of a few paragraphs. `probes/probe_toa_real_book.py` builds the plan
+over files named on the command line, **writes nothing**, and reports the
+timing, the unresolved short forms, the unrecognised abbreviations and a
+sample of the table. Until that has been run on a book, the numbers this
+feature produces on one are unknown.
+
 ### The core wiring sweep, ported from the Word editor
 
 `probes/probe_core_wiring.py` measures which of `bookindexcore`'s capabilities

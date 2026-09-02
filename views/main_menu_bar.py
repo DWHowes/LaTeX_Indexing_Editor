@@ -31,6 +31,7 @@ class MainMenuBar(QMenuBar):
     resync_index_data_requested = Signal()
     repair_entries_requested = Signal()
     check_index_requested = Signal()
+    build_toa_requested = Signal()
     resync_workspace_files_requested = Signal()
     manage_pruned_files_requested = Signal()
     index_statistics_requested = Signal()
@@ -174,6 +175,22 @@ class MainMenuBar(QMenuBar):
             lambda: self.repair_entries_requested.emit())
         self.repair_entries_action.setEnabled(False)
 
+        # Reads the whole project for citations, shows the table it would
+        # build, and writes an `\index` macro for every authority the indexer
+        # keeps -- as one undoable command. Starts disabled: it has nothing to
+        # read until a project is open.
+        #
+        # The emission and its controller were written at T3b and had no menu
+        # action for months, which `probes/probe_core_wiring.py` found on its
+        # first run: the Authorities preferences page was visible the whole
+        # time, so the feature looked present from the one surface an indexer
+        # would check.
+        self.build_toa_action = tools_menu.addAction(
+            "Build Table of &Authorities...")
+        self.build_toa_action.triggered.connect(
+            lambda: self.build_toa_requested.emit())
+        self.build_toa_action.setEnabled(False)
+
         tools_menu.addSeparator()
 
         # Ctrl+B is already bound to "Focus File Pane" above; use a distinct shortcut.
@@ -281,6 +298,7 @@ class MainMenuBar(QMenuBar):
         self.migrate_legacy_xrefs_action.setEnabled(is_enabled)
         self.repair_entries_action.setEnabled(is_enabled)
         self.check_index_action.setEnabled(is_enabled)
+        self.build_toa_action.setEnabled(is_enabled)
         # Project closing always forces this off immediately. Project opening
         # only forces it as far as "project is open" -- whether a base file
         # has ALSO been chosen is re-checked separately whenever the Edit

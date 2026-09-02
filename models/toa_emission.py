@@ -67,6 +67,7 @@ from bookindexcore.authorities import (
     assemble,
     merge_citations,
 )
+from bookindexcore.authorities.house_profiles import arrangement_for
 from bookindexcore.sorting import SortRules
 
 from .index_tag_grammar import escape_for_makeindex
@@ -294,7 +295,8 @@ def _macro(name: str, path: Sequence[tuple]) -> str:
 
 
 def build_plan(backend, system, rules: SortRules, *,
-               in_toc: bool = True) -> ToaPlan:
+               in_toc: bool = True, house=None,
+               on_progress=None, should_cancel=None) -> ToaPlan:
     """
     Read a manuscript, find its authorities, and describe the entries to write.
 
@@ -302,12 +304,37 @@ def build_plan(backend, system, rules: SortRules, *,
     :class:`~bookindexcore.backend.base.DocumentBackend`; only its read half is
     used, which is the same subset §8.17 identified when it argued that a
     paginated source is not a backend.
+
+    ``house`` is the publisher's specification, and **it decides the
+    arrangement and never what was found**:
+    :func:`~bookindexcore.authorities.house_profiles.arrangement_for` turns it
+    into the four arguments `assemble` takes, and nothing earlier in this
+    function can see it. So a publisher's choice cannot cost an indexer a
+    citation. None is the standard's own conventions, which is what a project
+    that has not answered the question gets.
+
+    ``on_progress`` is ``(done, total) -> None`` and ``should_cancel`` is
+    ``() -> bool``, both optional and both counted **in containers**, which is
+    the only unit this function knows before it has read anything. The pass is
+    slow enough to need them: the same work over a Word manuscript read a
+    million characters and took 224 seconds, and *a pass with no progress is
+    indistinguishable from a hang.*
+
+    A cancelled run returns an **empty plan** rather than a partial one. A
+    table of authorities is judged on completeness, so half a table is not a
+    smaller table -- it is a wrong one, and the difference is invisible once
+    it is on the page.
     """
     parser = CitationParser(system)
     found = []
-    for container in backend.containers():
+    containers = list(backend.containers())
+    for index, container in enumerate(containers):
+        if should_cancel is not None and should_cancel():
+            return ToaPlan(entries=(), preamble=(), table=None)
         found.extend(_citations_in(container, backend.read_text(container),
                                    parser))
+        if on_progress is not None:
+            on_progress(index + 1, len(containers))
 
     # Merging has to cross containers -- an authority cited in chapter 2 and
     # chapter 9 is one entry -- while a Citation carries an offset and no
@@ -325,7 +352,8 @@ def build_plan(backend, system, rules: SortRules, *,
         base += (end - start) + 1
 
     merged = merge_citations(shifted, system=system)
-    table = assemble(shifted, system, rules, merged=merged)
+    table = assemble(shifted, system, rules, merged=merged,
+                     **arrangement_for(house, system))
     paths = _leaf_paths(table)
 
     entries = []

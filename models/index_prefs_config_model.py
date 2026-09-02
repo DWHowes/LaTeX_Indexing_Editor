@@ -27,6 +27,22 @@ class IndexPrefsData:
     # "makeindex" or "xindy". Both ship as part of the standard pdfLaTeX/
     # TeX Live distribution. The remaining makeindex_*/xindy_* fields are
     # engine-specific and only one set applies at a time, per index_engine.
+    # The Table of Authorities' own declarations, written by the ToA run and
+    # nothing else.
+    #
+    # **They cannot be derived from the settings above**, which is why they
+    # are stored rather than generated: which `\makeindex[name=toacases]`
+    # lines a book needs depends on which categories it actually cites, and
+    # only a plan built over the manuscript knows that. An empty index prints
+    # a heading with nothing under it, which tells a reader the book cites
+    # regulations when it does not.
+    #
+    # Two fields rather than one because the generated block has two halves
+    # and they go in different places: declarations before `\begin{document}`,
+    # `\printindex` calls before `\end{document}`. N3's wiring, 1 September
+    # 2026.
+    toa_declarations: str = ""
+    toa_printindex: str = ""
     index_engine: str = "makeindex"
     # Absolute path to the active engine's executable (makeindex.exe or
     # xindy.exe, depending on index_engine). Cleared whenever index_engine
@@ -516,6 +532,13 @@ class IndexPrefsConfigModel:
         if d.printindex_use_multicols:
             lines.append("\\usepackage{multicol}")
 
+        # Last, and only where a table of authorities has been built: these
+        # are the book's own lines rather than the settings'. See
+        # `toa_declarations` for why they are stored and not derived.
+        if d.toa_declarations:
+            lines.append("% Table of Authorities")
+            lines.extend(d.toa_declarations.splitlines())
+
         return "\n".join(lines)
 
     def generate_printindex_snippet(self) -> str:
@@ -524,6 +547,11 @@ class IndexPrefsConfigModel:
         injection immediately before \end{document} in the project's base
         file. Wrapped in a multicols environment when printindex_use_multicols
         is set (using the same column count as imakeidx_columns).
+
+        The table of authorities' own \printindex calls follow it, **outside
+        the multicols wrapper**: a table of authorities is a short list read
+        by looking up a case name, and setting it in two columns beside a
+        subject index that wanted them is a decision nobody made.
         """
         d = self._data
         cmd_name = d.printindex_command.lstrip("\\").strip() or "printindex"
@@ -531,5 +559,8 @@ class IndexPrefsConfigModel:
 
         if d.printindex_use_multicols:
             cols = d.imakeidx_columns if d.use_imakeidx else 2
-            return f"\\begin{{multicols}}{{{cols}}}\n{command}\n\\end{{multicols}}"
+            command = (f"\\begin{{multicols}}{{{cols}}}\n{command}\n"
+                       f"\\end{{multicols}}")
+        if d.toa_printindex:
+            command += "\n" + d.toa_printindex
         return command

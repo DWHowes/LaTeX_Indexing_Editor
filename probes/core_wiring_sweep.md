@@ -114,11 +114,33 @@ a finding rather than a coincidence.** Most of what that host declines it
 declines for being LaTeX-shaped — the sidecar, the prenote, the macro ids, the
 source view — and every one of those is used here.
 
+## Finding 1, closed 1 September 2026
+
+The Table of Authorities is wired. `Tools -> Build Table of Authorities...`
+reads the project, shows the shared review dialog, writes an `\index` macro
+for every authority the indexer keeps, and puts the `\makeindex` and
+`\printindex` lines into the generated preamble block. `models/toa_prefs.py`
+is the store and the preferences flow both populates and saves it.
+
+**Two of the other findings closed with it, which is worth noticing.**
+`ui.progress_dialog` is the progress and cancel surface for the pass, so the
+duplication question answered itself; and `populate_authorities_fields` is
+called, so section 4 is empty. A feature that was missing pulled in two
+shared components that were sitting unused, because they were what it needed.
+
+`STORES` in the probe gained `toa_prefs` at the same time. **Adding a store
+is half the fix and naming it here is the other half** -- a store this list
+does not know about is one the probe cannot see, and it would have gone on
+reporting a gap that had been closed.
+
 ## What the indexer is owed a decision on
 
-1. **The Table of Authorities.** Wiring it is a menu action, a store, a
-   controller construction and a populate call, with tests and documentation.
-   Not started; it is a scoped piece of work rather than a repair.
-2. **The standalone heading-language dialog.** Small, and it makes a
-   mechanism this application already has reachable without inverting a name.
-3. **`ui.progress_dialog`.** Adopt the shared one or declare the local one.
+1. **The standalone heading-language dialog.** Still open. Small, and it makes
+   a mechanism this application already has reachable without inverting a
+   name: today a language can be stated here only while a name is being
+   inverted.
+2. **The end-to-end pass is unverified.** There is no LaTeX corpus on this
+   machine, so everything above is tested over fixtures of a few paragraphs.
+   `probes/probe_toa_real_book.py` is what to run against a real book; it
+   writes nothing, and what it reports is the timing, the two residue counts,
+   and a sample of the table.

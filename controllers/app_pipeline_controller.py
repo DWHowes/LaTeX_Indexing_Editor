@@ -1,3 +1,4 @@
+import dataclasses
 import os
 from shiboken6 import isValid  # PySide6 C++ lifetime validator
 from pathlib import Path
@@ -52,6 +53,9 @@ from controllers.check_index_controller import CheckIndexController
 from models.check_index_prefs import CheckIndexPrefs
 from models.presentation_prefs import PresentationPrefs
 from models.sort_prefs import SortPrefs
+from models.toa_prefs import ToaPrefs
+from models.toa_emission import build_plan as build_toa_plan, preamble_for
+from controllers.toa_controller import ToaController
 from controllers.index_edit_controller import IndexEditController
 from controllers.latex_text_backend import LatexTextBackend
 from controllers.range_consistency_controller import RangeConsistencyController
@@ -61,6 +65,9 @@ from models.app_paths import get_app_root
 from models.app_version import app_identity
 from bookindexcore.ui.help.controller import HelpController
 
+from bookindexcore.authorities import house_style_for, system_for
+from bookindexcore.ui.dialogs.toa_review import ToaReviewDialog
+from bookindexcore.ui.progress_dialog import ProgressDialog
 from bookindexcore.ui.style import AppStyleConfiguration
 from bookindexcore.ui.window import WindowLayoutState
 from views.editor_tab import EditorTab
@@ -274,6 +281,8 @@ class AppPipelineController(QObject):
             global_store=self.prefs.global_store("SortPrefs/global"))
         self.presentation_prefs = PresentationPrefs(
             global_store=self.prefs.global_store("PresentationPrefs/global"))
+        self.toa_prefs = ToaPrefs(
+            global_store=self.prefs.global_store("ToaPrefs/global"))
 
         self._index_prefs_ctrl = IndexPrefsConfigController(model=self._index_prefs_model,
                                                             prefs_persistence=self.prefs,
@@ -281,6 +290,7 @@ class AppPipelineController(QObject):
                                                             check_index_prefs=self.check_index_prefs,
                                                             sort_prefs=self.sort_prefs,
                                                             presentation_prefs=self.presentation_prefs,
+                                                            toa_prefs=self.toa_prefs,
                                                             parent_window=self.window,
                                                             on_general_changed=self.apply_general_preferences,
                                                             on_name_database_moved=self.reopen_name_database,
@@ -401,6 +411,7 @@ class AppPipelineController(QObject):
         self.window.menu_bar.resync_index_data_requested.connect(self._handle_manual_resync_request)
         self.window.menu_bar.repair_entries_requested.connect(self._handle_repair_entries_request)
         self.window.menu_bar.check_index_requested.connect(self._handle_check_index_request)
+        self.window.menu_bar.build_toa_requested.connect(self._handle_build_toa_request)
         self.window.menu_bar.resync_workspace_files_requested.connect(self._handle_manual_workspace_resync_request)
         self.window.menu_bar.manage_pruned_files_requested.connect(self.pruned_files_ctrl.manage_pruned_files)
 
@@ -1422,6 +1433,7 @@ class AppPipelineController(QObject):
         self.check_index_prefs.open_project(self.scope_ctrl.get_persistence_model())
         self.sort_prefs.open_project(self.scope_ctrl.get_persistence_model())
         self.presentation_prefs.open_project(self.scope_ctrl.get_persistence_model())
+        self.toa_prefs.open_project(self.scope_ctrl.get_persistence_model())
         self.window.status_bar.showMessage(f"Project '{project_name}' loaded successfully.", 3000)
 
         # Enable menu items that are gated behind an active project context
@@ -2004,6 +2016,133 @@ class AppPipelineController(QObject):
         dialog.apply_theme_configuration(bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode")))
         dialog.exec()
 
+    @Slot()
+    def _handle_build_toa_request(self) -> None:
+        r"""
+        Build a Table of Authorities and write it into the manuscript.
+
+        **The emission has existed since T3b and had no way in.**
+        `models.toa_emission` and `controllers.toa_controller` were written,
+        tested, and reachable from nothing; the Authorities preferences page
+        was visible the whole time, so from the one surface an indexer would
+        check the feature looked present. `probes/probe_core_wiring.py` found
+        it on its first run, 1 September 2026.
+
+        Four steps, and the order of them is the whole design.
+
+        **Read the standard from the project, not from here.** The citation
+        system and the publisher's house style are the book's, stored by
+        `ToaPrefs` and chosen on the shared Authorities page. A default
+        chosen in this method would be a standard nobody selected.
+
+        **Show the plan before writing it.** `ToaReviewDialog` lists the
+        authorities rather than the macros -- a book plans hundreds of macros
+        for a few dozen authorities -- and what is ticked is an authority, so
+        unticking one drops every macro that would have been written for it.
+
+        **One run is one undo.** Every macro goes through the ordinary edit
+        controller, so an indexer who dislikes the result presses undo once
+        and one who closes without saving has changed nothing on disk.
+
+        **Say what the preamble needs.** The macros are useless without the
+        matching `\makeindex` and `\printindex` lines, and this application
+        does not write another author's preamble. The note names them, and
+        the LaTeX Settings page's generated block carries them.
+        """
+        if self.scope_ctrl.active_project_name == "Untitled Project":
+            self.window.status_bar.showMessage("No project is open.", 3000)
+            return
+        if self.text_backend is None or not self.text_backend.containers():
+            self.window.status_bar.showMessage(
+                "There is nothing to read yet.", 3000)
+            return
+
+        try:
+            system = system_for(self.toa_prefs.system_name())
+            house = house_style_for(self.toa_prefs.house_name())
+        except (KeyError, ValueError) as error:
+            # A stored name no build recognises. Said rather than swallowed:
+            # the alternative is a table silently built to the wrong standard.
+            QMessageBox.warning(
+                self.window, "Citation standard not recognised",
+                f"{error}\n\nChoose one on the Authorities preferences page.")
+            return
+
+        progress = ProgressDialog(0, None, self.window)
+        progress.setWindowTitle("Reading the manuscript")
+        progress.show()
+        QApplication.processEvents()
+        try:
+            plan = build_toa_plan(
+                self.text_backend, system, self.sort_prefs.rules(),
+                house=house,
+                on_progress=lambda done, total: (
+                    progress.advance(done, total),
+                    QApplication.processEvents()),
+                should_cancel=progress.should_cancel)
+        finally:
+            progress.close()
+
+        if progress.cancelled:
+            self.window.status_bar.showMessage(
+                "Table of authorities cancelled.", 3000)
+            return
+        if plan.is_empty:
+            QMessageBox.information(
+                self.window, "No authorities found",
+                "Nothing in this project parses as a citation, so there is no "
+                "table to build. A subject index reports this, and it is the "
+                "right answer for one.")
+            return
+
+        # No `apply_theme_configuration` call: the review dialog sets no
+        # colours of its own, so it takes the application palette like every
+        # other plain dialog. The two shared dialogs that *do* take one --
+        # About and Statistics -- have hand-set colours to swap.
+        dialog = ToaReviewDialog(plan, self.window,
+                                 accept_label="Write the macros")
+        if dialog.exec() != ToaReviewDialog.DialogCode.Accepted:
+            self.window.status_bar.showMessage("No macros were written.", 3000)
+            return
+
+        accepted = dialog.accepted_entries()
+        if not accepted:
+            self.window.status_bar.showMessage("No macros were written.", 3000)
+            return
+
+        controller = ToaController(self.text_backend, system,
+                                   self.sort_prefs.rules())
+        result = controller.apply(dataclasses.replace(plan, entries=accepted))
+
+        # **The declarations go into the generated block as well as into the
+        # message.** The macros are inert without them, and an indexer who
+        # reads a summary and closes it has still built a table that will not
+        # print. Written only where something was, so a cancelled run leaves
+        # no declarations for indexes that do not exist.
+        if result.written:
+            declarations, prints = preamble_for(plan.table, in_toc=True)
+            self._index_prefs_model.update_data({
+                "toa_declarations": "\n".join(declarations),
+                "toa_printindex": "\n".join(prints),
+            })
+            persistence = (self.scope_ctrl.get_persistence_model()
+                           if self.scope_ctrl else None)
+            if persistence is not None:
+                self._index_prefs_model.persist_to_project(persistence)
+
+        note = ToaController.preamble_note(plan)
+        message = result.summary()
+        if note:
+            message += ("\n\nThe table will not print until the preamble "
+                        "carries these lines. They are in the LaTeX Settings "
+                        "page's generated block as well.\n\n" + note)
+        QMessageBox.information(self.window, "Table of Authorities", message)
+        # Dirty only when something was written, on the bulk-repair rule: a
+        # run that wrote nothing must not leave a project looking modified.
+        if result.written:
+            self._tree_modified = True
+        self.window.status_bar.showMessage(result.summary(), 4000)
+
     def _resync_index_data_from_disk(self) -> None:
         """
         Fully re-scans every .tex file in the project from disk and
@@ -2457,6 +2596,7 @@ class AppPipelineController(QObject):
         self.check_index_prefs.close_project()
         self.sort_prefs.close_project()
         self.presentation_prefs.close_project()
+        self.toa_prefs.close_project()
         self._refresh_index_command_options()
 
         self._tree_modified = False

@@ -1901,3 +1901,40 @@ it.
 `sample_project_dir` (in the root `conftest.py`) copies this into a fresh
 `tmp_path` per test, so tests that mutate files on disk never affect the
 checked-in fixture or leak state between tests.
+
+## The Table of Authorities, wired at last
+
+Three files were added at once and they are best read in that order:
+`tests/unit/models/test_toa_prefs.py`,
+`tests/unit/controllers/test_toa_controller.py`, and the two new cases in
+`tests/controllers/test_index_prefs_config_controller.py`.
+
+**The controller had no tests and had existed since T3b.** So
+`test_toa_controller.py` is not a refinement of a battery; it is the first
+thing that has ever run that code deliberately. The test to read is
+`TestARefusalIsNotAFailure`: a backend refuses an edit whose span no longer
+reads as expected, and **one refused citation is a citation missing from the
+table, not a reason to abandon the other four hundred**. The stub backend
+exists to be able to refuse a chosen edit, which a real one cannot be asked to
+do.
+
+`test_the_authorities_page_is_read_back_as_well_as_written` is the shape to
+copy for any preferences page. Asserting the save alone would not have caught
+the defect that prompted all this: the keys were collected and stored nowhere,
+so the choice was lost *and* the page's construction default was written over
+it on the next open. **A store that is written and never read back looks
+exactly like one that works**, so the test drives the real flow with a
+stand-in dialog and asserts what the dialog was *told*.
+
+`test_toa_prefs.py` is mostly about routing rather than values, because that
+is where this store differs from the Word editor's: the citation standard is a
+property of the book, so it is project-scoped, and
+`test_the_next_book_does_not_inherit_the_last_one_s` is the assertion that
+says so. It needs two project databases; `fresh_persistence` is per-test, so
+asking for it twice would have made the test pass for the wrong reason.
+
+**What none of these can tell you.** There is no LaTeX corpus on this machine,
+so every one of them runs over a fixture of a few paragraphs. The timing, the
+recall, and the residue counts on a real book are unknown, and
+`probes/probe_toa_real_book.py` is what measures them. *A green suite here is
+not evidence that the pass works on a manuscript.*

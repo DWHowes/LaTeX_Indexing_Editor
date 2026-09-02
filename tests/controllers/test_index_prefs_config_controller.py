@@ -18,6 +18,7 @@ from models.check_index_prefs import DISABLED_RULES_KEY, CheckIndexPrefs
 from models.index_prefs_config_model import IndexPrefsConfigModel
 from models.presentation_prefs import PresentationPrefs
 from models.sort_prefs import SortPrefs
+from models.toa_prefs import ToaPrefs
 from bookindexcore.ui.theme.config_model import ThemeConfigModel
 from models.preferences_persistence import PreferencesPersistence
 from bookindexcore.ui.theme.controller import ThemeConfigController
@@ -33,7 +34,7 @@ def _isolated_qsettings(tmp_path, qtbot):
 def _controller(qtbot):
     prefs = PreferencesPersistence()
     theme_controller = ThemeConfigController(ThemeConfigModel(), prefs)
-    # The three shared groups are given their real QSettings-backed stores,
+    # The four shared groups are given their real QSettings-backed stores,
     # so that what these tests exercise is the routing the application does
     # and not a dict standing in for it.
     controller = IndexPrefsConfigController(
@@ -43,6 +44,7 @@ def _controller(qtbot):
         sort_prefs=SortPrefs(global_store=prefs.global_store("SortPrefs/global")),
         presentation_prefs=PresentationPrefs(
             global_store=prefs.global_store("PresentationPrefs/global")),
+        toa_prefs=ToaPrefs(global_store=prefs.global_store("ToaPrefs/global")),
     )
     return controller, prefs
 
@@ -112,9 +114,9 @@ class TestHandleModelUpdate:
 class TestOnePayloadThreeDestinations:
     """
     The shared Check Index and Sorting pages live in this window, so one OK
-    writes three settings groups. Each takes the keys it owns from the merged
-    payload -- ``ScopedSettings.save`` and ``update_data`` both already did
-    that -- so nothing in the controller splits the dictionary.
+    writes several settings groups. Each takes the keys it owns from the
+    merged payload -- ``ScopedSettings.save`` and ``update_data`` both already
+    did that -- so nothing in the controller splits the dictionary.
     """
 
     def test_each_group_takes_its_own_keys(self, qtbot):
@@ -125,6 +127,7 @@ class TestOnePayloadThreeDestinations:
             DISABLED_RULES_KEY: ["headings.case"],       # Check Index
             "evaluate_numbers": True,                    # Sorting
             "passim_enabled": True,                      # Presentation
+            "authorities_citation_system": "oscola",     # Authorities
         }, {}, {})
 
         assert controller._model.serialize_to_dict()["fmt_page_delimiter"] == "; "
@@ -132,6 +135,56 @@ class TestOnePayloadThreeDestinations:
             "headings.case"]
         assert controller._sort_prefs.load()["evaluate_numbers"] is True
         assert controller._presentation_prefs.style().passim_enabled is True
+        assert controller._toa_prefs.system_name() == "oscola"
+
+    def test_the_authorities_page_is_read_back_as_well_as_written(
+            self, qtbot, monkeypatch):
+        """
+        **The defect this pair exists for**, and the half that was missing:
+        the page was collected and its keys reached no store, so an indexer's
+        citation standard went nowhere *and* the page showed its construction
+        default on the next open, which was then written over the choice.
+
+        Asserting the save alone would not have caught it. The window is
+        opened with a stand-in dialog and what it was *told* is asserted,
+        because a store that is written and never read back looks exactly
+        like one that works.
+        """
+        controller, _prefs = _controller(qtbot)
+        controller._handle_model_update(
+            {"authorities_citation_system": "mcgill"}, {}, {})
+
+        told = {}
+
+        class _Signal:
+            def connect(self, slot):
+                pass
+
+        class _Dialog:
+            def __init__(self, parent=None):
+                pass
+
+            def __getattr__(self, name):
+                # Every other call the flow makes on the real dialog, which
+                # this test is not about. Signals are attributes that are
+                # `connect`ed rather than called, so the stand-in has to
+                # answer both shapes.
+                if name.startswith("sig_"):
+                    return _Signal()
+                return lambda *args, **kwargs: None
+
+            def populate_authorities_fields(self, values):
+                told.update(values)
+
+            def exec(self):
+                return 0
+
+        monkeypatch.setattr(
+            "controllers.index_prefs_config_controller.IndexPrefsConfigDialog",
+            _Dialog)
+        controller.execute_configuration_flow()
+
+        assert told["authorities_citation_system"] == "mcgill"
 
     def test_the_shared_keys_do_not_leak_into_the_latex_globals(self, qtbot):
         """
