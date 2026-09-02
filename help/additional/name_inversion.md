@@ -88,6 +88,33 @@ Your choice fills in a list of words on **Preferences → Sorting**, under *By l
 
 None of this touches a heading you have not given a language to.
 
+## Titles that come after a name
+
+*Pasha*, *Bey*, *Efendi*, *Hanim*, *Aga* and their spellings sit at the end of
+a name, which is exactly where a surname sits. Left to itself the program read
+them as surnames, so *Sa'd Zaghlul Pasha* filed under **P** and every pasha in
+the book collected together there.
+
+Now the title comes off before the surname is looked for and goes back on
+afterwards: *Zaghlul Pasha, Sa'd*, filed under **Z**. A setting on
+**Preferences → Presentation** drops the title instead, giving *Zaghlul,
+Sa'd*; both file in the same place, and the source for this rule prints both
+forms for the same man, so the choice is yours.
+
+Two things it will not do:
+
+- **A name marked Turkish is left exactly as it is.** *Ahmet Cevdet Paşa*
+  files under **A**. Turkish titles were abolished along with the nickname
+  system by the Surnames Law of 1934, so a Turkish name that still carries one
+  belongs to a period before Turkish surnames existed and there is no surname
+  to file it under. The title is the clue, which is why marking the name
+  Turkish is worth doing.
+- **A title with a single name in front of it is left alone.** *Ismail Bey* is
+  a person and a title, not a forename and a surname, in either tradition.
+
+The list of words is on **Preferences → Presentation**, so you can add the
+spellings your book uses.
+
 ## Irish names, and the one choice you have to make
 
 Irish surnames carry a prefix, and the prefix changes with the sex and marital
