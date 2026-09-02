@@ -1938,3 +1938,18 @@ so every one of them runs over a fixture of a few paragraphs. The timing, the
 recall, and the residue counts on a real book are unknown, and
 `probes/probe_toa_real_book.py` is what measures them. *A green suite here is
 not evidence that the pass works on a manuscript.*
+
+**And the indexer looked for a legal text written in LaTeX and did not find
+one** (1 September 2026), so this is a standing limit rather than a gap
+waiting to be filled. Anyone reading these tests later should not take the
+absence of a corpus run as an oversight.
+
+## Stating a name's language without a lookup
+
+`tests/gui_smoke/test_name_inversion_async.py::TestStatingALanguageWithoutALookup`
+sits at the bottom of a file that is otherwise entirely about running an
+authority lookup off the UI thread. **The test worth reading is
+`test_no_authority_is_consulted`**, which replaces both lookup paths with
+something that raises: this surface exists precisely so that an indexer who
+already knows the answer does not wait for a network call to give it, and the
+only way to assert *nothing was consulted* is to make consulting fail.

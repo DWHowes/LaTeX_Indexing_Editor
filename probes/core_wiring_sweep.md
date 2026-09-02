@@ -133,14 +133,28 @@ is half the fix and naming it here is the other half** -- a store this list
 does not know about is one the probe cannot see, and it would have gone on
 reporting a gap that had been closed.
 
-## What the indexer is owed a decision on
+## Finding 2, closed 1 September 2026
 
-1. **The standalone heading-language dialog.** Still open. Small, and it makes
-   a mechanism this application already has reachable without inverting a
-   name: today a language can be stated here only while a name is being
-   inverted.
-2. **The end-to-end pass is unverified.** There is no LaTeX corpus on this
-   machine, so everything above is tested over fixtures of a few paragraphs.
-   `probes/probe_toa_real_book.py` is what to run against a real book; it
-   writes nothing, and what it reports is the timing, the two residue counts,
-   and a sample of the table.
+**Set name language...** sits beside *Invert name* on the entry table's
+context menu, and `HeadingLanguageDialog` is reached. An indexer who already
+knows a name is Arabic can say so without running an authority lookup first,
+which was the whole of what the shared dialog was for.
+
+`ui.progress_dialog` closed with the Table of Authorities above, so **section
+1 now reads "Nothing unaccounted for"** and all four sections are clean.
+
+## What is still owed, and it is not a decision
+
+**The Table of Authorities has never been run on a book.** Every test of it
+covers a fixture of a few paragraphs, because there is no legal text written
+in LaTeX to hand -- the indexer looked, on 1 September 2026, and did not find
+one. That is not a task waiting to be done; it is a **standing limit on what
+is known**, and it should be read that way rather than as a to-do somebody
+forgot.
+
+What would settle it is `probes/probe_toa_real_book.py` over a real
+manuscript: it writes nothing, and reports the timing per million characters,
+the unresolved short forms, the unrecognised abbreviations, and a sample of
+the table. Until then the recall figures for LaTeX are unknown, and the Word
+editor's -- 92% on cases, 36% on legislation, on its own corpus -- are the
+nearest thing to an expectation.

@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### A name's language can be stated without a lookup
+
+**Set name language...**, beside *Invert name* on the entry table's context
+menu. `HeadingLanguageDialog` has been in the core since N2 and was reachable
+from nothing here, which `probes/probe_core_wiring.py` reported: the only way
+to state a language in this application was to run an authority lookup and
+answer the inversion dialog. An indexer who already knows a name is Arabic
+should not have to ask VIAF about it first.
+
+Nothing about the manuscript changes. What changes is how the filing and
+inversion rules read the name -- in this book and the next, because
+`set_heading_language` writes the project row and the shared name database
+together.
+
+The dialog is told **where the current answer came from**, and
+`_language_source_note` is what reads it: *recorded in this project* and
+*remembered from another book* are different things, and an indexer changing
+one of them should know which. That is read separately rather than inferred
+from `heading_language`, which reports the answer and deliberately not its
+provenance.
+
+With this the wiring sweep reads **"Nothing unaccounted for"** in all four
+sections.
+
 ### The Table of Authorities is reachable
 
 Built at T3b, tested by nothing, reachable from nothing, and shown as present
@@ -59,13 +83,17 @@ matters is the refusal: a backend refuses an edit whose span no longer reads
 as expected, and one refused citation is a citation missing from the table,
 not a reason to abandon the other four hundred.
 
-**The end-to-end pass is unverified and this is the notice.** There is no
+**The end-to-end pass is unverified, and as of 1 September 2026 it may stay
+that way.** There is no
 LaTeX corpus on the machine this was built on, so every test above runs over
 a fixture of a few paragraphs. `probes/probe_toa_real_book.py` builds the plan
 over files named on the command line, **writes nothing**, and reports the
 timing, the unresolved short forms, the unrecognised abbreviations and a
-sample of the table. Until that has been run on a book, the numbers this
-feature produces on one are unknown.
+sample of the table. **The indexer looked for a legal text written in LaTeX
+and did not find one**, so this is a standing limit on what is known rather
+than a task waiting to be done. The Word editor's figures on its own corpus --
+92% recall on cases, 36% on legislation -- are the nearest thing to an
+expectation there is.
 
 ### The core wiring sweep, ported from the Word editor
 

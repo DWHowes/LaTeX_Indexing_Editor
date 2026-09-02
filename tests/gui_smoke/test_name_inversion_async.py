@@ -641,3 +641,136 @@ class TestTheNameDatabaseMoves:
             pipeline.reopen_name_database("anywhere")   # must not raise
         finally:
             pipeline.name_inverter = before
+
+
+class TestStatingALanguageWithoutALookup:
+    """
+    `HeadingLanguageDialog` reached this application from nothing until
+    1 September 2026, which `probes/probe_core_wiring.py` found. The shared
+    dialog's own docstring names two callers -- the inversion suggestion,
+    where a language is chosen while a heading is being decided, and the
+    standalone one, *"where an indexer who already knows a name is Arabic says
+    so without asking an authority anything"*. Only the first existed here.
+
+    **The point is the absence of a lookup.** Everything above this class is
+    about running one off the UI thread; this is the path that runs none at
+    all, and the tests assert that.
+    """
+
+    def _captured(self, monkeypatch, accept=True, chosen="ar"):
+        seen = []
+
+        class _Dialog:
+            DialogCode = _Codes
+
+            def __init__(self, heading, language=UNSTATED, parent=None, *,
+                         sources=""):
+                self.heading = heading
+                self.current = language
+                self.sources = sources
+                seen.append(self)
+
+            def exec(self):
+                return _Codes.Accepted if accept else _Codes.Rejected
+
+            def language(self):
+                return chosen
+
+        monkeypatch.setattr(
+            "controllers.app_pipeline_controller.HeadingLanguageDialog",
+            _Dialog)
+        return seen
+
+    def test_it_asks_about_the_heading_that_was_clicked(self, pipeline,
+                                                        name_index,
+                                                        monkeypatch):
+        _model, index = name_index
+        dialogs = self._captured(monkeypatch)
+
+        pipeline._handle_set_name_language_request(index)
+
+        assert [dialog.heading for dialog in dialogs] == ["Emer de Vattel"]
+
+    def test_no_authority_is_consulted(self, pipeline, name_index,
+                                       monkeypatch):
+        """
+        The whole reason this surface exists. An indexer who already knows the
+        answer should not have to wait for a network call to give it.
+        """
+        _model, index = name_index
+        self._captured(monkeypatch)
+
+        def _explode(*args, **kwargs):
+            raise AssertionError("the standalone dialog looked something up")
+
+        monkeypatch.setattr(pipeline, "invert_name_async", _explode)
+        monkeypatch.setattr(pipeline.name_inverter, "invert", _explode)
+
+        pipeline._handle_set_name_language_request(index)
+
+    def test_accepting_records_the_language(self, pipeline, name_index,
+                                            monkeypatch):
+        _model, index = name_index
+        self._captured(monkeypatch, chosen="ar")
+        recorded = []
+        monkeypatch.setattr(pipeline, "set_heading_language",
+                            lambda heading, language:
+                            recorded.append((heading, language)))
+
+        pipeline._handle_set_name_language_request(index)
+
+        assert recorded == [("Emer de Vattel", "ar")]
+
+    def test_cancelling_records_nothing(self, pipeline, name_index,
+                                        monkeypatch):
+        _model, index = name_index
+        self._captured(monkeypatch, accept=False)
+        recorded = []
+        monkeypatch.setattr(pipeline, "set_heading_language",
+                            lambda heading, language:
+                            recorded.append((heading, language)))
+
+        pipeline._handle_set_name_language_request(index)
+
+        assert recorded == []
+
+    def test_an_empty_heading_asks_nothing(self, pipeline, monkeypatch):
+        from PySide6.QtGui import QStandardItem, QStandardItemModel
+
+        model = QStandardItemModel()
+        model.appendRow(QStandardItem("   "))
+        dialogs = self._captured(monkeypatch)
+
+        pipeline._handle_set_name_language_request(model.index(0, 0))
+
+        assert dialogs == []
+
+    def test_the_dialog_is_told_where_the_current_answer_came_from(
+            self, pipeline, name_index, monkeypatch):
+        """
+        *Recorded in this project* reads very differently from *remembered
+        from another book*, and an indexer changing one of those should know
+        which they are changing.
+        """
+        _model, index = name_index
+        dialogs = self._captured(monkeypatch)
+        monkeypatch.setattr(pipeline, "heading_language", lambda heading: "ar")
+        monkeypatch.setattr(
+            pipeline, "_language_source_note",
+            lambda heading, current: "Recorded for this project.")
+
+        pipeline._handle_set_name_language_request(index)
+
+        assert dialogs[0].sources == "Recorded for this project."
+
+    def test_an_unstated_language_has_no_source_line(self, pipeline):
+        """
+        Nothing to say where it came from, because it came from nowhere.
+        """
+        assert pipeline._language_source_note("Emer de Vattel", UNSTATED) == ""
+        assert pipeline._language_source_note("Emer de Vattel", "") == ""
+
+
+class _Codes:
+    Accepted = 1
+    Rejected = 0

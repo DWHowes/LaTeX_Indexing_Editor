@@ -43,6 +43,14 @@ The clearest example is Arabic, where two names differ by a single capital lette
 
 Nothing in the text of those two names says which is which, so the rules leave both alone until you say. Choose the language and the suggestion is worked out again in front of you, so you can see what it changed.
 
+### Saying so without a lookup
+
+You do not have to run an inversion to record a language. Right-click a row in the reference table and choose **Set name language...** — the same question, asked on its own, with no lookup and no network call. It is the quicker path whenever you already know the answer.
+
+The dialog tells you where the language it is showing came from: *recorded for this project*, or *remembered from the shared name database* — a decision you made about this name in an earlier book. Both are worth knowing before you change one.
+
+What you record is written to both places at once, so a name you classify here arrives classified in your next project.
+
 ### The authority record fills it in, and you check it
 
 When the VIAF/Library of Congress lookup finds a record, it usually knows a language, and the dialog pre-selects it for you — but only for a name you have not already given one to, and the note tells you it came from the record. Two things were checked against real authority records, and both are reasons to look rather than to accept:

@@ -276,6 +276,36 @@ class TestEditEntryContextMenuManager:
 
         assert recorder.calls[0][0].column() == COL_MAIN_DISP
 
+    def test_set_name_language_targets_the_main_column_too(self, qtbot):
+        """
+        The same target as *Invert name* beside it, and for the same reason:
+        the language is a fact about the name in the Main heading, whichever
+        cell the click landed on.
+        """
+        view, manager = self._build(qtbot, [{"unique_id_number": 1, "heading_raw_text": "Main!Sub1"}])
+        index = self._proxy_index(view, 0, COL_SUB1_DISP)
+        menu = QMenu()
+        manager.populate_menu_actions(menu, index)
+        recorder = _SignalRecorder(manager.set_name_language_triggered)
+
+        _trigger(menu, "Set name language...")
+
+        assert recorder.calls[0][0].column() == COL_MAIN_DISP
+
+    def test_the_two_name_actions_sit_together(self, qtbot):
+        """
+        Beside inversion rather than further down the menu, because it is the
+        same question asked without a lookup. A shared dialog reachable from
+        nothing was what `probes/probe_core_wiring.py` reported here.
+        """
+        view, manager = self._build(qtbot, [{"unique_id_number": 1, "heading_raw_text": "Main"}])
+        menu = QMenu()
+        manager.populate_menu_actions(menu, self._proxy_index(view, 0))
+
+        labels = [action.text() for action in menu.actions()
+                  if not action.isSeparator()]
+        assert labels[:2] == ["Invert name", "Set name language..."]
+
     def test_delete_targets_just_the_clicked_row_when_nothing_is_selected(self, qtbot):
         view, manager = self._build(qtbot, [
             {"unique_id_number": 1, "heading_raw_text": "Main"},

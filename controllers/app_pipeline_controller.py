@@ -66,6 +66,8 @@ from models.app_version import app_identity
 from bookindexcore.ui.help.controller import HelpController
 
 from bookindexcore.authorities import house_style_for, system_for
+from bookindexcore.ui.dialogs.heading_language_dialog import (
+    HeadingLanguageDialog)
 from bookindexcore.ui.dialogs.toa_review import ToaReviewDialog
 from bookindexcore.ui.progress_dialog import ProgressDialog
 from bookindexcore.ui.style import AppStyleConfiguration
@@ -476,6 +478,7 @@ class AppPipelineController(QObject):
 
         self._edit_table_context_manager.delete_references_triggered.connect(self.entry_modifier_ctrl.handle_context_menu_delete_request)
         self._edit_table_context_manager.invert_name_triggered.connect(self._handle_index_name_inversion_request)
+        self._edit_table_context_manager.set_name_language_triggered.connect(self._handle_set_name_language_request)
         self._edit_table_context_manager.duplicate_references_triggered.connect(self._handle_duplicate_references_request)
         self._edit_table_context_manager.invert_headings_triggered.connect(self._handle_invert_headings_request)
 
@@ -526,6 +529,68 @@ class AppPipelineController(QObject):
         self.invert_name_async(
             source_name, _on_lookup_done,
             locale=self.heading_language(source_name), prefer_authority=True)
+
+    @Slot(QModelIndex)
+    def _handle_set_name_language_request(self, proxy_index) -> None:
+        """
+        Say what language a name is, without looking anything up.
+
+        **The gap the wiring sweep found**: `HeadingLanguageDialog` is in the
+        core and was reachable from nothing here, so the only way to state a
+        language in this application was to run an authority lookup and answer
+        the inversion dialog. An indexer who already knows a name is Arabic
+        should not have to ask VIAF about it first.
+
+        Nothing about the manuscript changes. What changes is how the filing
+        and inversion rules read the name -- from now on, and in the next book,
+        because `set_heading_language` writes the project row and the name
+        database together.
+
+        The dialog is told **where the current answer came from**, which it
+        shows: *recorded in this project* reads very differently from
+        *remembered from another book*, and an indexer changing one of those
+        should know which they are changing.
+        """
+        if not proxy_index or not proxy_index.isValid():
+            return
+        heading = str(proxy_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        if not heading:
+            self.window.status_bar.showMessage(
+                "Choose an index term first.", 4000)
+            return
+
+        current = self.heading_language(heading)
+        dialog = HeadingLanguageDialog(
+            heading, current, self.window,
+            sources=self._language_source_note(heading, current))
+        if dialog.exec() != HeadingLanguageDialog.DialogCode.Accepted:
+            return
+
+        self.set_heading_language(heading, dialog.language())
+        self.window.status_bar.showMessage(
+            f"{heading}: language recorded as {dialog.language()}.", 4000)
+
+    def _language_source_note(self, heading_text: str, current: str) -> str:
+        """
+        Which of the two places the current answer is in, as a sentence.
+
+        Read rather than inferred from `heading_language`'s return: that
+        method reports the *answer* and deliberately not its provenance, and
+        an indexer being asked to change something is owed the difference.
+        """
+        if not current or current == UNSTATED:
+            return ""
+        try:
+            persistence = (self.scope_ctrl.get_persistence_model()
+                           if self.scope_ctrl else None)
+            if persistence is not None:
+                heading_id = persistence.find_heading_id(heading_text)
+                if persistence.heading_language(heading_id) != UNSTATED:
+                    return "Recorded for this project."
+        except Exception as exc:
+            print(f"[NAME INVERSION] Could not say where the language for "
+                  f"{heading_text!r} came from: {exc}")
+        return "Remembered from the shared name database."
 
     def heading_language(self, heading_text: str) -> str:
         """
