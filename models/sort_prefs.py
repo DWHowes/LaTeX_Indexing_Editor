@@ -35,7 +35,7 @@ from typing import Any, Dict
 
 from bookindexcore.sorting import (
     LEGACY_SORT_KEYS, ORDER_BY_PROJECT, ORDER_MODE_KEY, SORT_DEFAULTS,
-    SortRules, makeindex_host, rules_for,
+    SortRules, makeindex_host, rules_for, xindy_host,
 )
 from bookindexcore.persistence import DictGlobalStore, ScopedSettings
 
@@ -112,13 +112,30 @@ class SortPrefs:
 
     def host_rules(self, index_prefs) -> SortRules:
         """
-        How the build will actually file it.
+        How the build will actually file it, which engine by engine is two
+        different answers.
 
         ``makeindex`` is the one host that exposes the strategy, so its preset
-        takes the project's ordering; ``xindy`` orders by its language module,
+        takes the project's ordering. ``xindy`` orders by its language module,
         which no preset here models, and the adapter's stated default is what
-        it falls back to.
+        the ordering falls back to.
+
+        **This used to hand both engines the makeindex preset**, and said so:
+        the docstring recorded xindy as unmodelled and left it at that. What
+        the fallback cost was then measured. The two engines disagree about
+        the diacritic fold, so a xindy project was being shown every accented
+        heading after ``z`` when xindy files it beside its base letter, and
+        this is the pane whose entire purpose is to show what the finished
+        index will look like. See ``xindy_host`` for the measurement and for
+        the class of character it still cannot state.
+
+        **The deliverable was never affected**, which is why this was a
+        preview defect and not a data one: ``latex_entry_model`` writes a sort
+        key only where the indexer supplied one, so an ordinary project emits
+        none and xindy folds for itself.
         """
+        if getattr(index_prefs, "index_engine", "makeindex") == "xindy":
+            return xindy_host(alphabetising_from_prefs(index_prefs))
         return makeindex_host(alphabetising_from_prefs(index_prefs))
 
     def rules(self, index_prefs) -> SortRules:

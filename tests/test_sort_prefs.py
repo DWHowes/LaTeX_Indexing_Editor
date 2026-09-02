@@ -83,6 +83,64 @@ class TestAlphabetisingComesFromTheEngineSetting:
         assert SortPrefs().host_rules(index_prefs).alphabetising == LETTER_BY_LETTER
 
 
+class TestTheHostPresetFollowsTheEngine:
+    r"""
+    Two engines, two presets, and for a long time one of them answering for
+    both.
+
+    ``host_rules`` handed every project the makeindex preset and its docstring
+    said so, recording xindy as unmodelled. Measured against the real engines
+    with no sort key at all, the fallback turned out to reverse the answer for
+    every accented heading: makeindex files ``\u00e1it`` after ``bealach`` and
+    xindy files it beside ``ait``.
+
+    **This is a preview and the deliverable was never wrong**, which is worth
+    stating in a test name somewhere, because it is what separates this from a
+    data defect: ``latex_entry_model`` writes a sort key only where the
+    indexer supplied one, so an ordinary project emits none and xindy folds
+    for itself.
+    """
+
+    IRISH = ["ait", "\u00e1it", "amach", "\u00c1ra", "azure", "bealach"]
+
+    def filed(self, rules):
+        from bookindexcore.sorting import filing_key
+        return sorted(self.IRISH, key=lambda h: filing_key(h, rules))
+
+    def test_a_makeindex_project_previews_an_accent_after_z(self):
+        index_prefs = IndexPrefsData(index_engine="makeindex")
+        rules = SortPrefs().host_rules(index_prefs)
+        assert rules.fold_diacritics is False
+        assert self.filed(rules)[-1] == "\u00c1ra"
+
+    def test_a_xindy_project_previews_it_beside_its_base_letter(self):
+        index_prefs = IndexPrefsData(index_engine="xindy")
+        rules = SortPrefs().host_rules(index_prefs)
+        assert rules.fold_diacritics is True
+        filed = self.filed(rules)
+        assert filed.index("\u00e1it") == filed.index("ait") + 1
+
+    def test_an_unset_engine_is_treated_as_makeindex(self):
+        """
+        The default the application already ships, and the safer of the two
+        to inherit: a makeindex preview of a xindy project misplaces accents,
+        and the reverse would misplace them for the commoner engine.
+        """
+        assert SortPrefs().host_rules(
+            IndexPrefsData()).fold_diacritics is False
+
+    def test_the_project_s_own_rules_are_untouched_by_the_engine(self):
+        """
+        The two questions the order mode exists to keep apart. Which engine a
+        project builds with is a fact about the deliverable, not about the
+        order the indexer is working to.
+        """
+        prefs = SortPrefs()
+        for engine in ("makeindex", "xindy"):
+            rules = prefs.project_rules(IndexPrefsData(index_engine=engine))
+            assert rules.fold_diacritics is False
+
+
 class TestTheOrderMode:
     def test_by_default_it_shows_the_indexers_own_rules(self):
         prefs = SortPrefs()
