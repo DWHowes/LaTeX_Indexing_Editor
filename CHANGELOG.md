@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### The index kind is stored, so the filing rules can be seeded
+
+`models/sort_prefs.py`, one key. The core grew a *What kind of index is
+this?* control on the Sorting page, and declaring a name index seeds the
+filing settings from it — the mechanism E9 built in August and that nothing
+had ever called, in any application.
+
+`INDEX_KIND_KEY` is the second non-field key to travel in that page's
+payload, after the order mode, and for the same reason: everything in
+`SORT_DEFAULTS` is splatted into `SortRules(**owned)`, so a declaration
+stored there would raise on load. It is kept so that reopening the window
+shows what was declared rather than offering to declare it again.
+
+**What it unlocks here was already written**: the name-index prefix drop, the
+cased Arabic list, the `Al-e` retained list, and the per-language lists for
+Flemish, Dutch under either code, German under either code, and Afrikaans.
+Every one of them had been reachable only from a probe that seeded for
+itself.
+
 ### A named symbol macro keeps its character in the projection
 
 `ESCAPED_LITERALS` held the seven *escaped punctuation* forms and none of the
