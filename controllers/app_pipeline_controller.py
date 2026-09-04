@@ -2164,8 +2164,12 @@ class AppPipelineController(QObject):
         # colours of its own, so it takes the application palette like every
         # other plain dialog. The two shared dialogs that *do* take one --
         # About and Statistics -- have hand-set colours to swap.
+        # **The profile goes with the plan**, which does not carry it: the
+        # dialog names what the specification records and this table does not
+        # do, and this is the moment for it, before a macro is written.
         dialog = ToaReviewDialog(plan, self.window,
-                                 accept_label="Write the macros")
+                                 accept_label="Write the macros",
+                                 house=house)
         if dialog.exec() != ToaReviewDialog.DialogCode.Accepted:
             self.window.status_bar.showMessage("No macros were written.", 3000)
             return

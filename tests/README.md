@@ -1953,3 +1953,26 @@ authority lookup off the UI thread. **The test worth reading is
 something that raises: this surface exists precisely so that an indexer who
 already knows the answer does not wait for a network call to give it, and the
 only way to assert *nothing was consulted* is to make consulting fail.
+
+## The one call site where the profile could be dropped
+
+`tests/unit/controllers/test_toa_review_wiring.py` is a static scan of
+`app_pipeline_controller.py`, and its docstring says so in the first line. The
+shared review dialog names what a house profile records and this application
+does not carry out, and it can only do that if this controller passes the
+profile it built the table with.
+
+**It is a scan because the alternative was sixty lines of stubs around one
+keyword.** `_handle_build_toa_request` wants a project, a text backend, a
+preferences store and a progress dialog before it reaches the review; the
+dialog's own behaviour is tested in the core, over the widget, including the
+case where no profile is passed and it correctly says nothing.
+
+*That silence is why the guard has to be here.* A host with no house style and
+a host that forgot to pass one look the same from inside the dialog, and they
+look the same to `probes/probe_core_wiring.py` as well: its four shapes are a
+module nobody imports, a key nobody stores, a store nobody reads back and a
+signal nobody takes. **An argument nobody passes is none of them.**
+
+`test_the_review_is_built_exactly_once` is the part that will fail first, and
+it is meant to: a second call site is a second place to forget.

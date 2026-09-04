@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### The review says what your publisher's style asks for and the table does not do
+
+Choose a publisher's house style on the Authorities preferences page and build
+a table of authorities: the review window, before a single macro is written,
+names the rules that specification records and this application does not carry
+out. Irwin Law records three of them. Nothing is applied differently; a rule
+you recorded is simply no longer dropped in silence.
+
+The same lines are now shown on the **Authorities preferences page**, under
+the profile you choose, so they reach you before the pass rather than after
+it. That page also had a defect fixed with them: its notes were refreshed when
+the page opened and when the citation standard changed, and not when you
+picked a publisher.
+
 ### The index kind is stored, so the filing rules can be seeded
 
 `models/sort_prefs.py`, one key. The core grew a *What kind of index is
