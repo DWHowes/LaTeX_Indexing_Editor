@@ -33,6 +33,7 @@ looking like a deletion.
 
 from typing import Any, Dict
 
+from bookindexcore import store
 from bookindexcore.sorting import (
     LEGACY_SORT_KEYS, ORDER_BY_PROJECT, ORDER_MODE_KEY, SORT_DEFAULTS,
     SortRules, makeindex_host, rules_for, xindy_host,
@@ -107,7 +108,36 @@ class SortPrefs:
     # -- reading ------------------------------------------------------------
 
     def load(self) -> Dict[str, Any]:
-        return self._scoped.load()
+        values = self._scoped.load()
+        values["authored_alphabets"] = self._alphabets(
+            values.get("authored_alphabets"))
+        return values
+
+    def _alphabets(self, from_settings) -> Dict[str, Any]:
+        """
+        The alphabets in force: the shared store's, and this project's own
+        over the top of them.
+
+        ***The store is the template and the project is the correction.*** An
+        alphabet is a published order, or an indexer's transcription of one,
+        and is as true in the next book as in this one -- so it belongs to the
+        machine; an alphabet corrected for *this* book belongs to the project,
+        which is what `ScopedSettings` was taught to carry on 4 September.
+
+        A store that cannot be read is reported and stood down from: filing by
+        the project's own rules is workable and a window that will not open is
+        not.
+        """
+        mine = dict(from_settings or {})
+        try:
+            store.adopt_alphabets(mine)
+            shared = store.alphabets()
+        except Exception as failure:            # sqlite, a locked file, disk
+            print(f"[SORT PREFS] Could not read the shared store: {failure}")
+            return mine
+        merged = dict(shared)
+        merged.update(mine)
+        return merged
 
     def order_mode(self) -> str:
         return str(self.load().get(ORDER_MODE_KEY, ORDER_BY_PROJECT))
@@ -158,4 +188,21 @@ class SortPrefs:
     # -- writing ------------------------------------------------------------
 
     def save(self, values: Dict[str, Any]) -> None:
+        """
+        Keep what this store owns, and put the alphabets where they belong.
+
+        **An alphabet goes to the shared store**, because it is an answer
+        about a language rather than a fact about this project; the project
+        keeps none of its own here, so opening the same store from the Word
+        editor shows the same list.
+        """
+        written = values.get("authored_alphabets")
+        if written:
+            try:
+                for name, record in written.items():
+                    store.save_alphabet(name, record)
+            except Exception as failure:
+                print(f"[SORT PREFS] Could not write the shared store: "
+                      f"{failure}")
+            values = dict(values, authored_alphabets={})
         self._scoped.save(values)

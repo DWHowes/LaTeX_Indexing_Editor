@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### An alphabet you write is the machine's, and so is a publisher you set up elsewhere
+
+An alphabet written on the Sorting page was stored in this application's own
+settings, so the same alphabet had to be written again in the Word editor. It
+goes to the shared store now, beside your name decisions, and one written in
+either editor is offered in both. The project keeps any correction you made for
+*this* book; the store is the template it started from.
+
+And a publisher's house profile authored in ToA_Builder can be chosen on the
+Authorities page here for the first time: this application knew the two
+profiles that ship and raised for anything else.
+
 ### The review says what your publisher's style asks for and the table does not do
 
 Choose a publisher's house style on the Authorities preferences page and build

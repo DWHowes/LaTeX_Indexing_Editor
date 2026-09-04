@@ -8,15 +8,17 @@ from pathlib import Path
 # display, which is what makes it usable in CI and from a plain terminal.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-# The name database is per *user* and shared by every index editor, so the one
+# The shared store is per *user* and shared by every index editor, so the one
 # an unguarded `NameInverter.shared()` reaches for is the developer's real set
-# of confirmed corrections. Pointed somewhere disposable before anything can
-# import it, for the same reason as the line above.
+# of confirmed corrections -- and since 4 September 2026 their house profiles,
+# alphabets and model assessments as well. Pointed somewhere disposable before
+# anything can import it, for the same reason as the line above, and **both
+# names** because the store was renamed and the old variable is still read.
 import tempfile
-os.environ.setdefault(
-    "BOOKINDEXCORE_NAME_DB",
-    os.path.join(tempfile.gettempdir(), "latex-indexing-editor-tests", "names.db"),
-)
+_disposable = os.path.join(tempfile.gettempdir(),
+                           "latex-indexing-editor-tests", "indexing.db")
+os.environ.setdefault("BOOKINDEXCORE_STORE", _disposable)
+os.environ.setdefault("BOOKINDEXCORE_NAME_DB", _disposable)
 
 import pytest
 from PySide6.QtCore import QSettings
@@ -239,3 +241,20 @@ def booted_app(tmp_path_factory, qapp):
         name_inverter.close()
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def a_store_of_its_own(tmp_path, monkeypatch):
+    """
+    One shared store per test, because the store is now genuinely shared.
+
+    It holds the name decisions, the house profiles, the alphabets and the
+    model assessments in one file for the whole machine, so a test that writes
+    one is a test the next one can read unless something stops it. The module
+    level `setdefault` above keeps the suite off the developer's real store;
+    this keeps the tests off each other's.
+    """
+    disposable = str(tmp_path / "store" / "indexing.db")
+    monkeypatch.setenv("BOOKINDEXCORE_STORE", disposable)
+    monkeypatch.setenv("BOOKINDEXCORE_NAME_DB", disposable)
+    return disposable

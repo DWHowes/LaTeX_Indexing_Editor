@@ -1976,3 +1976,20 @@ signal nobody takes. **An argument nobody passes is none of them.**
 
 `test_the_review_is_built_exactly_once` is the part that will fail first, and
 it is meant to: a second call site is a second place to forget.
+
+## The shared store, and why every test needs one of its own
+
+`conftest.py` points `BOOKINDEXCORE_STORE` somewhere disposable at import time
+and then gives each test a store of its own. Both halves matter, and the second
+was added on 4 September 2026 when the store stopped being a name cache: it
+holds house profiles, alphabets and model assessments as well, so a test that
+writes one is a test the next can read.
+
+**Both variable names are set.** The store was renamed and the old
+`BOOKINDEXCORE_NAME_DB` is still honoured, which is the guarantee a portable
+install depends on; a suite that set only one of them would be testing half the
+resolution order.
+
+`models/sort_prefs.py` is where the alphabets are folded in, and its docstring
+carries the division the phase settled: **the store is the template and the
+project is the correction.**
