@@ -99,6 +99,52 @@ The first should list exactly the three PDFs. The second must **not** contain
 `session_logs`, `.session_logs` or `.session_backups` — if it does, the app was
 launched from `dist` at some point and step 5 was skipped.
 
+**And check that the shared package came with it.** This step could not see
+`bookindexcore` at all until 5 September 2026, and the check is not the
+obvious one: the package is pure Python, so PyInstaller puts it in the archive
+embedded in the exe and ***there is no `bookindexcore` folder to look for***.
+Ask the binary:
+
+```
+Select-String -Path dist\LatexIndexingEditor\LatexIndexingEditor.exe -Pattern bookindexcore -Encoding Byte -AllMatches | Measure-Object
+```
+
+**157 matches, measured 5 September 2026.** Then start the application, which
+is the check the count only approximates:
+
+```
+dist\LatexIndexingEditor\LatexIndexingEditor.exe
+```
+
+It must open its window and stay open. A missing shared package fails on the
+first import, so that failure is immediate and total rather than subtle.
+
+### Why `pathex` is empty, and why that is not a bug
+
+***It was believed to be one.*** After Phase 6a put the extraction branch on
+`main`, this spec still read `pathex=[]` and had never named `bookindexcore`,
+which looked like a build recipe that could not find the package the
+application now depends on. The Word editor's spec names both trees and says
+PyInstaller *"walks imports rather than following a `.pth`"*, which made the
+conclusion look settled.
+
+**A control build refuted it.** The spec as it stands, and the same spec with
+the package named in `pathex`, produce **157 matches each**, and the frozen
+application starts either way. The reason is the shape of the editable
+install: both venvs carry `_editable_impl_bookindexcore.pth` holding **one
+bare path**, which Python adds to `sys.path` at interpreter startup.
+PyInstaller runs inside that interpreter and seeds its search from `sys.path`,
+so it finds the package with no help from the spec.
+
+Naming it would matter only for the *other* kind of editable install, the
+import-hook shape that ships a `__editable___*_finder.py`, which neither venv
+here has. So nothing is added: on this project's own rule, a line earns its
+place by being **measured wrong** without it, and this one was not.
+
+**If that shim shape ever changes, the count above goes to nothing and the
+application stops on its first import** — which is exactly what this step now
+catches.
+
 ## 8. Build the installer
 
 ```
