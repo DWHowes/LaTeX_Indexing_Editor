@@ -42,6 +42,23 @@ The editor creates one file in your project folder: `<ProjectName>_index_manifes
 
 You generally don't need to touch this file yourself. Because the editor trusts this database rather than re-scanning your project folder on every open, a `.tex` file added, removed, or moved outside the editor — or edited outside it, changing its `\index` content — won't be picked up automatically on the next open. Use [Resyncing Workspace Files from Disk](../tools/resync_workspace_files.md) to catch up on files added/removed/moved, and [Resyncing Index Data from Disk](../tools/resync.md) to catch up on content changes, rather than deleting the database by hand.
 
+## Opening a project made by an earlier version
+
+A project's database records the shape it was written in, and opening one made
+by an earlier version of the application brings it up to date first. You are
+not asked, because there is nothing to decide: the alternative to migrating is
+not opening.
+
+Each step is stamped only after it has actually run, and the whole sequence
+happens inside one transaction, so **a failure rolls back every change and
+every stamp together**. A database is never left claiming to be a version it
+did not reach, and a failed migration leaves your project exactly as it was.
+
+Your `.tex` files are untouched by any of this. They are the source of truth
+and the database is a cache over them: in the worst case it can be deleted and
+rebuilt by reopening the project, at the cost of a rescan rather than any of
+your work.
+
 ## See also
 
 - [The Base File](../getting_started/base_file.md)

@@ -179,6 +179,10 @@
     ]
    },
    {
+    "title": "What Kind of Index Is This?",
+    "file": "preferences/index_kind.md"
+   },
+   {
     "title": "Declared Alphabets",
     "file": "preferences/declared_alphabets.md"
    }
