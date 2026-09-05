@@ -114,13 +114,13 @@ def index_statistics(app):
 #: name -> builder. The name is the file's stem in `documentation/images/`.
 SHOTS = {
     "preferences_dialog_check_index":
-        lambda app: preferences_page(app, "Check Index"),
+        lambda app: preferences_page(app, "Checks"),
     "preferences_dialog_sorting":
         lambda app: preferences_page(app, "Sorting"),
     "preferences_dialog_presentation":
         lambda app: preferences_page(app, "Presentation"),
     "preferences_dialog_authorities":
-        lambda app: preferences_page(app, "Table of Authorities"),
+        lambda app: preferences_page(app, "Authorities"),
     "alphabet_editor": alphabet_editor,
     "index_statistics": index_statistics,
 }
@@ -169,7 +169,15 @@ def main() -> int:
         if target.exists():
             same_size, differing = compare(pixmap, target)
             if not same_size:
-                note = "SIZE CHANGED (was %s)" % target.stat().st_size
+                # The dimensions, not the file size. The Preferences shots
+                # were 720x746 while the dialog's floor was above the 664
+                # asked for here and Qt clamped the resize up, so a size
+                # change is a real signal and naming the wrong number wasted
+                # a look.
+                from PySide6.QtGui import QImage
+                was = QImage(str(target))
+                note = ("SIZE CHANGED (was %dx%d)"
+                        % (was.width(), was.height()))
             else:
                 note = "%d pixels differ" % differing
         else:

@@ -1,6 +1,6 @@
 # LaTeX Compiler
 
-The first horizontal tab under **Preferences → LaTeX Settings**. One setting: where to find the LaTeX compiler executable used to typeset your document.
+The first horizontal tab under **Preferences → LaTeX**. One setting: where to find the LaTeX compiler executable used to typeset your document.
 
 | Setting      | Default   | What it does                                                                                                                                                                                                                                                      |
 | ------------ | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

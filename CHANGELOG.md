@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### The Preferences window fits a laptop screen
+
+It could not be opened fully on a 1366x768 screen: its minimum height was
+**746 pixels** and such a screen has about 730 to give, so the OK and Cancel
+buttons sat below the bottom edge and no amount of resizing brought them back.
+It is **593** now, and nothing was hidden to get there.
+
+The height was not the pages; every one of them fits in 283 pixels. It was the
+tab bar down the left, whose height is the sum of its rotated labels' widths.
+Four labels are shorter, and the tabs you will see are **Checks**, **LaTeX**,
+**RTF** and **Authorities** where they read *Check Index*, *LaTeX Settings*,
+*RTF Export* and *Table of Authorities*. Nothing moved and no page was
+removed. The `cmd: makeindex/xindy` sub-page scrolls now, as the busier shared
+pages already did.
+
+The User Guide's four Preferences figures were taken again, and the help
+topics that tell you which tab to open were corrected.
+
+`probes/prefs_dialog_fits.py` measures the window. It has to run on the real
+platform: offscreen, the same window measures 964, because that platform does
+not have this machine's font metrics.
+
 ### An alphabet you write is the machine's, and so is a publisher you set up elsewhere
 
 An alphabet written on the Sorting page was stored in this application's own

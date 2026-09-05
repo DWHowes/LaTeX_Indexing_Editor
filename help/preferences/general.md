@@ -1,6 +1,6 @@
 # General
 
-The **General** tab holds settings that belong to the application itself rather than to any one project — unlike [LaTeX Settings](../preferences.md#latex-settings) and theme colours, these are shared by every project you open, and every one of them takes effect immediately when you accept the dialog.
+The **General** tab holds settings that belong to the application itself rather than to any one project — unlike [LaTeX](../preferences.md#latex) and theme colours, these are shared by every project you open, and every one of them takes effect immediately when you accept the dialog.
 
 ## Undo stack size
 

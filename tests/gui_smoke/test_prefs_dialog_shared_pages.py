@@ -30,9 +30,8 @@ class TestTheWindowMountsThem:
         dialog = _dialog(qtbot)
         labels = [dialog.vertical_tabs.tabText(i)
                   for i in range(dialog.vertical_tabs.count())]
-        assert labels == ["General", "Check Index", "Sorting", "Presentation",
-                          "Table of Authorities", "UI Themes",
-                          "LaTeX Settings", "RTF Export"]
+        assert labels == ["General", "Checks", "Sorting", "Presentation",
+                          "Authorities", "UI Themes", "LaTeX", "RTF"]
 
     def test_no_latex_page_is_mixed_into_the_shared_block(self, qtbot):
         """
@@ -104,26 +103,50 @@ class TestTheWindowMountsThem:
                   for i in range(dialog.vertical_tabs.count())]
 
         assert dialog.supports_table_of_authorities()
-        assert "Table of Authorities" in labels
+        assert "Authorities" in labels
         assert CITATION_SYSTEM_KEY in dialog.collect_project_payload()
 
-    def test_seven_tabs_still_fit(self, qtbot):
+    def test_all_eight_tabs_fit(self, qtbot):
         """
         A West tab bar's height is the sum of its rotated labels' widths.
         Six of these labels overflowed a 580-tall window on a large font, and
         Qt's answer was a scroll arrow with the last page behind it. E8's
-        Presentation page made it seven.
+        Presentation page made it seven, T3b's Authorities page eight.
         """
         dialog = _dialog(qtbot)
         bar = dialog.vertical_tabs.findChild(QTabBar)
         assert not bar.usesScrollButtons()
         assert bar.tabRect(bar.count() - 1).bottom() <= bar.sizeHint().height()
 
+    def test_the_labels_are_the_short_ones(self, qtbot):
+        """
+        Because the window's height depends on them.
+
+        A West tab bar rotates its labels, so the bar's height is the sum of
+        their widths and, with its scroller deliberately off, that height is
+        a floor the dialog cannot be sized below. Spelled out, *Check Index*
+        and *Table of Authorities* put the floor at 746 pixels, and a
+        1366x768 laptop has about 730 usable once the task bar and title bar
+        are taken off; the short labels put it at 593.
+
+        ***The height itself is not asserted here, because this suite runs
+        offscreen and the offscreen platform does not have the machine's font
+        metrics*** -- it reports 964 for the same window that measures 593 on
+        the real platform, so a pixel threshold in this file would be
+        measuring a font nobody has. `probes/prefs_dialog_fits.py` measures
+        it where the number means something. What is testable here is the
+        input the indexer's window is built from: the labels.
+        """
+        dialog = _dialog(qtbot)
+        labels = [dialog.vertical_tabs.tabText(i)
+                  for i in range(dialog.vertical_tabs.count())]
+        assert max(len(label) for label in labels) <= len("Presentation")
+
 
 class TestTheStrategyControlPointsAtTheRealSwitch:
     def test_it_is_read_only_here(self, qtbot):
         """
-        `makeindex_ordering` on the LaTeX Settings page has held this choice
+        `makeindex_ordering` on the LaTeX page has held this choice
         since before the shared page existed. Two editable copies would
         disagree the first time either was changed.
         """
@@ -133,7 +156,7 @@ class TestTheStrategyControlPointsAtTheRealSwitch:
     def test_it_names_where_the_real_one_is(self, qtbot):
         dialog = _dialog(qtbot)
         source = dialog.alphabetising_source()
-        assert "LaTeX Settings" in source
+        assert "LaTeX" in source
         assert "Sort Ordering Rule" in source
 
     def test_the_value_still_round_trips(self, qtbot):

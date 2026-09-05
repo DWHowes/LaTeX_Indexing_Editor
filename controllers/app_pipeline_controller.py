@@ -2478,7 +2478,7 @@ class AppPipelineController(QObject):
             QMessageBox.warning(
                 self.window, "RTF Export Unavailable",
                 "The following executable path(s) are not configured or don't exist:\n"
-                f"{', '.join(missing)}.\n\nSet them in Preferences → LaTeX Settings."
+                f"{', '.join(missing)}.\n\nSet them in Preferences → LaTeX."
             )
             return
 

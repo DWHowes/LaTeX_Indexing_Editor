@@ -51,7 +51,7 @@ Authorities](table_of_authorities.md).
 
 ## Choosing which rules run
 
-Rules are enabled in **Preferences → Check Index**, and the setting is
+Rules are enabled in **Preferences → Checks**, and the setting is
 per-project once a project is open, so an index of statutes and an index of
 concepts can run different sets without either being wrong.
 

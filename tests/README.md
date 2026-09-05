@@ -1225,10 +1225,24 @@ owes this window.
 It kept one until T1b, and a page added to the shell broke a test about
 *ordering* over a question of *membership*.
 
-`test_seven_tabs_still_fit` looks cosmetic and is not: a West tab bar's height
+`test_all_eight_tabs_fit` looks cosmetic and is not: a West tab bar's height
 is the sum of its rotated labels' *widths*, so it grows with both the page
 count and the user's font, and Qt's answer to overflow is a scroll arrow with
 the last page behind it. Six labels and a large font already produced that.
+
+`test_the_labels_are_the_short_ones` is the other half of the same fact. With
+the bar's scroller off, its height is a floor the dialog cannot be sized
+below: spelled out, *Check Index* and *Table of Authorities* put that floor at
+746 pixels, past what a 1366x768 laptop can show, and the short labels put it
+at 593.
+
+***The height itself is not asserted anywhere in this suite, and that is
+deliberate.*** These tests run under `QT_QPA_PLATFORM=offscreen`, and the
+offscreen platform does not have the machine's font metrics: it measures the
+same window at **964** where the real platform measures **593**. A pixel
+threshold here would be guarding a font nobody has. So the suite holds the
+input the window is built from, the labels, and `probes/prefs_dialog_fits.py`
+holds the number, on the real platform, where it means something.
 
 ### Auto-resync safety gate
 

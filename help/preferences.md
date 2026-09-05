@@ -1,6 +1,6 @@
 # Preferences
 
-**Edit → Preferences...** (`Ctrl+,`) opens a single dialog covering general application behaviour, LaTeX/indexing engine settings, colour theming, and RTF export, across four tabs.
+**Edit → Preferences...** (`Ctrl+,`) opens a single dialog covering general application behaviour, LaTeX/indexing engine settings, colour theming, and RTF export, across eight tabs down the left-hand side.
 
 Font family/size and the dark/light mode toggle are **not** in this dialog — they're on the main toolbar, and apply immediately as you change them.
 
@@ -8,7 +8,7 @@ Font family/size and the dark/light mode toggle are **not** in this dialog — t
 
 Application-wide behaviour: the undo depth, [auto-save](getting_started/saving_and_closing.md), the session log folder, and which page-number styles the entry table recognises. See [General](preferences/general.md) for each setting in detail.
 
-## LaTeX Settings
+## LaTeX
 
 Configuration for compiling the document and generating the index — needed for [RTF Export](tools/rtf_export.md), and written into your document's preamble via **Edit → Insert LaTeX Index Settings...** when you're ready to use it. This is by far the busiest part of Preferences, laid out across six horizontal tabs — each one is covered in its own topic, with every individual setting explained:
 
@@ -27,7 +27,7 @@ Separate colour editors for **Dark Theme** and **Light Theme** — window backgr
 
 Colour changes apply immediately across the whole application as soon as you accept the dialog — no restart needed.
 
-## RTF Export
+## RTF
 
 One setting: **Display RTF file on creation** — when checked, exporting to RTF opens a preview automatically instead of just reporting success in the status bar. See [RTF Export](tools/rtf_export.md).
 

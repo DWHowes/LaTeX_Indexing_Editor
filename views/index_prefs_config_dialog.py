@@ -31,6 +31,7 @@ Three things worth knowing before editing this file:
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QHBoxLayout, QFileDialog, QTabWidget,
     QCheckBox, QLineEdit, QSpinBox, QComboBox, QGroupBox, QPushButton,
+    QScrollArea,
 )
 
 from bookindexcore.ui.preferences import GeneralPreferencesTab, PreferencesDialog
@@ -74,7 +75,7 @@ class IndexPrefsConfigDialog(PreferencesDialog):
         the shared Sorting page shows it read-only rather than offering a
         second, disagreeable copy.
         """
-        return "LaTeX Settings → cmd: makeindex/xindy → Sort Ordering Rule"
+        return "LaTeX → cmd: makeindex/xindy → Sort Ordering Rule"
 
     def supports_table_of_authorities(self) -> bool:
         r"""
@@ -107,8 +108,8 @@ class IndexPrefsConfigDialog(PreferencesDialog):
     def host_tab_order(self) -> list[tuple[str, QWidget]]:
         """This application's own pages, appended after the shared block."""
         return [
-            ("LaTeX Settings", self.vtab_latex),
-            ("RTF Export", self.vtab_rtf_export),
+            ("LaTeX", self.vtab_latex),
+            ("RTF", self.vtab_rtf_export),
         ]
 
     def _build_rtf_export_tab(self) -> QWidget:
@@ -281,12 +282,26 @@ class IndexPrefsConfigDialog(PreferencesDialog):
         lay_printindex.addRow("Output Printing Command:", self.txt_printindex_cmd)
         lay_printindex.addRow(self.chk_printindex_multi)
 
-        # Mount all sub-tabs to nested horizontal framework container
+        # Mount all sub-tabs to nested horizontal framework container.
+        #
+        # **makeindex/xindy is mounted inside a scroll area and the other five
+        # are not**, because it is the only one that needs it: measured
+        # 5 September 2026, its six groups come to 578 where its siblings are
+        # 42 to 172, and 578 is what made this whole page 618 and the
+        # Preferences dialog taller than a 1366x768 laptop's screen. Wrapping
+        # the five that already fit would add a scrollbar to pages that never
+        # scroll.
         self.horizontal_latex_tabs.addTab(self.tab_pdflatex, "LaTeX Compiler")
         self.horizontal_latex_tabs.addTab(self.tab_imakeidx, "pkg: imakeidx")
         self.horizontal_latex_tabs.addTab(self.tab_idxlayout, "pkg: idxlayout")
         self.horizontal_latex_tabs.addTab(self.tab_hyperref, "pkg: hyperref")
-        self.horizontal_latex_tabs.addTab(self.tab_makeindex, "cmd: makeindex/xindy")
+
+        makeindex_scroller = QScrollArea()
+        makeindex_scroller.setWidgetResizable(True)
+        makeindex_scroller.setWidget(self.tab_makeindex)
+        self.horizontal_latex_tabs.addTab(makeindex_scroller,
+                                          "cmd: makeindex/xindy")
+
         self.horizontal_latex_tabs.addTab(self.tab_printindex, "cmd: printindex")
         vlatex_layout.addWidget(self.horizontal_latex_tabs)
 
