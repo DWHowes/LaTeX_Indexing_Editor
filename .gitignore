@@ -12,6 +12,12 @@ data
 # one has no effect.
 documentation/*
 !documentation/*.pdf
+# And the Markdown sources, from 5 September 2026. The Design Overview moved
+# onto md_to_rtf.py with the Phase 6a rewrite, so its .md is now the source
+# the .rtf and the .pdf are generated from, and a *source* with no history is
+# worse than the hand-authored artefact it replaced. The generated .rtf stays
+# ignored, beside the .docx that always was.
+!documentation/*.md
 *.txt
 !requirements.txt
 !requirements-dev.txt
