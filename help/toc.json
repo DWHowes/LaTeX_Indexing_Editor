@@ -1,76 +1,187 @@
 [
-  {
-    "title": "Getting Started",
+ {
+  "title": "Getting Started",
+  "children": [
+   {
+    "title": "Application Overview",
+    "file": "getting_started/application_overview.md"
+   },
+   {
+    "title": "Opening and Creating a Project",
+    "file": "getting_started/opening_a_project.md"
+   },
+   {
+    "title": "The Base File",
+    "file": "getting_started/base_file.md"
+   },
+   {
+    "title": "Saving and Closing",
+    "file": "getting_started/saving_and_closing.md"
+   },
+   {
+    "title": "Create an Index Entry",
+    "file": "getting_started/create_an_index_entry.md"
+   }
+  ]
+ },
+ {
+  "title": "The Index Tree",
+  "children": [
+   {
+    "title": "Viewing and Navigating",
+    "file": "index_tree/navigating.md"
+   },
+   {
+    "title": "Inserting Entries",
+    "file": "index_tree/inserting_entries.md"
+   },
+   {
+    "title": "Editing and Deleting Entries",
+    "file": "index_tree/editing_deleting.md"
+   },
+   {
+    "title": "Range References",
+    "file": "index_tree/range_references.md"
+   },
+   {
+    "title": "Cross-References (See / See Also)",
+    "file": "index_tree/cross_references.md"
+   }
+  ]
+ },
+ {
+  "title": "The Entry Table",
+  "children": [
+   {
+    "title": "Editing Entries",
+    "file": "entry_table/editing.md"
+   },
+   {
+    "title": "Duplicate References",
+    "file": "entry_table/duplicate_references.md"
+   },
+   {
+    "title": "The Cross-References Tab",
+    "file": "entry_table/cross_references_tab.md"
+   }
+  ]
+ },
+ {
+  "title": "Custom LaTeX Commands",
+  "children": [
+   {
+    "title": "Creating a Command",
+    "file": "custom_commands/creating.md"
+   },
+   {
+    "title": "Managing Project Commands",
+    "file": "custom_commands/managing.md"
+   }
+  ]
+ },
+ {
+  "title": "Tools",
+  "children": [
+   {
+    "title": "Head Notes",
+    "file": "tools/head_notes.md"
+   },
+   {
+    "title": "RTF Export",
+    "file": "tools/rtf_export.md"
+   },
+   {
+    "title": "Index Statistics",
+    "file": "tools/index_statistics.md"
+   },
+   {
+    "title": "Building a Table of Authorities",
+    "file": "tools/table_of_authorities.md"
+   },
+   {
+    "title": "Check Index",
+    "file": "tools/check_index.md"
+   },
+   {
+    "title": "Range Consistency Check",
+    "file": "tools/range_consistency.md"
+   },
+   {
+    "title": "Repair Index Entries",
+    "file": "tools/repair_index_entries.md"
+   },
+   {
+    "title": "Resyncing Index Data from Disk",
+    "file": "tools/resync.md"
+   },
+   {
+    "title": "Resyncing Workspace Files from Disk",
+    "file": "tools/resync_workspace_files.md"
+   },
+   {
+    "title": "Managing Pruned Files",
+    "file": "tools/manage_pruned_files.md"
+   }
+  ]
+ },
+ {
+  "title": "Additional Features",
+  "children": [
+   {
+    "title": "Advanced Search",
+    "file": "additional/advanced_search.md"
+   },
+   {
+    "title": "Name Inversion",
+    "file": "additional/name_inversion.md"
+   },
+   {
+    "title": "Keyboard Shortcuts",
+    "file": "additional/keyboard_shortcuts.md"
+   }
+  ]
+ },
+ {
+  "title": "Preferences",
+  "file": "preferences.md",
+  "children": [
+   {
+    "title": "General",
+    "file": "preferences/general.md"
+   },
+   {
+    "title": "LaTeX Settings",
     "children": [
-      {"title": "Application Overview", "file": "getting_started/application_overview.md"},
-      {"title": "Opening and Creating a Project", "file": "getting_started/opening_a_project.md"},
-      {"title": "The Base File", "file": "getting_started/base_file.md"},
-      {"title": "Saving and Closing", "file": "getting_started/saving_and_closing.md"},
-      {"title": "Create an Index Entry", "file": "getting_started/create_an_index_entry.md"}
+     {
+      "title": "LaTeX Compiler",
+      "file": "preferences/latex_settings/latex_compiler.md"
+     },
+     {
+      "title": "imakeidx Package",
+      "file": "preferences/latex_settings/imakeidx.md"
+     },
+     {
+      "title": "idxlayout Package",
+      "file": "preferences/latex_settings/idxlayout.md"
+     },
+     {
+      "title": "hyperref Package",
+      "file": "preferences/latex_settings/hyperref.md"
+     },
+     {
+      "title": "Index Engine (makeindex / xindy)",
+      "file": "preferences/latex_settings/index_engine.md"
+     },
+     {
+      "title": "printindex Command",
+      "file": "preferences/latex_settings/printindex.md"
+     }
     ]
-  },
-  {
-    "title": "The Index Tree",
-    "children": [
-      {"title": "Viewing and Navigating", "file": "index_tree/navigating.md"},
-      {"title": "Inserting Entries", "file": "index_tree/inserting_entries.md"},
-      {"title": "Editing and Deleting Entries", "file": "index_tree/editing_deleting.md"},
-      {"title": "Range References", "file": "index_tree/range_references.md"},
-      {"title": "Cross-References (See / See Also)", "file": "index_tree/cross_references.md"}
-    ]
-  },
-  {
-    "title": "The Entry Table",
-    "children": [
-      {"title": "Editing Entries", "file": "entry_table/editing.md"},
-      {"title": "Duplicate References", "file": "entry_table/duplicate_references.md"},
-      {"title": "The Cross-References Tab", "file": "entry_table/cross_references_tab.md"}
-    ]
-  },
-  {
-    "title": "Custom LaTeX Commands",
-    "children": [
-      {"title": "Creating a Command", "file": "custom_commands/creating.md"},
-      {"title": "Managing Project Commands", "file": "custom_commands/managing.md"}
-    ]
-  },
-  {
-    "title": "Tools",
-    "children": [
-      {"title": "Head Notes", "file": "tools/head_notes.md"},
-      {"title": "RTF Export", "file": "tools/rtf_export.md"},
-      {"title": "Index Statistics", "file": "tools/index_statistics.md"},
-      {"title": "Building a Table of Authorities", "file": "tools/table_of_authorities.md"},
-      {"title": "Range Consistency Check", "file": "tools/range_consistency.md"},
-      {"title": "Resyncing Index Data from Disk", "file": "tools/resync.md"},
-      {"title": "Resyncing Workspace Files from Disk", "file": "tools/resync_workspace_files.md"},
-      {"title": "Managing Pruned Files", "file": "tools/manage_pruned_files.md"}
-    ]
-  },
-  {
-    "title": "Additional Features",
-    "children": [
-      {"title": "Advanced Search", "file": "additional/advanced_search.md"},
-      {"title": "Name Inversion", "file": "additional/name_inversion.md"},
-      {"title": "Keyboard Shortcuts", "file": "additional/keyboard_shortcuts.md"}
-    ]
-  },
-  {
-    "title": "Preferences",
-    "file": "preferences.md",
-    "children": [
-      {"title": "General", "file": "preferences/general.md"},
-      {
-        "title": "LaTeX Settings",
-        "children": [
-          {"title": "LaTeX Compiler", "file": "preferences/latex_settings/latex_compiler.md"},
-          {"title": "imakeidx Package", "file": "preferences/latex_settings/imakeidx.md"},
-          {"title": "idxlayout Package", "file": "preferences/latex_settings/idxlayout.md"},
-          {"title": "hyperref Package", "file": "preferences/latex_settings/hyperref.md"},
-          {"title": "Index Engine (makeindex / xindy)", "file": "preferences/latex_settings/index_engine.md"},
-          {"title": "printindex Command", "file": "preferences/latex_settings/printindex.md"}
-        ]
-      }
-    ]
-  }
+   },
+   {
+    "title": "Declared Alphabets",
+    "file": "preferences/declared_alphabets.md"
+   }
+  ]
+ }
 ]
