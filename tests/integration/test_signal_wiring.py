@@ -31,7 +31,13 @@ edit instead of a signal silently staying "known broken" forever.
 import pytest
 from PySide6.QtCore import QObject, Signal
 
-APP_MODULE_PREFIXES = ("controllers.", "views.", "models.")
+# "bookindexcore." is here for a reason worth stating: this sweep only inspects
+# objects whose class lives in one of these modules, so the moment a signal-
+# bearing class moved into the shared package it dropped out of the sweep
+# silently -- no failure, just less coverage. Every extraction phase moves
+# more of them. Signals declared in bookindexcore are still this application's
+# problem when this application is the one that has to connect them.
+APP_MODULE_PREFIXES = ("controllers.", "views.", "models.", "bookindexcore.")
 
 
 def _is_app_object(obj) -> bool:
@@ -127,7 +133,35 @@ def _collect_boot_time_signal_pairs(app):
 # Each gets its own xfail test below rather than being silently skipped by
 # the sweep, and the sweep itself excludes exactly these pairs so it isn't
 # reporting the same finding twice.
-KNOWN_DEAD_SIGNALS = set()
+#: Signals that are legitimately unconnected in *this* application.
+#:
+#: `LevelFields` is shared with the Word editor (step 11d), and two of its
+#: signals are for a host that wants them: `committed` is Return on the last
+#: level, which the Word editor turns into "make this entry" and this
+#: application answers with Ctrl+K instead; `levels_edited` is for a host that
+#: watches typing. A shared widget offering more than one host uses is not the
+#: same defect as a signal built here and never wired up, which is what this
+#: test exists to catch.
+#: The file watcher is the same story (step 11e). `file_changed` and
+#: `file_missing` are what a host whose files are *not* text listens to; this
+#: application listens to `file_reload_completed`, which arrives with the new
+#: contents, because a `.tex` file has contents worth handing over.
+#: `MainToolBar.line_spacing_changed` is the third of the kind, and this test
+#: is what made it one. The picker behind it is built only for a host that
+#: passes `line_spacing=True`, because paragraph spacing means something in a
+#: view of prose -- the Word editor's manuscript -- and nothing in a view of
+#: `.tex` source, where a paragraph is a run of lines the author broke where
+#: they chose. It was added unconditionally first, this test caught it at
+#: once, and the control became declared rather than the signal becoming
+#: exempt. The entry stands for the signal, which is still on the shared
+#: class; the spinbox does not exist in this application at all.
+KNOWN_DEAD_SIGNALS = {
+    ("bookindexcore.ui.entry_window.levels.LevelFields", "committed"),
+    ("bookindexcore.ui.entry_window.levels.LevelFields", "levels_edited"),
+    ("bookindexcore.qt.watcher.TextFileWatcherEngine", "file_changed"),
+    ("bookindexcore.qt.watcher.TextFileWatcherEngine", "file_missing"),
+    ("bookindexcore.ui.window.tool_bar.MainToolBar", "line_spacing_changed"),
+}
 
 
 def _qualname(obj) -> str:
@@ -176,7 +210,7 @@ def test_walk_finds_the_known_live_wired_signals_as_a_sanity_check(booted_app):
         ("views.main_menu_bar.MainMenuBar", "recent_menu_about_to_show"),
         ("views.file_tree_view.FileTreeView", "file_prune_requested"),
         ("controllers.index_edit_controller.IndexEditController", "heading_renamed"),
-        ("models.index_edit_staging_model.IndexEditStagingModel", "entry_staged"),
+        ("bookindexcore.qt.staging.QtIndexEditStagingModel", "entry_staged"),
     ]
     for key in expect_present_and_connected:
         assert key in by_key, f"Expected signal {key} was not found by the object walk at all."

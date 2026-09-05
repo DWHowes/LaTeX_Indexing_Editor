@@ -1,90 +1,26 @@
+"""
+This application's three right-click menus: the index tree, the workspace file
+tree, and the entry table.
+
+The plumbing they share -- attaching to a viewport once it exists, catching the
+request from both viewport and widget, theming the menu, suppressing an empty
+one -- is ``bookindexcore.ui.context_menu.BaseContextMenuManager``. What stays here
+is the part that is about *this* application: which actions a menu offers and
+what they mean. "Prune" against a LaTeX project file has nothing in common with
+what the word would mean to an InDesign story, and the entry-table manager
+reads this app's 8-column layout constants, which the shared package does not
+have and will not until phase 4 parameterises the entry table.
+"""
 import os
 
-from PySide6.QtCore import QObject, Qt, Signal, Slot, QModelIndex, QPoint, QTimer, QEvent
+from PySide6.QtCore import Qt, Signal, Slot, QModelIndex
 from PySide6.QtWidgets import QMenu
 from PySide6.QtGui import QAction
 
-from controllers.app_style_configuration import AppStyleConfiguration
+from bookindexcore.ui.context_menu import BaseContextMenuManager
+
 from views.entry_modifier_list import COL_ID, COL_MAIN_DISP, COL_SUB2_DISP
 
-class BaseContextMenuManager(QObject):
-    """
-    POLYMORPHIC BASE CLASS (STRICT MVC presentation layer).
-    Handles visual UI mapping mechanics and custom stylesheet setups.
-    Has zero knowledge of backend data stores, paths, or pipeline operations.
-    """
-    def __init__(self, view_widget, parent=None):
-        super().__init__(parent)
-        self.view_widget = view_widget
-
-        if self.view_widget:
-            # Defer wiring so the viewport is guaranteed to exist.
-            # viewport() returns None if the widget hasn't been shown yet.
-            QTimer.singleShot(500, self._connect_viewport)
-
-    def _connect_viewport(self):
-        if not self.view_widget:
-            return
-
-        try:
-            viewport = self.view_widget.viewport()
-        except AttributeError:
-            viewport = None
-
-        if viewport is not None:
-            viewport.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            viewport.customContextMenuRequested.connect(self._intercept_context_request)
-            viewport.installEventFilter(self)
-
-            self.view_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            self.view_widget.customContextMenuRequested.connect(self._intercept_context_request)
-        else:
-            self.view_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            self.view_widget.customContextMenuRequested.connect(self._intercept_context_request)
-
-    @Slot(QPoint)
-    def _intercept_context_request(self, pixel_position):
-        if not self.view_widget:
-            return
-
-        try:
-            viewport = self.view_widget.viewport()
-        except AttributeError:
-            viewport = None
-
-        proxy_index = self.view_widget.indexAt(pixel_position)
-
-        if not proxy_index.isValid():
-            return
-
-        context_menu = QMenu(self.view_widget)
-
-        try:
-            context_menu.setStyleSheet(AppStyleConfiguration.get_unified_menu_stylesheet())
-        except ImportError:
-            pass
-
-        self.populate_menu_actions(context_menu, proxy_index)
-
-        if not context_menu.isEmpty():
-            if viewport is not None and self.sender() is viewport:
-                global_pos = viewport.mapToGlobal(pixel_position)
-            else:
-                global_pos = self.view_widget.mapToGlobal(pixel_position)
-            context_menu.exec(global_pos)
-
-    def eventFilter(self, watched, event):
-        if (
-            event.type() == QEvent.ContextMenu
-            and self.view_widget is not None
-            and watched is getattr(self.view_widget, "viewport", lambda: None)()
-        ):
-            self._intercept_context_request(event.pos())
-            return True
-        return super().eventFilter(watched, event)
-
-    def populate_menu_actions(self, menu_container: QMenu, proxy_index: QModelIndex):
-        raise NotImplementedError("Subclasses must implement populate_menu_actions.")
 
 class IndexTreeContextMenuManager(BaseContextMenuManager):
     """
@@ -118,17 +54,22 @@ class IndexTreeContextMenuManager(BaseContextMenuManager):
 class FileTreeContextMenuManager(BaseContextMenuManager):
     """
     Subclass: File Asset Visual Context Actions.
-    Pure Interface: Emits raw indices to the controller for file validation checks.
+
+    Emits resolved *paths*, not indices. It used to emit the QModelIndex and
+    let the receiving controller ask the persistence layer to read the item
+    roles out of it, which is how a Qt view type ended up imported by the
+    database module. Reading an index is this layer's job; the controller and
+    the repository below it deal in paths.
     """
-    prune_file_triggered = Signal(QModelIndex)
-    set_root_file_triggered = Signal(QModelIndex)
+    prune_file_triggered = Signal(str)
+    set_root_file_triggered = Signal(str)
 
     def populate_menu_actions(self, menu_container: QMenu, proxy_index: QModelIndex):
         if proxy_index.column() != 0:
             proxy_index = proxy_index.siblingAtColumn(0)
 
         display_name = str(proxy_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
-        file_path = str(proxy_index.data(Qt.ItemDataRole.UserRole + 1) or "").strip()
+        file_path = self._path_of(proxy_index)
 
         set_root_action = QAction(f"Set '{display_name}' as root file", menu_container)
         set_root_action.setData(proxy_index)
@@ -154,21 +95,34 @@ class FileTreeContextMenuManager(BaseContextMenuManager):
             menu_container.addSeparator()
             menu_container.addAction(prune_action)
 
+    def _path_of(self, proxy_index: QModelIndex) -> str:
+        """The tree node's absolute path, normalized, or "" if it has none."""
+        if not isinstance(proxy_index, QModelIndex) or not proxy_index.isValid():
+            return ""
+        return self.view_widget.absolute_path_of(proxy_index).strip()
+
     @Slot()
     def _on_set_root_file_clicked(self):
         action = self.sender()
         if action and isinstance(action, QAction):
-            target_index = action.data()
-            if isinstance(target_index, QModelIndex) and target_index.isValid():
-                self.set_root_file_triggered.emit(target_index)
+            file_path = self._path_of(action.data())
+            if file_path:
+                self.set_root_file_triggered.emit(file_path)
 
     @Slot()
     def _on_prune_clicked(self):
         action = self.sender()
         if action and isinstance(action, QAction):
             target_index = action.data()
-            if isinstance(target_index, QModelIndex) and target_index.isValid():
-                self.prune_file_triggered.emit(target_index)
+            if not isinstance(target_index, QModelIndex) or not target_index.isValid():
+                return
+            # A folder has a path like anything else, so the guard has to be
+            # explicit: pruning is a per-file record operation.
+            if self.view_widget.is_directory_node(target_index):
+                return
+            file_path = self._path_of(target_index)
+            if file_path:
+                self.prune_file_triggered.emit(file_path)
 
 class EditEntryContextMenuManager(BaseContextMenuManager):
     """
@@ -181,6 +135,7 @@ class EditEntryContextMenuManager(BaseContextMenuManager):
     doesn't itself change the selection).
     """
     invert_name_triggered = Signal(QModelIndex)
+    set_name_language_triggered = Signal(QModelIndex)
     delete_references_triggered = Signal(list)      # list of entry IDs
     duplicate_references_triggered = Signal(list)   # list of entry IDs
     invert_headings_triggered = Signal(list)         # list of entry IDs
@@ -192,6 +147,17 @@ class EditEntryContextMenuManager(BaseContextMenuManager):
         invert_name_action.setData(main_index)
         invert_name_action.triggered.connect(self._on_invert_name_clicked)
         menu_container.addAction(invert_name_action)
+
+        # Beside inversion, and targeting the same Main heading, because it
+        # is the same question asked without a lookup: an indexer who already
+        # knows a name is Arabic could only say so by running an authority
+        # search and answering the suggestion dialog. Found by
+        # `probes/probe_core_wiring.py`, which reported the shared dialog as
+        # reachable from nothing here.
+        set_language_action = QAction("Set name language...", menu_container)
+        set_language_action.setData(main_index)
+        set_language_action.triggered.connect(self._on_set_name_language_clicked)
+        menu_container.addAction(set_language_action)
 
         menu_container.addSeparator()
 
@@ -264,6 +230,14 @@ class EditEntryContextMenuManager(BaseContextMenuManager):
             target_index = action.data()
             if isinstance(target_index, QModelIndex) and target_index.isValid():
                 self.invert_name_triggered.emit(target_index)
+
+    @Slot()
+    def _on_set_name_language_clicked(self):
+        action = self.sender()
+        if action and isinstance(action, QAction):
+            target_index = action.data()
+            if isinstance(target_index, QModelIndex) and target_index.isValid():
+                self.set_name_language_triggered.emit(target_index)
 
     @Slot()
     def _on_delete_clicked(self):

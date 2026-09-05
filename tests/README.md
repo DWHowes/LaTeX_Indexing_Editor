@@ -1,5 +1,24 @@
 # Test suite
 
+## This is no longer the only suite
+
+Extraction phase 1 moved the format-agnostic half of several subsystems into
+the **`bookindexcore`** package, and their tests went with them. Name filing, the
+undo stack, the change journal, the staging model, session backup and logging,
+theming, help content, search, and the shared About box are all tested in
+`../bookindexcore/tests/` now, not here. What stays is everything that is about
+*this* application: LaTeX grammar, the `.tex` backend, persistence, and the
+wiring that connects the shared pieces to this app's own.
+
+Run both. `bookindexcore` is installed editable, so a change there is live here
+immediately — and a change there that breaks this application will not show up
+in this suite's collection, only in its failures.
+
+```
+pytest                              # this application
+cd ../bookindexcore && pytest           # the shared package
+```
+
 ## Running
 
 ```
@@ -20,7 +39,9 @@ that construct real widgets) runs headlessly in a plain terminal or CI.
 tests/
   conftest.py                    # QT_QPA_PLATFORM=offscreen, fresh_persistence, sample_project_dir, booted_app
   fixtures/sample_project/       # small checked-in .tex project used across layers
-  unit/models/                   # layer 1: pure logic, no PySide6 dependency
+  unit/                          # layer 1: pure logic, no PySide6 dependency
+  unit/test_layering.py          #   ...plus the static import-direction scan (not module-specific)
+  unit/models/                   #   one file per module under test
   persistence/                   # layer 2: FileTreePersistence + ProjectLoadWorker's sync logic
   controllers/                   # layer 3: one controller at a time, hand-built collaborators
   integration/                   # layer 4: boots the REAL AppPipelineController object graph
@@ -62,12 +83,142 @@ one behaviour rather than a whole module, and each is named for the behaviour:
 have their subject in `views/`, not `models/`, but are pure logic and belong
 to this layer). Their subsections name them explicitly.
 
+### `latex_dialect.py`
+
+`test_latex_dialect.py` runs `bookindexcore.testing.dialect_conformance` — the
+same battery the Word and InDesign dialects will answer to — against
+`LatexDialect`, plus the LaTeX-specific behaviour the battery cannot state.
+
+What is here rather than in the shared package is the **corpus**. The laws are
+shared; the samples cannot be, because `Kant!early works` is two levels in this
+format and one level containing an exclamation mark in Word. When adding a
+sample, prefer one that has broken something: the corpus already carries
+`Kant, Immanuel|(textbf` (a styled range, which was read as a page style named
+`(textbf` until [`index_tag_grammar.py`](#index_tag_grammarpy) fixed it) and
+`Bang"! Goes the theory` (a quoted separator).
+
+Three things the battery cannot know and this file pins:
+
+- **The stored/markup boundary.** The Page column stores `"standard"` for a
+  reference with no page style; the markup spells that as nothing at all.
+  `TestStoredEncapBoundary` is that boundary. Getting it wrong does not fail
+  loudly — the stored word is simply written into the `.tex` file and the
+  document acquires a `\standard` that no package defines.
+- **`rich_text_runs`**, lifted out of `IndexTextFormatterDelegate`, where it
+  could only ever serve one widget. Note
+  `test_an_unknown_macro_passes_through_verbatim`: the delegate's *docstring*
+  claimed unsupported macros were stripped and its code did the opposite. The
+  code is what shipped, so the code is what moved — but it disagrees with
+  `suggested_sort_key`, which reads through any `\name{...}`. Worth resolving
+  on its own, not inside an extraction phase.
+- **That the dialect and the grammar never disagree.** Almost every dialect
+  method forwards to `index_tag_grammar`, and the scanner and the write path
+  still call that module directly. A dialect that quietly re-implemented a
+  reading would put two implementations of the grammar back into the
+  application, which is the exact failure `index_tag_grammar` was written to
+  end.
+
+### `latex_text_backend.py`
+
+`test_latex_text_backend.py` runs `bookindexcore.testing.backend_conformance`
+— the same battery the Word and InDesign backends will answer to — against a
+real folder of `.tex` files with a real `DocumentIOController` writing to
+them. Passing it was the stated exit condition for extraction phase 3.
+
+Most of the battery *mutates* the document, so `make_backend` builds a fresh
+project every time. A battery whose tests interfere is worse than none.
+
+`TestTheEntryTable` covers the thing this backend exists to do and the thing
+that is easiest to get wrong. A `.tex` file carries nothing that identifies a
+macro — no bookmark, no insert label, nothing but a position — so identity is
+assigned by whoever first scans it and then *maintained*. Re-deriving
+positions by rescanning would re-mint every anchor and orphan every locator
+held anywhere else. The tests pin that an anchor survives an edit that moves
+its entry, and that the table still agrees with the file afterwards: if it
+drifts, the next write guard refuses, which is exactly how an entry becomes
+uneditable.
+
+`shift_after` has its own test because it is the odd one out — a move the
+backend did not cause. The generated preamble and cross-reference blocks are
+spliced straight into a file by machinery that knows nothing about entries,
+and everything after the splice point moves anyway.
+
+### `test_latex_text_backend_adoption.py` — identity across the seam
+
+`adopt_entries` seeds the backend's entry table from records the application
+already holds rather than from a scan, because the two disagree about
+*identity*: a scan mints anchors from where a macro is now, and the app's
+anchors were minted once and never move.
+
+The two tests in `TestIdentityAcrossTheSeam` are both regressions from
+converting real call sites in phase 5b, and **neither produced an error** —
+which is why they are worth keeping:
+
+- Normalising the container spelling made every locator the backend returned
+  compare unequal to the ones the store held, so `apply_relocations` moved
+  nothing and reported nothing wrong.
+- A returned locator that omitted `line_number`/`column_offset` — NOT NULL
+  columns — produced a save that failed at the database, a long way from the
+  edit that caused it.
+
+### `latex_record_mapping.py` — the anchor rule and the relocation sum
+
+Two later additions, both about the same thing: an entry's *identity*, as
+distinct from its position.
+
+`TestTheAnchorRule` covers `path:line:column`, applied at the single point
+where a row becomes a record. It matters because of what an anchor is for —
+`EntryStore.apply_relocations` matches an update to a record by anchor, and two
+records with no anchor have two locators that compare *equal*. The batch is
+then ambiguous rather than wrong in one place, and the store refuses the whole
+thing. Deriving the anchor in the codec makes that impossible by construction
+instead of a precondition every caller has to remember.
+
+`TestRelocations` covers `relocations_for`, which is the one copy of "what an
+edit moves". `test_the_backend_re_exports_this_very_function` asserts identity
+rather than equivalence, and is the point of the arrangement: `LatexTextBackend`
+presents the function under the name §4.2 gives it, the entry store calls it
+directly, and two implementations of the sum would eventually disagree about
+which entries an edit moves — surfacing as a write guard refusing an edit a
+long way from the cause.
+
+`test_the_entry_at_the_edit_position_is_not_moved` is the subtle one: that
+entry is the one being rewritten, its new end is set by the caller, and moving
+it here would apply the delta to it twice.
+
+### `latex_record_mapping.py`
+
+The boundary between this application's `project_references` columns and the
+shared `IndexReference`. `bookindexcore` owns the record, this application
+owns the schema, and neither knows the other's names — so
+`test_latex_record_mapping.py` is mostly about *losing* things.
+
+`test_no_column_is_silently_dropped` is the one to keep. A column no mapping
+names is lost on the next write, and the symptom shows up much later as a
+field that mysteriously reverts to its old value.
+
+Three things worth knowing about the mapping:
+
+- **The `encap` column holds three different things** — a page style, a range
+  marker, and a cross-reference — and the record keeps them as three fields.
+  Reading them as one string is a bug this project has already shipped.
+- **`is_range_closer` and `is_cross_reference` are derived, not stored.** They
+  are still written, because SQL queries filter on them, but a stored copy of
+  a derived value is a copy that can disagree with its source. A row claiming
+  to be a closer while its `encap` says otherwise is believed about its
+  `encap`.
+- **Positions never become record fields.**
+  `test_no_position_is_a_record_field` asserts that structurally. If
+  `absolute_position` ever reappears there, LaTeX's position model is in the
+  shared model — and Word re-resolves from a bookmark while InDesign has no
+  offsets at all.
+
 ### `index_tag_grammar.py`
 
 The single parser/serializer for `\index` tag structure: levels, encap, sort
-keys, see/seealso, range markers, heading depth/parent paths, and whole-tag
-`parse_body`/`parse_macro`/`IndexTag.to_macro`. Everything downstream trusts
-it about brace nesting, escapes and separator precedence, so
+keys, see/seealso, range markers, index classes, heading depth/parent paths,
+and whole-tag `parse_body`/`parse_macro`/`IndexTag.to_macro`. Everything
+downstream trusts it about brace nesting, escapes and separator precedence, so
 `test_index_tag_grammar.py` is the deepest layer-1 file after
 `test_latex_index_parser.py`, and for the same reason. Two things are worth
 knowing before editing either file:
@@ -97,6 +248,28 @@ pair to drift into another round-trip corruption; and
 `IndexEditController._substitute_token_in_heading` silently dropped a
 trailing `!` and used `.split("@")[0]`, which returns `"a{b"` for `a{b@c}d`.
 
+**The index class (`\index[names]{...}`).** `imakeidx`'s optional argument
+selects which of a project's named indexes an entry goes to, and it lives
+*outside* the braces — so it is a field on `IndexTag`, never part of
+`to_body()`, and therefore never part of `heading_raw_text`. That separation is
+what `TestIndexClasses::test_the_class_is_not_part_of_the_body` protects: the
+same term filed in two indexes must not look like two different headings.
+
+`TestIndexClasses` covers reading, writing and — the one that matters —
+`test_refiling_replaces_rather_than_accumulates`. Filing is not a prefix
+operation. An indexer moving a heading from the Subject Index to a Table of
+Authorities does it twice on the same macro, and an implementation that
+accumulated would corrupt it the second time.
+
+`TestMacroBodyStart` covers the write guard. It used to be asked as
+`startswith("\\index{")`, which answers *no* for every entry in a named index —
+and a guard that answers no aborts the rewrite, so those entries silently could
+not be edited at all. Note `test_a_custom_command_is_not_admitted_by_default`:
+unlike `build_macro_pattern`, which always admits plain `\index` alongside
+whatever else it is given, this one matches exactly the command it was asked
+about. Overwriting an `\isidx` span with an `\index` macro is the confusion the
+guard exists to prevent.
+
 **A range marker and a page style in one encap.** `makeindex` writes a styled
 range marker-first — `|(textbf` … `|)textbf` — so the encap is two independent
 halves, not one value. `range_role` used to be `encap == "("`, an exact
@@ -108,6 +281,21 @@ an encap without knowing whether it is a range, and the documented case where
 a `see{X}` encap is reported as a command — nothing in the *marker* grammar
 distinguishes a cross-reference, so callers that care ask `parse_encap_xref`
 first. `TestRangeRoles` keeps the bare `(`/`)` cases and adds the styled ones.
+
+**A note locator is a page style with an argument.** `TestNoteLocators` covers
+`fn{4}` — the encap that renders `123n4` against a document defining
+`\def\fn#1#2{{#2}n#1}` — and it is built *on top of* the range pair above
+rather than beside it, because `(fn{4}` is a range that also carries a note
+number and a caller that read the note and forgot the marker would write back
+a range with one end. LaTeX is the only one of the three formats this family of
+editors targets that can express one, which is why `LatexDialect` is the only
+dialect declaring `supports_note_locators = True`.
+
+The tests that matter are the ones that decline. `see{Cats}` has exactly the
+same shape and is a cross-reference; a project's own `\toacite{5}` has it too
+and is a page style. **Membership in the project's list of note macros is what
+identifies a note locator, never the shape**, which is the same discipline as
+the `parse_encap_xref`-first rule directly above.
 
 Because `ProjectLoadWorker` and `range_consistency_model` already asked the
 grammar rather than comparing encaps themselves, both started handling styled
@@ -190,23 +378,7 @@ written as the *selections a user makes*, not as offsets — a test named for
 one named for `(4, 5)` does not.
 
 ### `index_command_stack.py`
-
-The undo/redo records — `MacroEdit`, `EntrySnapshot`, `HeadingChange`,
-`IndexCommand` — and the stacks holding them. Pure data with no Qt and no
-I/O; execution lives in `IndexEditController.apply_command`, so the
-arithmetic every undo depends on is testable in isolation.
-
-The rule worth staring at is edit **ordering**: edits are applied front to
-back and each shifts everything after it, so `IndexCommand.inverted()` walks
-them backwards. Get that wrong and an undo writes to positions that no longer
-describe the text. `test_index_command_stack.py` pins it from both
-directions, including the range-pair case where a closer merged into its
-opener's command must come back off first.
-
-`TestConfigurableLimit` covers a later change: the undo depth became a user
-preference (Preferences → General), so the bound has to be changeable on a
-**live** stack rather than only at construction, and lowering it has to trim
-the oldest commands immediately rather than waiting for the next push.
+**Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `latex_index_parser.py`
 
@@ -219,63 +391,32 @@ scrubbing macro definitions, and turning positions into line/column
 coordinates — and delegates everything between the braces.
 
 ### `name_inverter.py`
-
-The offline rule-based logic (`_fast_invert` and friends). The methods that
-actually make requests — `_viaf_autosuggest_uncached`,
-`_fetch_viaf_authority_heading`, `_fetch_lc_authority_heading` — remain out of
-scope, but the *resolution* logic wrapped around them is now covered, because
-an AutoSuggest entry carrying neither an LC id nor a VIAF id falls straight
-through to its own `term`/`name` field without touching the network.
-`TestFetchAuthorityFromAutosuggestEntry` uses that route.
-
-Two real, pre-existing bugs were found here and confirmed empirically while
-writing the original coverage, not just inferred from reading: an
-`UnboundLocalError` on any name where "del" is the Spanish connector, and dead
-code — a regex guard that could never match — silently breaking the documented
-two-token "Mac Donald" form. Both are now fixed, with
-`test_two_token_mac_space_form_combines` and
-`test_del_connector_does_not_crash` in `test_name_inverter.py` as permanent
-regression coverage (no longer `xfail`).
-
-Three later additions each pin a fix of their own:
-
-- **`TestFetchAuthorityFromAutosuggestEntry`** — the trailing life-date
-  qualifier (`Marshall, John, 1755-1835`) used to be stripped on only *one* of
-  the four paths that can return a heading, the Library of Congress one. A
-  heading taken from VIAF's own record kept its dates, and VIAF main headings
-  carry them as a matter of course, so the same person resolved two different
-  ways depending on which id AutoSuggest happened to carry. Stripping now
-  happens once at the method's single exit point. Indexers strike these dates,
-  so the pre-fix behaviour produced a spurious "user correction" on every such
-  name.
-- **`TestConstructionWithoutACache`** — `self._conn` was assigned only inside
-  the branch that opens the database, so constructing with `viaf_enabled=False`
-  or no path left the attribute missing entirely and every later read of it
-  raised `AttributeError`, including from `close()` and `__del__`.
-- **`TestCachePathHandling`** — `os.makedirs(os.path.dirname(path))` sat
-  outside the `try`, so a bare relative filename (whose dirname is `""`) took
-  the constructor down, while every other way of failing to open the cache
-  degraded quietly. The call is now inside the `try` *and* guarded for the
-  empty-dirname case, so a bare filename genuinely works rather than merely
-  failing silently.
-
-The invariant all three protect: opening the cache either works or leaves a
-usable cacheless inverter. It must never raise out of the constructor.
+**Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `session_logger.py`
+**Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
 
-`test_session_logger_folder.py` covers the log folder specifically — its name
-became a user preference (Preferences → General), and the default changed from
-the hidden `.session_logs` to a visible `session_logs`, on the grounds that a
-folder whose whole purpose is for the user to open and read it should not be
-hidden. `TestRealignToProjectRoot` covers the folder following the open
-project.
+### Import direction (`test_layering.py`)
 
-Every test here stops the intercept in teardown. `SessionLogger` reassigns
-`sys.stdout`/`sys.stderr` on construction, and leaving that in place swallows
-pytest's own output for the rest of the run — see also
-[the theme broker gotcha](#the-theme-broker-is-a-process-wide-singleton) for
-the other process-wide state this suite has to put back.
+The one file in this layer whose subject is not a module but the **shape of
+the import graph**. It exists because the `bookindexcore` extraction found five
+layering faults in modules headed for the shared package — none of them a
+runtime bug, all of them extraction blockers, because a model that imports a
+view is fine until the model moves package and the view does not.
+
+Three assertions, all static: no module in `models/` imports `views` or
+`controllers`; no module imports itself; and the modules named in
+`QT_FREE_MODULES` import no `PySide6`. The scan reads import statements out of
+the parse tree rather than importing anything, so a module needing a GUI, a
+display or a project on disk is covered exactly like one that isn't, and
+function-body imports count — a deferred import breaks the cycle at runtime but
+keeps the coupling this file is about.
+
+**Extend `QT_FREE_MODULES` as each extraction phase moves more code into a
+Qt-free layer.** It is the cheapest available enforcement of the rule that
+`bookindexcore`'s model, dialect, backend, persistence, syntax and session layers
+import nothing outside the standard library, which is what lets the Word and
+InDesign backends run headlessly.
 
 ### `entry_modifier_list.py` encap style values
 
@@ -284,6 +425,20 @@ the other process-wide state this suite has to put back.
 module. The bold/italic encap name lists behind the Entry Table's Page column
 became a user preference (Preferences → General) because a project styling its
 page numbers with its own macro silently got a plain, mis-styled cell for it.
+
+`TestTheDialectSeesTheSamePreference` covers the second consumer. The Entry
+Table is no longer the only thing that needs to know which macro means bold —
+`LatexDialect.page_style_vocabulary` is what shared UI will populate a
+page-style control from, and shared code cannot reach into this module's
+private frozensets. The preference therefore lands on both or on neither; two
+copies that can drift apart is the class of bug `index_tag_grammar` exists to
+end.
+
+The *defaults* those lists start from live on `index_tag_grammar`, not here:
+which markup means bold is a fact about the format. They used to sit in
+`views/entry_modifier_list.py` and be imported upwards by
+`models/preferences_persistence.py`, which is one of the faults
+[`test_layering.py`](#import-direction-test_layeringpy) now prevents.
 
 The lists are module-level state read while building every table row, so each
 test restores the defaults afterwards; a leaked value changes how an unrelated
@@ -336,10 +491,7 @@ rather than guessed — the escaping is easy to get subtly wrong by inspection
 alone. No bugs found.
 
 ### `session_backup_manager.py`
-
-Register/revert/restore-single/clear-all backup sequencing, real files under
-`tmp_path` throughout, no os/shutil mocking, since the sequencing itself is
-the whole point. No bugs found.
+**Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `latex_entry_model.py`
 
@@ -349,15 +501,10 @@ and `metadata`'s exact dict shape, all in isolation beyond what
 `test_latex_index_controller_insert.py` exercises end-to-end. No bugs found.
 
 ### `help_content_model.py`
-
-`load_toc`, and `render_topic_html`'s Markdown-to-HTML conversion, heading-id
-slugification, path-traversal refusal, and style templating. Real files under
-`tmp_path`, no `QTextBrowser`. No bugs found.
+**Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `theme_config_model.py`
-
-Mirrors `IndexPrefsConfigModel`'s update/serialize/seed/load/persist pattern
-for the dark/light colour dataclasses. No bugs found.
+**Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
 
 ### `app_paths.py`
 
@@ -379,11 +526,62 @@ needed) and the synchronous, non-threaded parts of `ProjectLoadWorker`
 `compute_file_checksums`). Use the `fresh_persistence` and
 `sample_project_dir` fixtures from the root `conftest.py`.
 
+**Half of what this layer tests now lives in `bookindexcore.persistence`.**
+`FileTreePersistence` is a subclass of `IndexRepository` and keeps only the
+three tables about *files* — `project_files`, `project_file_sync_state`,
+`project_custom_commands`. The index tables, the transaction and the migration
+runner are shared, and `bookindexcore/tests/persistence/` covers them against
+the paper dialect, which is the better test: it is what shows that no query
+here knows what a cross-reference looks like in LaTeX. These tests stay
+because they exercise the two halves *together*, through the class the
+application actually holds.
+
 Split by concern rather than by class: `test_schema_and_setup.py`,
 `test_reference_crud.py`, `test_project_files.py`,
 `test_metadata_and_commands.py`, `test_index_manifest.py`,
 `test_statistics_and_queries.py`, `test_cross_references.py`,
 `test_sync_checksums.py`, and `test_project_load_worker.py`.
+
+`test_schema_and_setup.py` also covers **`is_cross_reference`**, the stored
+boolean on `project_references` that replaced an
+`(encap LIKE 'see{%' OR encap LIKE 'seealso{%')` fragment three queries used to
+interpolate. The flag is *derived*, never supplied by a caller, so the coverage
+is about it staying in step with the encap it comes from: set on both insert
+paths, rewritten by any update that touches `encap` in either direction, left
+alone by an update that doesn't, and backfilled once — computed, not from a
+constant `DEFAULT` — when an older project database first gains the column.
+One test pins that the backfill does **not** re-run on a second open: it is a
+migration, not a repair pass. Note that the flag is stricter than the `LIKE`
+prefix it replaced, since it is computed by `grammar.is_xref_encap`; an
+unterminated `see{Target` is no longer a cross-reference, which is the point —
+the database now holds the same opinion as the rest of the application.
+
+It also covers the **schema version stamp**. That field existed from the
+beginning and was inert: seeded once with `INSERT OR IGNORE` and read by
+nothing, so it said `1.0.0` through five schema changes. It is written by the
+shared migration runner now, and
+`test_a_new_project_is_stamped_at_the_current_schema_version` pins that a
+freshly created database reports the current core version *and* this
+application's own host version — the two are numbered separately, so adding a
+LaTeX-only table never has to touch the core's numbering.
+
+### Per-index settings (`test_index_prefs_config_model.py::TestPerIndexSettings`)
+
+The three `\makeindex[...]` keys — title, columns, intoc — describe **one
+index** and now live in the project's index-definitions list rather than in
+the flat `pref_` namespace. `imakeidx_noautomatic` and `imakeidx_nonewpage`
+are `\usepackage` options and deliberately stay flat: they apply once however
+many indexes a project declares, and folding a document-wide setting into one
+index's definition would make it look per-index the moment a project has two.
+
+The test worth reading is
+`test_saving_the_default_index_leaves_a_second_index_alone`. The preferences
+dialog can only see one index today, so its save has to be a read-modify-write
+of the list; a wholesale replace would silently delete a Table of Authorities
+the project had already declared. `test_a_migrated_project_keeps_the_title_its_indexer_chose`
+is the end-to-end version: an older database opens, the schema migration folds
+its old flat values into definition zero, and the model reads them from the
+new place.
 
 `test_project_load_worker.py` also pins that a **styled** range written by
 hand — `\index{term|(textbf}` … `\index{term|)textbf}`, valid `makeindex` that
@@ -401,6 +599,96 @@ for why.
 
 `pytest-qt`'s `qtbot`, testing one controller at a time with hand-built
 collaborators.
+
+### Bulk tools: `test_bulk_command_at_scale.py` and `test_bulk_repair_controller.py`
+
+Two files covering the contract every tool that changes the index has to meet —
+one command, all-or-nothing, previewed.
+
+**`test_bulk_command_at_scale.py`** is about the machinery. It applies a
+command of 300 edits and asserts the file comes back **byte for byte** after
+inverting it. That comparison is the one that matters: every edit changes the
+length of what it replaces, so each shifts everything after it, and a rounding
+error anywhere accumulates across three hundred edits and surfaces as text in
+the wrong place rather than as an exception. Coordinates are checked by
+*reading the file at each cached span* and confirming it holds that entry's
+macro — not by asserting the numbers changed plausibly.
+
+Its docstring carries the **measured cost model**, `O(edits × entries)`, with
+the table. That is there so a tool author can predict the cost rather than
+discover it, and so the loose time ceiling in the file is understood as a
+guard against a change for the worse rather than a performance target.
+
+**`test_bulk_repair_controller.py`** is about the first tool built on it. The
+tests worth reading are in `TestWhatItRefusesToLose`: the encapsulation, the
+range marker and the index class all live *outside* `heading_raw`, so
+rebuilding a macro from the heading alone silently destroys them — turning
+`\index{Main|textbf}` into `\index{Main}`, dropping the `|(` that opens a page
+range, or moving an entry out of its named index. The rename path learned that
+the hard way; these pin it for the repair path.
+
+`test_a_stale_proposal_is_refused_rather_than_misapplied` covers the gap a
+preview opens: it can sit on screen while the indexer thinks, and the document
+can move underneath it. Edits are rebuilt from current coordinates at apply
+time and the backend's guard refuses any that no longer match, so the outcome
+is nothing written rather than the wrong span rewritten.
+
+### `test_check_index_controller.py` — the application's half, and only that
+
+The twenty-four Check Index rules are tested in `bookindexcore`, against a
+dialect no file is written in, precisely so that nothing about them can be
+LaTeX. What this file covers is the three things only an application can
+supply — the entries, the project's vocabulary, and **document order** — and
+one of those is the reason the file exists at all.
+
+`TestDocumentOrder` is the part to read. `LatexTextBackend.order_key` resolves
+an anchor through a per-container entry table, and against an **unadopted**
+backend it answers `-1` for every entry: no exception, no warning, and a
+report in which no two page ranges ever overlap because the rule could not
+look. That is the same shape as the coordinate bug this project already
+shipped once, so both halves are pinned —
+`test_the_backend_can_order_every_entry_it_is_given` asserts the controller's
+adoption works, and `test_without_adoption_the_keys_are_all_the_same` records
+what the report would silently become if it ever stopped.
+
+`TestTheProjectsOwnVocabulary` covers the application's one contribution to a
+shared rule. Nothing about `LaTeX`'s shape distinguishes it from a typing
+slip, so no heuristic in the core can exempt it; the LaTeX app seeds the
+exception list, and a real slip (`enGland`) still has to be reported or the
+seeding has gone too far.
+
+`_paired()` in the fixture is worth knowing about: the parser reports each
+`\index` macro as it finds it and does **not** work out which `|)` closes
+which `|(` — `ProjectLoadWorker` does that at load time. A fixture that
+skipped it would leave every opener without a partner, and the
+overlapping-range rule would have nothing to look at while appearing to pass.
+
+### A modal dialog is a stopped run, not a slow one
+
+`tests/conftest.py` has an autouse `_no_modal_dialogs` fixture that turns every
+static `QMessageBox` into an `AssertionError` carrying the dialog's own
+message. It is suite-wide and not opt-in, deliberately: the tests that need it
+are exactly the ones nobody predicted would need it.
+
+It exists because this has cost real debugging time **twice**, both times the
+same way. A genuine regression on an error path opened `QMessageBox.warning`
+with nobody there to dismiss it; the visible symptom was a suite that simply
+never finished, which from the outside is indistinguishable from an infinite
+loop. The second time, the culprit was `EntryModifierController.
+_perform_row_deletion` — the deletion had been refused because coordinates had
+gone stale, which is precisely the information the dialog was holding hostage.
+
+A test that legitimately drives a prompt overrides the fixture from its own
+body; `monkeypatch.setattr` inside a test runs after the fixture, so the later
+patch wins. `test_batch_delete_removes_every_selected_entry` does exactly that
+for `QMessageBox.question`.
+
+**If the suite ever does appear to hang**, two things make it quick, and both
+were learned the hard way: do not pipe the run through anything (a pipe buffers,
+so a progressing run looks silent), and use
+`faulthandler.dump_traceback_later(interval, repeat=True, file=<handle>,
+exit=False)` — with `exit=True` the process dies before the stack flushes, and
+the one thing you needed is the one thing you do not get.
 
 ### Convention: prefer real collaborators over stubs
 
@@ -590,13 +878,23 @@ correction someone did not want should cost one keystroke to reverse.
 
 ### `IndexTreeView` (view-layer logic)
 
-`append_entry`/`remove_last_entry`/`reinsert_entry` — the tree's own
-undo/redo for a fresh live insertion, plus `append_entry`'s
-`suppress_transaction`-gated DB-staging call, which no other test exercises
-with `suppress_transaction=False`. See `test_index_tree_view_undo_redo.py`,
-and [Ancestor pruning that ignores a node's own
-references](#ancestor-pruning-that-ignores-a-nodes-own-references) for the
-bug it found.
+**Two of these files moved into `bookindexcore` at extraction step 9b**, and
+the move is the point: they were this application's tests of a *shared*
+widget, which is how a shared widget acquires one host's assumptions. They
+are `bookindexcore/tests/ui/test_tree_undo_redo.py` (formerly
+`test_index_tree_view_undo_redo.py`: `append_entry` / `remove_last_entry` /
+`reinsert_entry`, and see [Ancestor pruning that ignores a node's own
+references](#ancestor-pruning-that-ignores-a-nodes-own-references) for the bug
+it found) and `.../test_tree_cross_reference_nodes.py`.
+
+`test_index_tree_sort_keys.py` **stays here**, and that is not an oversight:
+what it asserts is that `	extit{Titanic}` files under *Titanic* and
+`kant@	extbf{Kant}` under *kant*. Those are this dialect's answers, and the
+core ships no LaTeX dialect to ask.
+
+What is left in this application is the *binding*: `SourceCoordinate` and
+`tree_reference_from_row` in `views/index_tree_view.py`, which is where the
+seven coordinate keys the shared tree used to read for itself are read now.
 
 ### `context_menu_subsystem.py`
 
@@ -612,6 +910,14 @@ by delete/duplicate/invert-headings, and the Sub2-disables-Invert-headings
 guard. See `test_context_menu_subsystem.py`, and
 [`QMenu.exec()` cannot be monkeypatched](#qmenuexec-cannot-be-monkeypatched)
 for why `populate_menu_actions` is called directly.
+
+`FileTreeContextMenuManager` emits **paths**, not `QModelIndex`, and the tests
+assert the emitted path rather than the row it came from. Both actions used to
+emit the index and leave the receiving controller to ask *the persistence
+layer* to read the item roles out of it — which is how `QModelIndex` came to be
+imported by the database module. Resolving an index belongs to this layer, so
+the directory guard on Prune is tested here too: a folder carries a path like
+any other node, so nothing but an explicit check stops it being pruned.
 
 ### Custom LaTeX commands
 
@@ -647,6 +953,30 @@ currently-active theme mode on acceptance; see
 same global-vs-project seed/load/persist orchestration, plus delegating theme
 colours to `ThemeConfigController`; see
 `test_index_prefs_config_controller.py`).
+
+That controller now edits **three** settings groups from one window, because
+the shared Check Index and Sorting pages went into the same dialog. The
+dialog hands back one merged payload and each group filters it — which is what
+`ScopedSettings.save` and `IndexPrefsConfigModel.update_data` were both
+already written to do — so `_handle_model_update` needs no knowledge of which
+key belongs where. `_controller()` in the test file builds the two shared
+groups with their **real** QSettings-backed stores rather than dict stubs, so
+what is exercised is the routing the application actually does.
+
+**A real bug the pages exposed**: with no project open, `CheckIndexPrefs` was
+constructed over `DictGlobalStore` — the in-memory store `bookindexcore`
+ships for tests. Its "global" scope therefore died with the process. Invisible
+while the settings were unreachable from a menu, and a straightforward data
+loss the moment they were not. `QSettingsGlobalStore` in
+`preferences_persistence.py` is the durable one; the dict store remains the
+test default, so a test that wants one still gets it by saying nothing.
+
+**A second one**: `makeindex_ordering` was collected, stored and never
+written. `generate_*` emitted `-c`, `-p` and `-s` and no `-l`, so letter
+ordering was a preference the build ignored. The combo's second item was also
+spelled `character`, which `sort_rules_adapter._ORDERING` did not recognise —
+so the adapter fell back to word ordering as well, from the other direction.
+Both are fixed and the old spelling is still read.
 
 **A real bug found and fixed here**: `PreferencesPersistence.load_index_prefs`'s
 `coerce()` helper compared `dataclasses.fields()`'s `.type` (an actual type
@@ -807,10 +1137,17 @@ queued-connection timing.
 ### Project lifecycle
 
 Project open and base-file auto-detection (`test_base_file.py`);
-prune/reopen/restore and "Set as root file" via both the `QModelIndex`
+prune/reopen/restore and "Set as root file" via both the right-click
 context-menu path and the plain string path (`test_project_lifecycle.py`). A
 pruned file resurrecting on reopen was a real reported bug, proven fixed
 end-to-end here rather than only at the controller level.
+
+`test_base_file.py` drives the context-menu route by building the real menu
+for a tree node and triggering the action, rather than calling a controller
+slot with a `QModelIndex`. There is no such slot any more — both routes carry
+a path and land on `_handle_file_set_as_root` (see
+[`context_menu_subsystem.py`](#context_menu_subsystempy)) — and going through
+the menu covers the resolution step that the deleted adapter used to own.
 
 ### Resync
 
@@ -824,6 +1161,74 @@ Data from Disk", `\index` content changed on disk
 Add/remove writes `cross_refs.tex` for real, and "Insert Cross-References
 File..." splices `\input{cross_refs.tex}` into the real base file and is
 idempotent on a second run.
+
+### Table of Authorities (T3b)
+
+`tests/unit/models/test_toa_emission.py`. No Qt, no project, no backend — the
+fake is three methods, because that is all of `DocumentBackend` this reads.
+
+**The file exists because of a measurement, and the docstring carries it.** Run
+at a raw `.tex` file the citation grammar found eight citations in the fixture
+and got every case wrong: each parsed as a *short form* with a party of
+`Goodfellow}` or `Key}`, because the party walk stops on `\textit{` and starts
+again after the space. Parallel citations went with the parties and three of
+the eight failed the round trip. With the projection: correct forms, whole
+parties, parallel citations intact, zero round-trip failures.
+
+Two tests pin faults this phase **introduced** rather than inherited, which is
+worth knowing when reading them:
+
+- `test_the_party_walk_does_not_reach_the_chapter_title`. Blanking markup
+  leaves whitespace, and the walk looks back 260 characters, so the first
+  citation in a chapter absorbed the chapter title. Citations are parsed a
+  paragraph at a time now.
+- `test_an_escaped_literal_keeps_its_character` and
+  `test_an_escaped_percent_does_not_open_a_comment` are a pair that pull
+  against each other. `\&` prints an ampersand a reader sees, so it must
+  survive the projection; a restored `%` must not then open a comment. **Caught
+  by compiling a real document, not by a test** — `Bell \& Howell v. Wade`
+  parsed as `Bell Howell` and the generated table named a case that does not
+  exist, with a clean parse, a passing round trip and a successful build.
+
+`test_both_halves_of_the_key_are_escaped` covers the other half of that:
+`escape_for_makeindex` does not escape `&`, correctly, because `&` is LaTeX's
+grammar and not makeindex's. A bare one fails the build with *Misplaced
+alignment tab character*, so the two escapings compose and neither covers the
+other.
+
+### The shared preferences pages
+
+`test_prefs_dialog_shared_pages.py` tests the *wiring*, not the pages — those
+belong to `bookindexcore`. The wiring has failed in both directions, and both
+are pinned here.
+
+**By absence.** `tab_order()` used to be declared by each application, so a
+page added to the shared shell did not appear in this window until it was
+named — and the failure is silent, because an absent tab looks exactly like one
+that was never built. E8's Presentation page shipped invisible here for that
+reason. It is composed now, and
+`test_a_page_added_to_the_shell_arrives_here_without_an_edit` is what keeps it
+that way.
+
+**By arrival.** The opposite fault, found when T1b's "Table of Authorities"
+page landed in this window while emission was still unbuilt.
+`test_this_application_gets_no_table_of_authorities_page` asserts three things:
+no declaration, no tab, and — the one that matters — no
+`authorities_citation_system` key in the project payload. The page's controls
+are collected on every OK, so an ungated page would have stamped a defaulted
+Bluebook declaration into every LaTeX project. **That test inverts when T3
+lands**, and flipping `supports_table_of_authorities()` is the only edit T3
+owes this window.
+
+`test_no_latex_page_is_mixed_into_the_shared_block` asks
+`dialog.shared_tab_order()` what is shared rather than keeping its own list.
+It kept one until T1b, and a page added to the shell broke a test about
+*ordering* over a question of *membership*.
+
+`test_seven_tabs_still_fit` looks cosmetic and is not: a West tab bar's height
+is the sum of its rotated labels' *widths*, so it grows with both the page
+count and the user's font, and Qt's answer to overflow is a scroll arrow with
+the last page behind it. Six labels and a large font already produced that.
 
 ### Auto-resync safety gate
 
@@ -927,6 +1332,53 @@ index.
 That last case is why the request carries a `QPersistentModelIndex` rather
 than a `QModelIndex`: a responsive window means the user can re-sort or edit
 the table while a lookup is out.
+
+The same file has grown two classes about where a confirmed answer *goes*,
+which is a different question from how it is obtained.
+
+`TestWhichBooksTheSurnameIsFor` covers the scope of a remembered compound
+surname. `ScopedSettings` routes a save to the project store whenever a project
+is open, so a surname confirmed by hand was remembered for that book and lost
+for the next — the correction made again from scratch in every subsequent
+project. `test_a_book_already_open_gets_it_too` is the one to read: it seeds a
+second project *first*, then adds the surname, then reopens the second project,
+because seeding fills only what is missing and a project that already holds a
+compound-surname list would otherwise skip the key forever. Without that case
+the feature reaches every book except the ones anybody is currently working on.
+
+Every test in it uses **its own surname**. `booted_app` is module-scoped, so the
+global template outlives each test, and a shared name would make them pass or
+fail on whatever ran before them. The fixture opens the project and closes it
+again on teardown for the same reason: a project left open is open for every
+test in the module that runs afterwards.
+
+`TestTheNameDatabaseMoves` covers what has to happen after the Preferences page
+relocates the shared name database. A relocation is a file move and this
+controller is holding a sqlite connection, which SQLite will go on writing to
+after the file has been renamed out from under it — so without the reopen, every
+correction for the rest of the session lands in a file nothing will ever read
+again, and nothing reports it, because the write succeeds.
+`test_the_project_rules_survive_the_reopen` is the one that would rot silently:
+the rules are pushed onto the inverter by this object rather than read by it, so
+a freshly built one holds the package defaults and quietly stops honouring the
+project's own tables.
+
+Both tests set `BOOKINDEXCORE_NAME_DB` and put the original inverter back in a
+`finally`. `booted_app` is module-scoped, so an inverter left pointing at a
+`tmp_path` that pytest has since removed would take out every test after them.
+`tests/conftest.py` also points that variable at a throwaway file before any
+import, because the name database is per *user* and shared by every editor —
+the one an unguarded `NameInverter.shared()` reaches for is the developer's own.
+
+`TestAStatedLanguageOutlivesTheBook` pins the second write in
+`set_heading_language`, which its own docstring had described for some time
+without the code doing it. Only the project's heading row was written; the name
+database was reached by `cache_resolved_heading`, which runs when the heading is
+*changed* — so stating a language and accepting the suggestion unaltered, the
+commonest thing that happens on that dialog, recorded the decision for one book
+and asked again in the next. The second test monkeypatches the project store
+into raising, because the two stores fail for unrelated reasons and one being
+unavailable is no reason to withhold the answer from the other.
 
 ### Dark-mode dialog contrast
 
@@ -1449,3 +1901,95 @@ it.
 `sample_project_dir` (in the root `conftest.py`) copies this into a fresh
 `tmp_path` per test, so tests that mutate files on disk never affect the
 checked-in fixture or leak state between tests.
+
+## The Table of Authorities, wired at last
+
+Three files were added at once and they are best read in that order:
+`tests/unit/models/test_toa_prefs.py`,
+`tests/unit/controllers/test_toa_controller.py`, and the two new cases in
+`tests/controllers/test_index_prefs_config_controller.py`.
+
+**The controller had no tests and had existed since T3b.** So
+`test_toa_controller.py` is not a refinement of a battery; it is the first
+thing that has ever run that code deliberately. The test to read is
+`TestARefusalIsNotAFailure`: a backend refuses an edit whose span no longer
+reads as expected, and **one refused citation is a citation missing from the
+table, not a reason to abandon the other four hundred**. The stub backend
+exists to be able to refuse a chosen edit, which a real one cannot be asked to
+do.
+
+`test_the_authorities_page_is_read_back_as_well_as_written` is the shape to
+copy for any preferences page. Asserting the save alone would not have caught
+the defect that prompted all this: the keys were collected and stored nowhere,
+so the choice was lost *and* the page's construction default was written over
+it on the next open. **A store that is written and never read back looks
+exactly like one that works**, so the test drives the real flow with a
+stand-in dialog and asserts what the dialog was *told*.
+
+`test_toa_prefs.py` is mostly about routing rather than values, because that
+is where this store differs from the Word editor's: the citation standard is a
+property of the book, so it is project-scoped, and
+`test_the_next_book_does_not_inherit_the_last_one_s` is the assertion that
+says so. It needs two project databases; `fresh_persistence` is per-test, so
+asking for it twice would have made the test pass for the wrong reason.
+
+**What none of these can tell you.** There is no LaTeX corpus on this machine,
+so every one of them runs over a fixture of a few paragraphs. The timing, the
+recall, and the residue counts on a real book are unknown, and
+`probes/probe_toa_real_book.py` is what measures them. *A green suite here is
+not evidence that the pass works on a manuscript.*
+
+**And the indexer looked for a legal text written in LaTeX and did not find
+one** (1 September 2026), so this is a standing limit rather than a gap
+waiting to be filled. Anyone reading these tests later should not take the
+absence of a corpus run as an oversight.
+
+## Stating a name's language without a lookup
+
+`tests/gui_smoke/test_name_inversion_async.py::TestStatingALanguageWithoutALookup`
+sits at the bottom of a file that is otherwise entirely about running an
+authority lookup off the UI thread. **The test worth reading is
+`test_no_authority_is_consulted`**, which replaces both lookup paths with
+something that raises: this surface exists precisely so that an indexer who
+already knows the answer does not wait for a network call to give it, and the
+only way to assert *nothing was consulted* is to make consulting fail.
+
+## The one call site where the profile could be dropped
+
+`tests/unit/controllers/test_toa_review_wiring.py` is a static scan of
+`app_pipeline_controller.py`, and its docstring says so in the first line. The
+shared review dialog names what a house profile records and this application
+does not carry out, and it can only do that if this controller passes the
+profile it built the table with.
+
+**It is a scan because the alternative was sixty lines of stubs around one
+keyword.** `_handle_build_toa_request` wants a project, a text backend, a
+preferences store and a progress dialog before it reaches the review; the
+dialog's own behaviour is tested in the core, over the widget, including the
+case where no profile is passed and it correctly says nothing.
+
+*That silence is why the guard has to be here.* A host with no house style and
+a host that forgot to pass one look the same from inside the dialog, and they
+look the same to `probes/probe_core_wiring.py` as well: its four shapes are a
+module nobody imports, a key nobody stores, a store nobody reads back and a
+signal nobody takes. **An argument nobody passes is none of them.**
+
+`test_the_review_is_built_exactly_once` is the part that will fail first, and
+it is meant to: a second call site is a second place to forget.
+
+## The shared store, and why every test needs one of its own
+
+`conftest.py` points `BOOKINDEXCORE_STORE` somewhere disposable at import time
+and then gives each test a store of its own. Both halves matter, and the second
+was added on 4 September 2026 when the store stopped being a name cache: it
+holds house profiles, alphabets and model assessments as well, so a test that
+writes one is a test the next can read.
+
+**Both variable names are set.** The store was renamed and the old
+`BOOKINDEXCORE_NAME_DB` is still honoured, which is the guarantee a portable
+install depends on; a suite that set only one of them would be testing half the
+resolution order.
+
+`models/sort_prefs.py` is where the alphabets are folded in, and its docstring
+carries the division the phase settled: **the store is the template and the
+project is the correction.**

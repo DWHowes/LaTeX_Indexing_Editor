@@ -28,14 +28,16 @@ a = Analysis(
     # rapidfuzz has an optional numpy-array integration (process.pyi/
     # process_cpp.py) that PyInstaller's static analyzer pulls in
     # defensively even though this app only uses rapidfuzz.fuzz on plain
-    # strings (models/search_worker.py). numpy itself is leftover in this
-    # venv from an abandoned LLM-based name-inversion experiment, not an
-    # actual app dependency -- excluded here, along with the rest of that
-    # ML stack, so none of it balloons the frozen build.
-    excludes=[
-        'numpy', 'torch', 'torchvision', 'pandas', 'scipy', 'opencv',
-        'cv2', 'transformers', 'accelerate', 'docling_ibm_models', 'rapidocr', 'shapely',
-    ],
+    # strings (models/search_worker.py).
+    #
+    # This list used to also name torch, transformers, docling and the rest
+    # of an ML stack left in the venv by an abandoned LLM-based
+    # name-inversion experiment. Those packages have since been uninstalled
+    # -- the venv now holds requirements-dev.txt and nothing else -- so the
+    # excludes are gone with them. Only numpy stays, because it is a
+    # *transitive* risk rather than a stray install: anything that pulls
+    # numpy back in would reach the frozen build through rapidfuzz.
+    excludes=['numpy'],
     noarchive=False,
     optimize=0,
 )
@@ -61,7 +63,7 @@ exe = EXE(
     # Embedded in the .exe, which is what Explorer and the taskbar read
     # before the app is running. The same file is set on the QApplication
     # at startup (main.py) for window and dialog icons.
-    icon='icons/lidx.ico',
+    icon='icons/lix.ico',
 )
 
 coll = COLLECT(

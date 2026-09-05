@@ -16,10 +16,10 @@ from dataclasses import asdict
 import pytest
 from PySide6.QtWidgets import QSpinBox, QTabBar
 
-from controllers.app_style_configuration import AppStyleConfiguration
-from models.theme_config_model import DarkThemeColours, LightThemeColours
+from bookindexcore.ui.style import AppStyleConfiguration
+from bookindexcore.ui.theme.config_model import DarkThemeColours, LightThemeColours
 from views.index_prefs_config_dialog import IndexPrefsConfigDialog
-from views.theme_config_dialog import ThemeConfigDialog
+from bookindexcore.ui.theme.config_dialog import ThemeConfigDialog
 
 
 def _luminance(rgb):
@@ -147,7 +147,16 @@ class TestThemeConfigDialogTabs:
 
 class TestSpinBoxArrowsAreVisible:
     def test_arrows_contrast_against_their_button(self, dark_prefs_dialog, qapp):
-        spin = dark_prefs_dialog.findChildren(QSpinBox)[0]
+        # A spin box on the page that is actually showing. This used to take
+        # findChildren(QSpinBox)[0], which held only while every spin box in
+        # the dialog happened to be on the visible tab; adding the
+        # Presentation page in E8 put an unlaid-out one first, and grabbing a
+        # widget with no size returns an empty image rather than failing --
+        # so the test broke somewhere unrelated to what it is checking.
+        candidates = [s for s in dark_prefs_dialog.findChildren(QSpinBox)
+                      if s.isVisible() and not s.size().isEmpty()]
+        assert candidates, "no visible spin box in the preferences dialog"
+        spin = candidates[0]
         # Away from either end, so neither arrow is legitimately greyed out --
         # a disabled arrow is meant to be dim and would mask the real problem.
         spin.setValue((spin.minimum() + spin.maximum()) // 2)

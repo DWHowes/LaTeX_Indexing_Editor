@@ -214,5 +214,5 @@ class TestSortKeySplitNotice:
         window.reset_ui()
 
         assert window._split_notices == {}
-        assert window._declined_splits == {}
+        assert window.fields._declined_splits == {}
         assert undo not in window.main_entry.actions()

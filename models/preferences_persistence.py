@@ -2,7 +2,7 @@ import json
 import os
 from PySide6.QtCore import QObject, QSettings, QDir, QByteArray
 
-from views.entry_modifier_list import (
+from models.index_tag_grammar import (
     DEFAULT_BOLD_ENCAP_VALUES,
     DEFAULT_ITALIC_ENCAP_VALUES,
 )
@@ -19,11 +19,59 @@ _GENERAL_LIST_KEYS = ("encap_bold_values", "encap_italic_values")
 # should change how many are *displayed*, not throw history away, so raising it
 # again brings the older entries back. (Deliberately unlike the undo stack,
 # where lowering the bound really does discard.)
+#
+# These stay here rather than moving to the shared General tab, and the tab is
+# *told* them (IndexPrefsConfigDialog passes them through). A model importing a
+# widget module for three integers is the shape of Phase 0's first defect, and
+# this application remains the authority on what it will store.
 RECENT_PROJECTS_KEY = "recent_projects"
 RECENT_PROJECTS_HARD_CAP = 25
 RECENT_PROJECTS_MAX_SHOWN = 25
 RECENT_PROJECTS_MIN_SHOWN = 1
 RECENT_PROJECTS_DEFAULT_SHOWN = 10
+
+
+class QSettingsGlobalStore:
+    r"""
+    A ``bookindexcore.persistence.GlobalStore`` over one QSettings group.
+
+    ``ScopedSettings`` needs a global store that outlives the process, and
+    ``DictGlobalStore`` does not: it is the in-memory one the package ships
+    for tests. Handing the shared Check Index and Sorting groups a dict meant
+    that with no project open they were edited, saved, and gone at the next
+    launch -- invisible until those pages became reachable from a menu.
+
+    Narrow on purpose. The protocol is two methods, and this is the whole
+    adapter: a group name, a read and a write. Values are stored as QSettings
+    stores them and coerced back to the group's declared types by
+    ``ScopedSettings.load``, which is why nothing here needs to know a type.
+    Lists are the one exception -- QSettings round-trips a Python list through
+    an ``.ini`` unreliably -- so they are comma-joined on the way out, the
+    same convention ``update_general_preferences`` already uses, and
+    ``coerce_like`` splits them again on the way in.
+    """
+
+    def __init__(self, group: str, settings: QSettings | None = None):
+        self._group = group
+        self._settings = settings if settings is not None else QSettings()
+
+    def read_all(self) -> dict:
+        self._settings.beginGroup(self._group)
+        try:
+            return {key: self._settings.value(key)
+                    for key in self._settings.childKeys()}
+        finally:
+            self._settings.endGroup()
+
+    def write(self, values) -> None:
+        self._settings.beginGroup(self._group)
+        try:
+            for key, value in values.items():
+                if isinstance(value, (list, tuple)):
+                    value = ",".join(str(item) for item in value)
+                self._settings.setValue(key, value)
+        finally:
+            self._settings.endGroup()
 
 
 class PreferencesPersistence(QObject):
@@ -46,6 +94,16 @@ class PreferencesPersistence(QObject):
         self.settings = QSettings()
         self._migrate_legacy_settings_location()
         self._migrate_legacy_index_prefs_keys()
+
+    def global_store(self, group: str) -> "QSettingsGlobalStore":
+        """
+        A durable global store for one shared settings group.
+
+        Handed *this* QSettings rather than a fresh one so the group lands
+        wherever the migrations above settled, and cannot end up in the
+        legacy location a second time.
+        """
+        return QSettingsGlobalStore(group, self.settings)
 
     def _migrate_legacy_settings_location(self) -> None:
         """
@@ -276,6 +334,32 @@ class PreferencesPersistence(QObject):
                     value = ", ".join(str(item).strip() for item in value if str(item).strip())
                 self.settings.setValue(key, value)
 
+        self.settings.sync()
+
+    def migrate_layout_state(self) -> None:
+        """
+        Move a layout stored under this application's own key names into the
+        shared ones. Step 11f.
+
+        `bookindexcore.ui.window.WindowLayoutState` keeps the window geometry
+        and each named splitter under a `layout/` prefix, and it is what both
+        editors use now. This application stored the same three things under
+        `window_geometry`, `window_state` and `splitter_state` at the root, so
+        without this an indexer's own division of the screen would be silently
+        thrown away once, on the first launch after the change.
+
+        Runs once: it does nothing when the shared keys already hold anything.
+        """
+        if self.settings.value("layout/geometry") is not None:
+            return
+        for old_key, new_key in (("window_geometry", "layout/geometry"),
+                                 ("window_state", "layout/state"),
+                                 ("splitter_state", "layout/splitter/main")):
+            stored = self.settings.value(old_key)
+            if stored is None:
+                continue
+            self.settings.setValue(new_key, stored)
+            self.settings.remove(old_key)
         self.settings.sync()
 
     def serialize_layout_state(self, closure_payload: dict):

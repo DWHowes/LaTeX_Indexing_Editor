@@ -40,6 +40,7 @@
       {"title": "Head Notes", "file": "tools/head_notes.md"},
       {"title": "RTF Export", "file": "tools/rtf_export.md"},
       {"title": "Index Statistics", "file": "tools/index_statistics.md"},
+      {"title": "Building a Table of Authorities", "file": "tools/table_of_authorities.md"},
       {"title": "Range Consistency Check", "file": "tools/range_consistency.md"},
       {"title": "Resyncing Index Data from Disk", "file": "tools/resync.md"},
       {"title": "Resyncing Workspace Files from Disk", "file": "tools/resync_workspace_files.md"},

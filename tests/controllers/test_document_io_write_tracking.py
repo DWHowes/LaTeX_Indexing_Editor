@@ -29,8 +29,8 @@ import os
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTabWidget
 
-from models.session_backup_manager import SessionBackupManager
-from models.text_sanitizer import TextSanitizer
+from bookindexcore.session.backup import SessionBackupManager
+from bookindexcore.util.text import TextSanitizer
 from controllers.document_io_controller import DocumentIOController
 from views.editor_tab import EditorTab
 

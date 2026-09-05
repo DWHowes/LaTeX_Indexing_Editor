@@ -1,11 +1,13 @@
 import os
 
+from models.latex_record_mapping import line_of
+
 from PySide6.QtCore import QObject, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from models.range_consistency_model import find_range_consistency_issues
 from views.range_consistency_dialog import RangeConsistencyDialog
-from controllers.app_style_configuration import AppStyleConfiguration
+from bookindexcore.ui.style import AppStyleConfiguration
 
 
 class RangeConsistencyController(QObject):
@@ -116,12 +118,12 @@ class RangeConsistencyController(QObject):
 
     def _location(self, entry_id: int) -> tuple:
         """Returns (heading_label, file_basename, line_number) for entry_id, or None if it's gone."""
-        record = self._entry_model._records.get(entry_id)
+        record = self._entry_model.get_record(entry_id)
         if record is None:
             return None
         heading = self._entry_model.get_display_label(entry_id)
-        file_name = os.path.basename(record.get("file_path") or "")
-        line = record.get("line_number")
+        file_name = os.path.basename(record.container or "")
+        line = line_of(record)
         return heading, file_name, line
 
     def _describe_issue(self, issue: dict) -> str | None:
@@ -221,7 +223,7 @@ class RangeConsistencyController(QObject):
         try:
             for issue in issues:
                 entry_ids = issue["entries"]
-                if not all(eid in self._entry_model._records for eid in entry_ids):
+                if not all(self._entry_model.has_record(eid) for eid in entry_ids):
                     # An earlier fix in this same batch already consumed one of
                     # this issue's entries (e.g. shared between two reported
                     # issues) — nothing left here to act on.

@@ -56,26 +56,30 @@ space and a perfectly ordinary thing to want in an index entry.
 """
 
 import re
-from dataclasses import dataclass
 from typing import Optional
 
 # --------------------------------------------------------------------------
 # Vocabulary
 # --------------------------------------------------------------------------
+#
+# The severities, the roles and the Finding record itself are the shared
+# ones: `IndexDialect.check` returns them, so a warning about a LaTeX entry
+# and a warning about a Word one have to be the same kind of object for one
+# advice surface to render both. Only the *rules* below are LaTeX's.
+#
+# Re-exported under their original names because every call site in this
+# application already imports them from here, and the point of the shared
+# type is that nothing about using it should change.
 
-#: The document will not build, or the entry is silently lost or altered.
-ERROR = "error"
-
-#: The entry builds, but it will not mean what was typed.
-WARNING = "warning"
-
-#: Text that gets printed in the index.
-ROLE_DISPLAY = "display"
-
-#: Text the indexing engine files under and never prints.
-ROLE_SORT = "sort"
-
-ROLES = (ROLE_DISPLAY, ROLE_SORT)
+from bookindexcore.dialect import (   # noqa: F401 -- re-exported, see above
+    ERROR,
+    Finding,
+    ROLE_DISPLAY,
+    ROLE_SORT,
+    ROLES,
+    WARNING,
+    worst_severity,
+)
 
 #: makeindex's escape character. Consumed, unlike the backslash.
 QUOTE_CHAR = '"'
@@ -103,37 +107,6 @@ _LATEX_SPECIALS = {
 
 #: Specials that are only special outside math mode.
 _MATH_SAFE = ("_", "^")
-
-
-@dataclass(frozen=True)
-class Finding:
-    """
-    One thing worth saying about a span of entry text.
-
-    ``position``/``length`` locate the span in the text that was checked,
-    so a caller can point at it. ``fix`` is what that span should be
-    replaced with, or None where there is no mechanical repair -- an
-    unclosed brace and a trailing backslash are both "the indexer has to
-    say what they meant", not something to guess at.
-    """
-
-    severity: str
-    position: int
-    message: str
-    fix: Optional[str] = None
-    length: int = 1
-
-    @property
-    def end(self) -> int:
-        return self.position + self.length
-
-    @property
-    def has_fix(self) -> bool:
-        return self.fix is not None
-
-    @property
-    def is_error(self) -> bool:
-        return self.severity == ERROR
 
 
 # --------------------------------------------------------------------------
@@ -371,16 +344,50 @@ def check(text: str, *, role: str = ROLE_DISPLAY) -> list[Finding]:
     return findings
 
 
+def check_entry_length(body: str, limit: Optional[int]) -> list[Finding]:
+    r"""
+    Whether a whole entry is too long for the index engine that will read it.
+
+    Separate from :func:`check` because it asks about a different thing.
+    ``check`` looks at one *field* — a heading level, a sort key — and reports
+    characters that will be misread. This looks at the **whole tag body**, and
+    the only thing it can say is that the engine will refuse it.
+
+    ``limit`` comes from ``dialect.max_entry_length(project)``, which is
+    engine-dependent: measured at 10,239 characters for makeindex 2.17 and
+    about 1,860 for xindy, a five-fold difference (see
+    ``e0_measurements`` in the bookindexcore repository). ``None`` means the
+    engine has no limit and there is nothing to say.
+
+    **Worth checking despite the limits being generous**, because of how the
+    failure presents. makeindex rejects the entry outright, writes nothing for
+    it, records ``First argument too long`` in the ``.ilg`` — and **exits 0**.
+    Nothing in a normal build reports it; the entry is simply missing from the
+    finished index, and the only way to notice is to look for something you
+    know you indexed. xindy is worse in one way and better in another: it dies
+    with a stack overflow and takes the whole run with it, which at least
+    cannot be missed.
+
+    Reported at position 0: the fault is the entry's length rather than
+    anything at a particular character, and underlining ten thousand
+    characters would say nothing.
+    """
+    if not limit or not body:
+        return []
+    if len(body) <= limit:
+        return []
+    return [Finding(
+        ERROR, 0,
+        f"This entry is {len(body):,} characters, and the index engine "
+        f"accepts at most {limit:,}. It will be rejected outright -- missing "
+        f"from the finished index, with the complaint buried in the .ilg log "
+        f"and the build still reporting success.",
+    )]
+
+
 def has_findings(text: str, *, role: str = ROLE_DISPLAY) -> bool:
     """Whether :func:`check` has anything to say about this text."""
     return bool(check(text, role=role))
-
-
-def worst_severity(findings: list[Finding]) -> Optional[str]:
-    """ERROR if any finding is one, WARNING if there are only those."""
-    if not findings:
-        return None
-    return ERROR if any(finding.is_error for finding in findings) else WARNING
 
 
 def apply_fixes(text: str, *, role: str = ROLE_DISPLAY) -> str:

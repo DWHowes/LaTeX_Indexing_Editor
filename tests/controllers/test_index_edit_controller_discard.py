@@ -28,11 +28,12 @@ from PySide6.QtWidgets import QTabWidget
 
 from models.latex_index_parser import LatexIndexParser
 from models.entry_modifier_model import EntryModifierModel
-from models.index_edit_staging_model import IndexEditStagingModel
+from bookindexcore.qt.staging import QtIndexEditStagingModel
 from models.index_tree_model_engine import IndexTreeModelEngine
 from models.file_tree_persistence import FileTreePersistence
-from models.text_sanitizer import TextSanitizer
-from models.session_backup_manager import SessionBackupManager
+from models.latex_record_mapping import reference_from_row
+from bookindexcore.util.text import TextSanitizer
+from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from controllers.index_edit_controller import IndexEditController
 from views.index_tree_view import IndexTreeView
@@ -82,8 +83,13 @@ def _add_top_level_node(tree, token: str, refs: list[dict]):
     root = tree.base_model.invisibleRootItem()
     col0 = QStandardItem(token)
     col0.setData(token, Qt.ItemDataRole.ToolTipRole)
-    col1 = QStandardItem(" ".join(f"[{r['unique_id_number']}]" for r in refs))
-    col1.setData(list(refs), Qt.ItemDataRole.UserRole + 1)
+    # **Seeded the way the tree itself would seed it.** Since extraction step
+    # 9b a node's UserRole+1 payload is a list of TreeReference, not of raw
+    # load rows, and the column text is composed in one place; a test that
+    # hand-builds the old shape is testing a payload the app no longer makes.
+    records = [tree.tree_reference_from_row(r) for r in refs]
+    col1 = QStandardItem(tree.render_reference_column(records))
+    col1.setData(records, Qt.ItemDataRole.UserRole + 1)
     root.appendRow([col0, col1])
 
 
@@ -102,7 +108,7 @@ class TestDiscardUncommittedEntry:
         for ref in refs:
             ref["heading_id"] = heading_id
 
-        staging_model = IndexEditStagingModel()
+        staging_model = QtIndexEditStagingModel()
         entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
         entry_model.load_records(refs)
         for ref in refs:
@@ -205,7 +211,7 @@ class TestDiscardDirtyEdits:
         })
         _add_top_level_node(tree, "Renamed", [ref])
 
-        staging_model = IndexEditStagingModel()
+        staging_model = QtIndexEditStagingModel()
         entry_model = EntryModifierModel(persistence=persistence, staging_model=staging_model)
         entry_model.load_records([ref])
         entry_model.mark_dirty(uid)
@@ -238,7 +244,7 @@ class TestDiscardDirtyEdits:
         assert "Renamed" not in top_level_tokens
         assert "Main" in top_level_tokens
         col1 = root.child(top_level_tokens.index("Main"), 1)
-        attached_ids = [r["unique_id_number"] for r in col1.data(Qt.ItemDataRole.UserRole + 1)]
+        attached_ids = [r.entry_id for r in col1.data(Qt.ItemDataRole.UserRole + 1)]
         assert uid in attached_ids
 
     def test_updates_the_staging_baseline_to_the_reverted_value(self, tmp_path, qtbot):
@@ -266,7 +272,7 @@ class TestDiscardDirtyEdits:
             "absolute_position": 0, "absolute_end": 10, "encap": "standard",
             "macro_command": "index", "is_range_closer": False,
         }
-        entry_model._records[999] = other_ref
+        entry_model._records[999] = reference_from_row(other_ref)
         entry_model.mark_dirty(999)
 
         controller.discard_dirty_edits(str(tmp_path / "chapter.tex"))

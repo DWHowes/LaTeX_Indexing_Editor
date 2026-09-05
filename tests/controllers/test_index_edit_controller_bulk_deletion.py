@@ -25,9 +25,9 @@ from PySide6.QtWidgets import QTabWidget
 
 from models.latex_index_parser import LatexIndexParser
 from models.entry_modifier_model import EntryModifierModel
-from models.index_edit_staging_model import IndexEditStagingModel
-from models.text_sanitizer import TextSanitizer
-from models.session_backup_manager import SessionBackupManager
+from bookindexcore.qt.staging import QtIndexEditStagingModel
+from bookindexcore.util.text import TextSanitizer
+from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from controllers.index_edit_controller import IndexEditController
 from views.index_tree_view import IndexTreeView
@@ -93,8 +93,9 @@ def _set_node_refs(tree, parts: list[str], refs: list[dict]) -> QStandardItem:
     node = _get_or_create_path(tree.base_model.invisibleRootItem(), parts)
     parent = node.parent() or tree.base_model.invisibleRootItem()
     col1 = parent.child(node.row(), 1)
-    col1.setData(list(refs), Qt.ItemDataRole.UserRole + 1)
-    col1.setText(" ".join(f"[{r['unique_id_number']}]" for r in refs))
+    records = [tree.tree_reference_from_row(r) for r in refs]
+    col1.setData(records, Qt.ItemDataRole.UserRole + 1)
+    col1.setText(tree.render_reference_column(records))
     return node
 
 
@@ -114,7 +115,7 @@ def _register_heading(engine, heading_text: str, refs: list[dict]) -> int:
 def _new_stack(qtbot):
     tree = IndexTreeView(model_engine=_FakeEngine())
     qtbot.addWidget(tree)
-    staging_model = IndexEditStagingModel()
+    staging_model = QtIndexEditStagingModel()
     entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
     tabs = QTabWidget()
     qtbot.addWidget(tabs)

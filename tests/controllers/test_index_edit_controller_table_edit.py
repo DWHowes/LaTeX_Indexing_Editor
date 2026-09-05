@@ -22,10 +22,11 @@ from PySide6.QtWidgets import QTabWidget
 
 from models.latex_index_parser import LatexIndexParser
 from models.entry_modifier_model import EntryModifierModel
-from models.index_edit_staging_model import IndexEditStagingModel
+from models.latex_record_mapping import reference_from_row
+from bookindexcore.qt.staging import QtIndexEditStagingModel
 from models.index_tree_model_engine import IndexTreeModelEngine
-from models.text_sanitizer import TextSanitizer
-from models.session_backup_manager import SessionBackupManager
+from bookindexcore.util.text import TextSanitizer
+from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from controllers.index_edit_controller import IndexEditController
 from views.index_tree_view import IndexTreeView
@@ -74,8 +75,13 @@ def _add_top_level_node(tree, token: str, refs: list[dict]):
     root = tree.base_model.invisibleRootItem()
     col0 = QStandardItem(token)
     col0.setData(token, Qt.ItemDataRole.ToolTipRole)
-    col1 = QStandardItem(" ".join(f"[{r['unique_id_number']}]" for r in refs))
-    col1.setData(list(refs), Qt.ItemDataRole.UserRole + 1)
+    # **Seeded the way the tree itself would seed it.** Since extraction step
+    # 9b a node's UserRole+1 payload is a list of TreeReference, not of raw
+    # load rows, and the column text is composed in one place; a test that
+    # hand-builds the old shape is testing a payload the app no longer makes.
+    records = [tree.tree_reference_from_row(r) for r in refs]
+    col1 = QStandardItem(tree.render_reference_column(records))
+    col1.setData(records, Qt.ItemDataRole.UserRole + 1)
     root.appendRow([col0, col1])
 
 
@@ -111,7 +117,7 @@ def _build_stack(tmp_path, qtbot, tex_content, heading_raw_text="Main", filename
     _add_top_level_node(tree, heading_raw_text, refs)
     _register_heading(tree, heading_raw_text, refs)
 
-    staging_model = IndexEditStagingModel()
+    staging_model = QtIndexEditStagingModel()
     entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
     entry_model.load_records(refs)
 
@@ -151,7 +157,7 @@ def _build_range_stack(tmp_path, qtbot, tex_content, heading_raw_text="Main"):
     _add_top_level_node(tree, heading_raw_text, [opener_ref])
     _register_heading(tree, heading_raw_text, [opener_ref, closer_ref])
 
-    staging_model = IndexEditStagingModel()
+    staging_model = QtIndexEditStagingModel()
     entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
     entry_model.load_records([opener_ref, closer_ref])
 
@@ -241,7 +247,7 @@ class TestHandleEntryTableEdit:
 
         renamed_row = top_level_tokens.index("Renamed")
         col1 = root.child(renamed_row, 1)
-        attached_ids = [r["unique_id_number"] for r in col1.data(Qt.ItemDataRole.UserRole + 1)]
+        attached_ids = [r.entry_id for r in col1.data(Qt.ItemDataRole.UserRole + 1)]
         assert uid in attached_ids
 
     def test_reuses_an_existing_heading_node_instead_of_duplicating(self, tmp_path, qtbot):
@@ -254,7 +260,7 @@ class TestHandleEntryTableEdit:
         other_path, other_uid_dicts = _parse_entries(tmp_path, r"\index{Existing}", "other.tex")
         other_ref = _ref_from_uid_dict(other_uid_dicts[0], other_path, "Existing")
         _add_top_level_node(tree, "Existing", [other_ref])
-        entry_model._records[other_ref["unique_id_number"]] = other_ref
+        entry_model._records[other_ref["unique_id_number"]] = reference_from_row(other_ref)
 
         controller.handle_entry_table_edit(uid, "Existing")
 
@@ -266,7 +272,7 @@ class TestHandleEntryTableEdit:
         assert len(existing_rows) == 1  # not duplicated
 
         col1 = root.child(existing_rows[0], 1)
-        attached_ids = {r["unique_id_number"] for r in col1.data(Qt.ItemDataRole.UserRole + 1)}
+        attached_ids = {r.entry_id for r in col1.data(Qt.ItemDataRole.UserRole + 1)}
         assert attached_ids == {uid, other_ref["unique_id_number"]}
 
     def test_syncs_the_range_partners_heading(self, tmp_path, qtbot):

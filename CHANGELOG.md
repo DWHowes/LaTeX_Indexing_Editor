@@ -1,5 +1,1209 @@
 # Changelog
 
+## Unreleased
+
+### An alphabet you write is the machine's, and so is a publisher you set up elsewhere
+
+An alphabet written on the Sorting page was stored in this application's own
+settings, so the same alphabet had to be written again in the Word editor. It
+goes to the shared store now, beside your name decisions, and one written in
+either editor is offered in both. The project keeps any correction you made for
+*this* book; the store is the template it started from.
+
+And a publisher's house profile authored in ToA_Builder can be chosen on the
+Authorities page here for the first time: this application knew the two
+profiles that ship and raised for anything else.
+
+### The review says what your publisher's style asks for and the table does not do
+
+Choose a publisher's house style on the Authorities preferences page and build
+a table of authorities: the review window, before a single macro is written,
+names the rules that specification records and this application does not carry
+out. Irwin Law records three of them. Nothing is applied differently; a rule
+you recorded is simply no longer dropped in silence.
+
+The same lines are now shown on the **Authorities preferences page**, under
+the profile you choose, so they reach you before the pass rather than after
+it. That page also had a defect fixed with them: its notes were refreshed when
+the page opened and when the citation standard changed, and not when you
+picked a publisher.
+
+### The index kind is stored, so the filing rules can be seeded
+
+`models/sort_prefs.py`, one key. The core grew a *What kind of index is
+this?* control on the Sorting page, and declaring a name index seeds the
+filing settings from it — the mechanism E9 built in August and that nothing
+had ever called, in any application.
+
+`INDEX_KIND_KEY` is the second non-field key to travel in that page's
+payload, after the order mode, and for the same reason: everything in
+`SORT_DEFAULTS` is splatted into `SortRules(**owned)`, so a declaration
+stored there would raise on load. It is kept so that reopening the window
+shows what was declared rather than offering to declare it again.
+
+**What it unlocks here was already written**: the name-index prefix drop, the
+cased Arabic list, the `Al-e` retained list, and the per-language lists for
+Flemish, Dutch under either code, German under either code, and Afrikaans.
+Every one of them had been reachable only from a probe that seeded for
+itself.
+
+### A named symbol macro keeps its character in the projection
+
+`ESCAPED_LITERALS` held the seven *escaped punctuation* forms and none of the
+**named** ones, so `\S` was blanked with the rest of the markup:
+
+    42 U.S.C. \S 2000e   ->   42 U.S.C.    2000e
+
+Given a real section sign the citation parser reads that as a **statute**.
+Given the projection it read the remains as a **case with no parties** and
+filed *42 U.S.C. 2000* in the Table of Cases.
+
+**Nothing failed.** The parse was clean, the projection kept its length
+contract, the suite was green, and the table looked plausible. It is the same
+story the ampersand told in that module's own docstring one class of macro
+along, and it was found the same way: by running the pass over a real book,
+not by a test.
+
+`\S` and `\P` are the two that matter, section and paragraph being how
+legislation is cited in US, Canadian and German practice; the rest of the
+named symbols went in with them, on the same footing. The character is placed
+at the end of the span it replaces, so the length contract holds.
+
+Three regression tests, and **one of them is a guard**: writing this fix
+through a shell heredoc put a tab character into four of the new keys, and
+nothing failed then either. A malformed key never matches, which is the
+quietest way for a lookup table to lose an entry, and it was caught by the
+test beside it that asserted an actual projection.
+
+### The Table of Authorities, measured on a real project
+
+The indexer supplied a LaTeX thesis of 30 files and 698,289 characters. It is
+a sociology book rather than a legal one, so what this measures is the
+machinery, not the recall.
+
+- **0.5 seconds per million characters.** The Word editor's equivalent pass
+  took 224 seconds on about a million; this is roughly **450 times faster**,
+  because it reads plain files and computes offsets where the other drives
+  Word through COM. The progress dialog is belt and braces now rather than a
+  necessity.
+- **The projection holds up on real markup**: 698,289 source characters to
+  695,359 non-blank projected, reading as clean prose.
+- **0 authorities found and 0 false positives**, against 20
+  years-in-parentheses, 9 uses of *v.* in prose and 227 `\citep` calls. Zero
+  is the right answer for this book, and the absence of spurious rows is the
+  useful half of it.
+
+Recall on a legal text remains unmeasured, and is now the only part that is.
+
+### A name's language can be stated without a lookup
+
+**Set name language...**, beside *Invert name* on the entry table's context
+menu. `HeadingLanguageDialog` has been in the core since N2 and was reachable
+from nothing here, which `probes/probe_core_wiring.py` reported: the only way
+to state a language in this application was to run an authority lookup and
+answer the inversion dialog. An indexer who already knows a name is Arabic
+should not have to ask VIAF about it first.
+
+Nothing about the manuscript changes. What changes is how the filing and
+inversion rules read the name -- in this book and the next, because
+`set_heading_language` writes the project row and the shared name database
+together.
+
+The dialog is told **where the current answer came from**, and
+`_language_source_note` is what reads it: *recorded in this project* and
+*remembered from another book* are different things, and an indexer changing
+one of them should know which. That is read separately rather than inferred
+from `heading_language`, which reports the answer and deliberately not its
+provenance.
+
+With this the wiring sweep reads **"Nothing unaccounted for"** in all four
+sections.
+
+### The Table of Authorities is reachable
+
+Built at T3b, tested by nothing, reachable from nothing, and shown as present
+the whole time by a preferences page that stored nothing. Found by
+`probes/probe_core_wiring.py` on its first run.
+
+**`Tools -> Build Table of Authorities...`** reads the project for citations,
+shows the plan, and writes an `\index` macro for every authority the indexer
+keeps, as one undoable command. Five pieces, and each was missing:
+
+- **`models/toa_prefs.py`**, the store. Project-scoped like the sort and
+  Check Index settings, which is the one place this deliberately differs from
+  the Word editor's flat one: *the citation standard is a property of the
+  book*, and an indexer who sets McGill on one manuscript must not find it
+  following them into the next. The shipped default is the core's own
+  `DEFAULT_SYSTEM`, because the shared page offers that first and the two have
+  to agree or a book would be parsed under one standard while the page said
+  another.
+- **The preferences wiring.** `populate_authorities_fields` on the way in,
+  `toa_prefs.save` on the way out. The page had been collecting its two keys
+  on OK and handing them to nothing, so a standard an indexer chose went
+  nowhere *and* the construction default was written over it next time.
+- **The menu action**, and the handler behind it. It reads the standard from
+  the project rather than choosing one, shows the review dialog before
+  anything is written, and marks the project dirty only when something was.
+- **A review surface.** `ToaReviewDialog` is shared now: it lists the
+  authorities rather than the macros, because a book plans hundreds of macros
+  for a few dozen authorities, and what is ticked is an authority, so
+  unticking one drops every macro that would have been written for it.
+- **Progress and cancel.** `build_plan` gained `on_progress` and
+  `should_cancel`, counted in containers, and the shared `ProgressDialog`
+  drives them. *A pass with no progress is indistinguishable from a hang.* A
+  cancelled run returns an **empty** plan and not a partial one: a table of
+  authorities is judged on completeness, so half a table is not a smaller
+  table, it is a wrong one.
+
+**The house style acts rather than being recorded.** `build_plan` takes
+`house` and reads it through the core's new `arrangement_for`, so a publisher
+profile decides the arrangement and nothing earlier -- it cannot cost an
+indexer a citation. Storing a key that acted on nothing would have been the
+same defect the sweep exists to report, one layer down.
+
+**The preamble goes into the generated block, not only into a message.** The
+macros are inert without `\makeindex` and `\printindex` lines, and an indexer
+who reads a summary and closes it has still built a table that will not print.
+`IndexPrefsData` gained `toa_declarations` and `toa_printindex`, written by
+the run: they cannot be derived from the settings, because which declarations
+a book needs depends on which categories it actually cites. The `\printindex`
+calls sit **outside** the multicols wrapper -- a table of authorities is a
+short list read by looking up a case name, and setting it in two columns
+because the subject index wanted them is a decision nobody made.
+
+**`controllers/toa_controller.py` has tests now**, and had none. The one that
+matters is the refusal: a backend refuses an edit whose span no longer reads
+as expected, and one refused citation is a citation missing from the table,
+not a reason to abandon the other four hundred.
+
+**The end-to-end pass is unverified, and as of 1 September 2026 it may stay
+that way.** There is no
+LaTeX corpus on the machine this was built on, so every test above runs over
+a fixture of a few paragraphs. `probes/probe_toa_real_book.py` builds the plan
+over files named on the command line, **writes nothing**, and reports the
+timing, the unresolved short forms, the unrecognised abbreviations and a
+sample of the table. **The indexer looked for a legal text written in LaTeX
+and did not find one**, so this is a standing limit on what is known rather
+than a task waiting to be done. The Word editor's figures on its own corpus --
+92% recall on cases, 36% on legislation -- are the nearest thing to an
+expectation there is.
+
+### The core wiring sweep, ported from the Word editor
+
+`probes/probe_core_wiring.py` measures which of `bookindexcore`'s capabilities
+this application actually reaches, in the four shapes the "added but not wired
+in" fault takes: a core module with no caller, a preferences key collected and
+stored by nothing, a store written and never read back, and a signal or page
+the shared window offers that nothing here takes. It reports rather than
+asserts, and declares the answers that are deliberately negative so the list
+stays short enough to read. `probes/core_wiring_sweep.md` is the first run.
+
+Three things the port had to change, and one it improved. This host is three
+directories and a `main.py` rather than one package under `src/`; the LaTeX
+pages' keys are a dataclass rather than a defaults dict; and **the General tab
+has no defaults dict at all**, so the probe parses
+`update_general_preferences` for the keys it writes. That last is the better
+measurement of the three: it reads the code that does the storing, so a key
+dropped from the method shows up the day it is dropped, where a declared dict
+would go on promising it.
+
+**The first run found that the Table of Authorities is built here and cannot
+be reached.** The shared Authorities page shows, collects its two keys on OK,
+and nothing stores either or populates the page, so a citation standard set by
+an indexer goes nowhere and the page's construction default is written over it
+next time. Following that turned up `controllers/toa_controller.py`, which has
+no caller anywhere in this application: the emission code is written and
+tested and there is no route to it from the interface. Reported, not repaired;
+wiring it is scoped work.
+
+Two shared dialogs are also unreached: the standalone heading-language dialog,
+so a language can be stated here only while inverting a name, and
+`ui.progress_dialog`, where the compile step builds Qt's own instead.
+
+### A Spanish or Portuguese name with two given names inverts correctly
+
+No code here changed. The core's N3 finding O replaced a guess in the Iberian
+walk: a name with three or more tokens in front of an internal `de` kept only
+the **first** as a forename, so `Maria Luisa Rivera de Montoya` came back
+`Luisa Rivera de Montoya, Maria`. It now starts the surname at the token
+before the connector, which is what Cronshaw prints and what the widow rule
+beside it already did.
+
+The widow rule itself matched `viuda` and never the commoner `vda.`, and that
+is fixed with it.
+
+### A name marked Chinese, Korean, Vietnamese, Hmong or Thai files differently
+
+No code here changed, but the headings this application suggests did. The
+core's N3 findings F, G, H and M replaced the CJK boolean with a per-language
+declaration of the **heading form**, and the shared Presentation page has a
+row for each: `Mao Zedong` marked `zh` now suggests `Mao, Zedong` rather than
+being left alone, Thai and Vietnamese are left as written rather than
+inverted, and a Japanese name inverts like any other because in a
+Western-language book it is given in Western order.
+
+An unmarked name is unaffected: no rule reading the string can tell
+`Mao Zedong` from an English name of the same shape, which is what the
+per-entry language and the direct-order table are both for.
+
+### The inversion dialog is told which prefixes are read for their case
+
+The core's N3 finding I puts a note under the authority's value saying that
+its capital letter is not evidence: LC capitalises the first word of every
+heading by rule, so its records cannot show whether a person preferred a
+lowercase letter, and that case is exactly what tells `Al Thani` from
+`al Turabi`.
+
+The note fires only where this project's own `cased_filing_prefixes` says the
+case decides the filing, so the dialog takes the list rather than reaching
+for it, and this controller passes it beside `compound_surnames`. A host that
+never passed it would show the note on nothing, which looks exactly like a
+project with nothing to warn about, so there is a test for the passing and
+not only for the note.
+
+### One inversion test moved from asserting an answer to asserting a delivery
+
+The core's N3 finding B gave the cascade a general filial rule that reads a
+lowercase connector's case for every name, not only where an entry states
+Arabic. `test_the_dialog_is_given_a_way_to_re_ask_the_rules` proved that a
+language change re-asks the rules by showing that the answer changed for
+`Isa bin Sulman`, and the answer no longer does: the name files in direct
+order either way, and what a stated language now decides is which rule owns
+it.
+
+The test's own name is "is given a way to re-ask the rules", so it asserts
+that now, spying on `rule_only` and checking the locale it is handed. **A
+test whose vehicle is a worked example is testing two things**, the plumbing
+and the answer, and it fails when either moves. Nothing in this application
+changed.
+
+### The inversion cascade moved into the core, and this application adopted it
+
+Five methods here did the whole of it -- `_refresh_name_rules`,
+`reopen_name_database`, `invert_name`, `_rule_only_inversion`,
+`invert_name_async` -- plus the executor and the shutdown order beside them,
+about 110 lines. **None of it was about LaTeX**, and the Word editor was about
+to need every line, so it is
+`bookindexcore.naming.service.NameInversionService` now and this controller
+delegates. `name_inverter` is a property over the service's, so nothing that
+used the name had to change.
+
+**Nothing here behaves differently and the suite is unchanged at 1,731**,
+which was the test: the second caller fixes the core and adapts every host,
+and the host that already worked is the one that proves the interface did not
+have to bend.
+
+Two things arrive with it, both from the core:
+
+- an authority lookup switched **off** no longer stops the application
+  remembering the indexer's corrections, because the name database is no
+  longer opened only when VIAF is;
+- the Presentation page grows the tables that had no control anywhere: the
+  Arabic ones, the epithet and place-of-origin words, the cased filing
+  prefixes, the generational suffixes and the Mac/Mc switch.
+
+### The file watcher was dead on Windows, and this application never knew
+
+Fixed in bookindexcore: `QFileSystemWatcher` accepts a path spelled with
+backslashes, lists it in `files()` afterwards, and then never reports a write
+to it. The engine registered exactly that, so **reloading a .tex file changed
+underneath you has not worked on this platform**. The core now speaks Qt's
+own spelling at that boundary and the platform's everywhere else.
+
+The only change here is one test, which asserted on Qt's internal list rather
+than on `watched_paths()` and so was asserting on the spelling instead of on
+the watching. Nothing in the application changed.
+
+### Undo records are `SourceEdit`s now, and nothing else changed
+
+`MacroEdit` was the shared undo record and every field of it was this
+application's: a character offset, a file path, and the name of the macro being
+rewritten. The Word editor has none of those, so the shared stack was
+unusable there. Those values are not gone, they have moved into the locator's
+**hint**, which is where a backend's private accounting has belonged since
+Phase 3.
+
+`models/command_edits.py` is the whole adaptation: `macro_edit()` builds the
+`SourceEdit`, and `edit_position`, `edit_end` and `edit_command_name` read the
+three values back out. Five construction sites and fifteen field reads convert
+mechanically.
+
+**The scope estimated 181 references across 16 files, and that was wrong.** It
+counted `absolute_position` everywhere, almost all of it the entry model's own
+legitimate use: this application's backend really does have character offsets
+and keeps them. The command path touches seven constructions and fifteen reads.
+
+**One finding worth the name.** The helpers were first called `position_of` and
+`end_of` -- and this application already has functions of exactly those names,
+for *records*, in the LaTeX codec. Importing a second pair shadowed them in two
+controllers and produced nine failures whose message named
+`'IndexReference' object has no attribute 'after'`, a type the change had never
+touched. The prefix on `edit_position` says which of the two a reader is
+looking at.
+
+Suite 1,731, green, with no behavioural change.
+
+
+### `build_xref` accepts the cross-reference labels, and ignores them
+
+The shared protocol's `build_xref` now takes an optional `labels` mapping, so a
+project's chosen wording for *see* and *see also* can reach the field in a host
+that prints it. This is not such a host: `xref_label_owner` here is
+`XREF_LABEL_DOCUMENT`, because makeindex emits `\see{target}{page}` and the
+words live in a macro the **author** controls.
+
+So the argument is accepted and ignored, and the docstring says why. Pretending
+to honour it would promise what LaTeX cannot deliver, and the Presentation page
+already renders those two fields read-only for this answer. The new conformance
+law is skipped for the same reason: it applies only to a dialect declaring the
+label is ours.
+
+
+### The editor tab's keystroke policy moved to bookindexcore
+
+The Word editor's manuscript view had no visible caret, because it used
+`setReadOnly(True)` and Qt draws no cursor in a read-only widget. This
+application had solved that years ago -- keep the widget editable, whitelist
+the keys -- with the reason sitting beside the call as `# kept editable so
+cursor blinks`. So the policy is now
+`bookindexcore.ui.text_view.ReadOnlyTextMixin` and both hosts use it. Forty
+lines of whitelist here become nineteen: `handle_reserved_key`, which claims
+Ctrl+Z and Ctrl+Y for the **index's** command stack before the whitelist sees
+them, because the document's undo is not the index's undo.
+
+**The move closes a hole this class had.** Nothing guarded
+`insertFromMimeData`, so text **dragged in from another window** was inserted
+regardless: the keyboard was locked down and the context menu offered no
+paste, and a drag went straight past both. It is refused now, and the mixin's
+tests run against `QPlainTextEdit` and `QTextEdit` alike.
+
+A mixin rather than one shared base class, and that was measured rather than
+argued. `QPlainTextEdit` ignores `QTextBlockFormat.leftMargin`, which the Word
+view needs for its indents; and `QTextEdit` takes **2.36s against 0.05s** for
+four cursor seeks over a 5 MB, 40,000-line document, which is an ordinary
+`.tex` and the gesture this application is built on. Neither base serves both.
+
+### The entry window's title bar is now the shared one
+
+`EntryWindowTitleBar` moved to `bookindexcore.ui.entry_window`, fifty-nine
+lines lighter here. It closed its parent dock directly, which is right for a
+dock and useless for the Word editor's entry window, a pane in a splitter. It
+reports the gesture now and the dock connects `close_requested` to `close`.
+
+### `MainToolBar.line_spacing_changed` is pinned as legitimately unconnected
+
+The shared toolbar grew a paragraph-spacing picker for the Word editor.
+`test_every_boot_time_signal_has_a_connected_receiver` caught it at boot with
+no receiver here **in the same run it was added**, which is the whole reason
+that test exists. The right answer was not to exempt the signal but to make
+the control declared: the picker is built only for a host that asks for it,
+because spacing means something in a view of prose and nothing in a view of
+`.tex` source, where a paragraph is a run of lines the author broke where they
+chose. The signal is still on the shared class, so it is pinned in
+`KNOWN_DEAD_SIGNALS` with that reason, beside `LevelFields.committed` and the
+watcher's two.
+
+
+### The layout is remembered through the shared helper
+
+Step 11f. Saving and restoring the window's geometry and the sidebar divider
+was done here in three places, with this application's own hex encoding; the
+Word editor needed the same thing, so it moved to
+`bookindexcore.ui.window.WindowLayoutState`.
+
+**An existing layout is carried over.** This application stored the three
+values under `window_geometry`, `window_state` and `splitter_state`; the shared
+helper keeps them under a `layout/` prefix. `migrate_layout_state` moves them
+once, because otherwise an indexer's own division of the screen would be
+thrown away on the first launch after the change, with nothing to say why.
+
+The hex round trip's tests went with the code. What stays here is the
+migration, which is this application's own.
+
+### The file watcher is now `TextFileWatcherEngine`
+
+Step 11e. The shared watcher read every changed file as UTF-8 text, which is
+right here and wrong for the Word editor, whose manuscripts are zips. The
+reading half is a subclass now, and this application takes it: nothing about
+its behaviour changes, and `file_reload_completed` still arrives with the new
+contents.
+
+Two of the base class's signals go unused here and say so in
+`KNOWN_DEAD_SIGNALS`: `file_changed` and `file_missing` are what a host that
+does not want the contents listens to.
+
+### The entry window's heading fields come from bookindexcore
+
+Step 11d, and this application is again the one that loses code. Everything
+about *typing a heading* moved to `bookindexcore.ui.entry_window`: the
+progressive levels, the sort key that follows until it is claimed, the typed
+sort key split with its undo, the per-field advice and its repair, and the
+completion helper, which was called `LatexEntryAutoCompleter` and contained
+nothing whatever about LaTeX. `views/latex_entry_auto_completer.py` is
+deleted; `latex_index_window.py` is about 400 lines lighter.
+
+**Nothing about the window changed on screen**, and its public shape is
+unchanged: `main_entry`, `sub1_entry`, `sub2_entry`, `sort_entries`,
+`show_sort_keys`, `get_sort_keys`, `reveal_sub1` and the rest still mean what
+they meant. They are views onto the shared fields now rather than widgets
+built here.
+
+What stayed is what is actually LaTeX's: which command wraps the entry, the
+`	extbf` and `	extit` buttons with the selection widening they need, the
+page-reference encap, and `get_entry_data`.
+
+**The tests split the same way.** What the shared fields do is tested in the
+core, against a dialect that is not LaTeX; what stays here is this
+application's own reading of them, such as a sort field following
+`	extit{The Quality of Mercy}` to *The Quality of Mercy*.
+
+Two of `LevelFields`'s signals are unconnected here and now say so in
+`KNOWN_DEAD_SIGNALS`: `committed` is Return on the last level, which the Word
+editor turns into "make this entry" and this application answers with Ctrl+K,
+and `levels_edited` is for a host that watches typing. A shared widget
+offering more than one host uses is not the defect that test hunts for.
+
+### The tab close glyph comes from bookindexcore
+
+`build_tab_close_icon` moved to `bookindexcore.ui.window` at step 11c, because
+the Word editor's manuscript tabs want the same glyph and the same meaning for
+it. `views/editor_tab.py` re-exports it, so nothing that imports it from there
+had to change.
+
+### The toolbar, the status bar and the sidebar move to bookindexcore
+
+Step 11a of the Word editor's interface alignment, and this application is the
+one that loses code. `views/main_tool_bar.py` and `views/main_status_bar.py`
+are deleted; `ProjectSidebarView` is now a subclass of the shared
+`SidebarPanels` holding only what is genuinely this application's, which is
+which three panels it has, what they are called, and the fact that Edit
+Entries carries a second horizontal strip of its own.
+
+**Nothing about the window changed on screen**, and that was the test.
+
+The menu bar's shortcuts now come from `bookindexcore.ui.shortcuts` rather
+than from seventeen string literals, including this application's own four
+tool gestures: they are declared there as this application's, so that "is this
+key free?" has one place to ask when a third editor arrives.
+
+**Two defects fell out of the move.**
+
+`_handle_index_entry_window_toggle` called the toolbar's panel-state method
+with `is_visible`, a bool where a panel index was wanted, so showing the index
+entry window checked the *Index References* sidebar button and hiding it
+checked *Workspace Files*. The shared method is named for what it does, and
+the call read as nonsense the moment it was; nothing on the toolbar follows
+that toggle now.
+
+And the sidebar only ever told the toolbar which panel was in front when the
+toolbar itself had asked. Clicking a panel's own tab left the buttons showing
+the panel before it. **`test_signal_wiring` found it**, by asking why the
+shared sidebar's new `panel_shown` signal had no receiver: exactly the class
+of thing that test was written for.
+
+### The index tree's References column, and one visible change
+
+`bookindexcore`'s index tree carried this application's shape and nothing
+else's: every reference row was `file_path` / `line_number` / `column_offset`
+/ `absolute_position` / `absolute_end` / `macro_command` / `fallback_label`,
+and the navigation signal was those seven fields plus an entry id, in eight
+positional arguments. A second application with no files and no lines could
+not describe where its entries were at all, so the tree now carries a
+`TreeReference` whose `location` is opaque and whose host resolves it.
+
+**This application is unchanged to look at, with one exception.** Identity is
+now the entry id rather than `f"{file_path}:{line_number}"`, so **two `\index`
+macros on one source line draw as `[12] [13]` where they drew `[12]`**. They
+were always two entries and the entry table beside the tree always listed
+both.
+
+`IndexTreeView` here gains `SourceCoordinate` and `tree_reference_from_row`,
+which is where the seven coordinate keys are read now. Nothing else moved:
+`handle_index_navigation` still resolves the entry's current position from the
+live `EntryModifierModel` and still falls back to the snapshot, which is what
+it did before. What changed is that the snapshot is this application's own
+record instead of the shared tree's assumption, and the entry id no longer has
+to be smuggled past a contract that could not carry it.
+
+The `[12] [13]` string is composed in one place now,
+`IndexTreeView.render_reference_column`, rather than here and in the tree.
+
+### Two test files moved into bookindexcore
+
+`test_index_tree_view_undo_redo.py` and `test_index_tree_cross_reference_nodes.py`
+were this application's tests of a **shared** widget, which is how a shared
+widget acquires one host's assumptions. They are
+`bookindexcore/tests/ui/test_tree_undo_redo.py` and
+`.../test_tree_cross_reference_nodes.py` now, run against the paper dialect.
+
+`test_index_tree_sort_keys.py` stays. What it asserts is that
+`	extit{Titanic}` files under *Titanic*: that is this dialect's answer, and
+the core ships no LaTeX dialect.
+
+### The application mark is now LiX, and part of a suite
+
+The icon is redrawn: **LiX** in Computer Modern, pale blue on a dark navy plate
+with a bright blue rim, in the taskbar, the title bar and Alt-Tab. The About box
+shows the same wordmark above the application's name, and the name itself is
+unchanged: this is still the LaTeX Indexing Editor.
+
+**Why the D went.** There are four applications sharing one core now, and they
+have one identity between them: `LiX`, `WdX`, `IdX` and `ToA`, each a dark plate
+with its own rim colour. A three-letter code is what fits that plate, and LiDX
+was the odd one at four.
+
+**Why there is a rim.** At 16 pixels no three-letter code is readable in any
+typeface, so a taskbar tells one application from another by colour, and a ring
+of it is a large enough area to do that where a letterform is not. It also gives
+the plate an edge against a dark taskbar, which the old icon does not have and
+which is the one thing about it that was a defect rather than a preference.
+
+The artwork is generated by `branding/make_marks.py` in `bookindexcore`, which
+defines all four applications in one place, so the suite cannot drift apart one
+repository at a time. The letterforms are Latin Modern Roman, the maintained
+successor to the Computer Modern the previous wordmark was set in.
+
+`icons/lidx.*` are gone, replaced by `icons/lix.*`; the installer script, the
+PyInstaller spec, the window icon and the About box all point at the new set.
+
+
+### New: build a Table of Authorities from the manuscript
+
+For a legal book, the editor can now read the manuscript, find every case,
+statute, regulation and rule it cites, and write the index entries that produce
+a **Table of Authorities** — cases in one section, statutes in another, each in
+the order a law publisher expects rather than plain alphabetical order.
+
+`42 U.S.C. § 1983` files under 42, and `2 U.S.C.` comes before `10 U.S.C.` —
+which is what a table of authorities requires and what ordinary alphabetical
+sorting gets wrong. Under the British and Canadian standards, an Act appears
+once with the sections you cited listed beneath it.
+
+**Preferences → Table of Authorities** is where you say which citation standard
+the book is written in. That page has been in the window for a while and did
+nothing; it now decides what the editor looks for, because `[1986] 1 SCR 103`
+is a citation under the McGill guide and is not one under the Bluebook.
+
+Everything found is written as ordinary `\index` entries at the citation, so
+LaTeX produces the table with real page numbers exactly as it produces your
+subject index. The editor tells you what to add to your preamble, and the whole
+run is a single undo.
+
+**What it does not do yet.** Short forms — `Id.`, `supra note 4`, `ibid` — are
+counted and reported but not resolved to the case they point at, because that
+needs the rest of the document rather than a better pattern. And a citation the
+editor could not attribute a party name to appears under its citation rather
+than under a case name, where you can see it and fix it.
+
+### Changed: the name database is shared, and it has moved
+
+Every name you settle is kept in a database of its own — how it inverts, why,
+and what language it is. That database was being kept **inside the
+application's own folder**, which was wrong in two ways. The Word and InDesign
+index editors would each have built up their own separate set of the same
+names, so a name you had already answered in one would ask you again in the
+other. And a folder beside the program is not yours: it is read-only on many
+installations, and an upgrade replaces it.
+
+It now lives in your own user folder, in one place that **all of the index
+editors share**. Nothing is lost — the database you already have is moved there
+the first time you start the application, and if there is somehow one at each
+end, the two are merged with your own hand-made corrections taking precedence
+over anything looked up automatically. Your old file is kept, renamed, rather
+than deleted.
+
+**Preferences → General → Name Database** shows where it is and moves it
+somewhere else if you want it somewhere else — a synced folder, say, or a drive
+you back up. Choose a folder and the database is moved there and every index
+editor follows it.
+
+### New: a name you have settled stays settled, book after book
+
+A compound surname you confirmed on the Name Inversion dialog was remembered
+for the rest of that index and forgotten for the next one, so the same
+correction had to be made again in every book. The answer is about the person,
+not about the manuscript, so the dialog now asks.
+
+Under the *Remember 'Vargas Llosa' as a compound surname* tick there is a
+second one — **Remember it for every index, not just this one** — and it starts
+ticked. Leave it, and the surname joins the table every new index starts from
+*and* the indexes you already have open, so it never has to be entered again.
+Untick it and the surname stays with the index you are in, which is the right
+answer when a name is a reading this one volume takes.
+
+The same applies to the **Language** you state on that dialog. It went to the
+index you were in and nowhere else unless you also changed the heading; it is
+now written to the remembered-names database as well, which is what carries a
+classification into the next book.
+
+### Fixed: name tables were corrupt in every open project
+
+A real defect, older than the above and found while building it. Every list on
+**Preferences → Presentation** — particles, direct order, compound surnames,
+generational suffixes — was written into the project file in a form the reader
+could not parse back, so what came out had a stray bracket and quote mark
+attached to the first and last entries. The list looked present and matched
+nothing, which is why it never showed up as an obvious failure: names simply
+filed as though the table were empty.
+
+Lists are now stored the same way the application-level settings have always
+stored them. **Projects already saved are repaired the next time they are
+opened** — nothing needs re-entering.
+
+### New: the authority lookup suggests the language
+
+When the VIAF/Library of Congress lookup finds a record, it now also fills in the
+**Language** on the Name Inversion dialog — for a name you have not already given
+one. You still confirm it, and the note under the control tells you why that
+matters.
+
+Two things were checked against real authority records before this was built, and
+both limit what the suggestion is worth:
+
+- **It is the language of the person, not of the name.** Joseph Conrad's record
+  says English. His family name was Korzeniowski.
+- **It carries no region.** Hugo Claus — Flemish, born in Bruges — comes back as
+  plain Dutch, the same code a Netherlands author gets. That is exactly the
+  distinction that decides whether *Van den Eede* files under V or under E, so a
+  Flemish name still needs you to say so.
+
+Nothing is stored until you press OK, and the suggestion is never written to the
+remembered-names database — that database records what you decided, and a guess
+kept there would come back looking settled in the next book.
+
+### New: compound surnames, remembered once
+
+*Mario Vargas Llosa* is filed **Vargas Llosa, Mario**, under V. His family name
+is two words, and no rule can work that out: *Gabriel García Márquez* and
+*Winston Spencer Churchill* are the same shape and take opposite answers, and
+*John Foster Dulles* is a single surname that looks like a double one. The only
+honest answer is a list, and **Preferences → Presentation → Compound surnames**
+is where it lives, seeded with the examples the standard manuals print.
+
+**The list grows as you work.** When you correct a name in the Name Inversion
+dialog, it offers to remember the family name you used — tick it, and every
+later name ending in those words is right without being corrected again. A
+surname the list already holds is not offered, accents and all.
+
+### Fixed: your name settings never reached the inverter
+
+A real defect, found while building the above and older than it. The Name
+Inversion tables on the Preferences → Presentation page — direct order,
+particles, generational suffixes — were read once when the application started,
+before any project was open, so they were always the built-in defaults. A name
+you added to *Direct order* was still inverted; a particle you removed was still
+absorbed.
+
+They are now read each time a name is inverted, so a change on that page takes
+effect on the next lookup, in the project you are in.
+
+### New: filing rules that differ by language
+
+Some names file differently depending on which language they are, and no rule
+reading the text can tell. The clearest pair is Dutch and Flemish: *Louis van
+den Eede* is filed **Van den Eede, Louis** under V in Belgian practice, and
+**Eede, Louis van den** under E in Dutch. German has one of its own — *ten* is
+an ordinary Dutch preposition and files under the name behind it, but in German
+it is an article of foreign origin and is filed on, so *Hein ten Hoff* files
+under T.
+
+Where a heading has been given a language (see Name Inversion, below), those
+rules now apply to it. Headings with no language file exactly as they did.
+
+**Preferences → Presentation** asks which national code to follow for Dutch and
+for German, the only two languages where two compete. The choice is small and
+concrete: FOBID leaves *Ver* and the foreign-origin prefixes standing so *La
+Fontaine Verwey, Herman de* files under L, while ABC-regels transposes them and
+files it under F; RAK files a contraction so *Vom Berg, Fritz* files under V,
+while DIN 5007-2 transposes it and files it under B.
+
+**Preferences → Sorting** shows what that choice filled in — one line per
+language — and you can edit it. A line ending at the colon means that language
+ignores no leading words at all, which is what makes Flemish work.
+
+This was measured against every worked example in the Dutch, German and Spanish
+chapters of *Indexing Names* (ASI, 2012). Fourteen of the seventeen already
+filed correctly; these are the other three.
+
+### New: Name Inversion asks what language the name is
+
+Not what language the *book* is — most manuscripts carry names from several,
+and some filing rules cannot be applied without knowing which one applies to
+a given name. The clearest case is Arabic, where two names differ by a single
+capital letter and file in completely different places: *Osama Bin Laden*
+files as **Bin Laden, Osama** under B, while *Isa bin Sulman* files as
+**Isa bin Sulman** under I. Nothing in the text says which is which, so until
+now both took the same rule and one of them was always wrong.
+
+Choose the language in the Name Inversion dialog and the suggestion is worked
+out again in front of you. A line underneath says what your choice did — the
+rules applied, or the language was recorded and nothing else changed. That
+second case is deliberate and worth using: a language with no rules behind it
+yet is still a note of something true, kept where the next person to open the
+entry will see it, and it is what any future rule would be built on.
+
+Your choice is remembered against this entry **and** against the name itself,
+so a name classified in one book arrives classified in the next. The entry
+wins where the two differ.
+
+For a book that really is all one language, **Preferences → Presentation**
+now has a *default name language*. It is the weakest of the three — the entry
+and the remembered name both override it — and it starts at "Not stated",
+because a language assumed for every name in a book is wrong on exactly the
+ones that needed you to look.
+
+**Also on Preferences → Sorting:** a second list of ignored leading words,
+matched exactly as written. It is what lets `al Turabi` file under T while
+`Al Thani` files under A — the Arabic article and the Arabic word for *clan*,
+which are the same two letters and are told apart by the capital alone. It is
+filled in for you when an index is declared to be an index of names.
+
+### Changed: how hyphens file, and a setting that migrates
+
+**Preferences → Sorting** now asks what a hyphen *does* rather than whether to
+ignore it, because there are three answers and they give three different
+orders for the same headings: leave it alone, remove it so `co-operative`
+files as `cooperative`, or treat it as a space. Word removes it; the indexing
+manuals treat a hyphen inside a name as a word break.
+
+If you had "hyphens and slashes" ticked, your projects keep that behaviour —
+it becomes "Remove it" on first open. Nothing needs doing.
+
+**Also new on that page:** an option to file accented and transliterated
+letters under their base letter, so `Ḥusayn` files under H. Without it such a
+name sorts after every ordinary name in the index, because the marked letter
+is a higher character code than `z`. makeindex and xindy do not do this for
+you — Word and InDesign do — so for a LaTeX project it is the emitted sort key
+that carries it.
+
+### New: note locators — `\index{Smith, John|fn{4}}`
+
+A note locator says *page 123, note 4* and prints `123n4`. LaTeX is the only
+one of the three formats this family of editors targets that can express one:
+it works through an encapsulation that takes an argument, against a document
+defining `\def\fn#1#2{{#2}n#1}`. Word cannot — an `XE` field inside a footnote
+files at the page the note sits on and is indistinguishable from body text
+there — and neither can InDesign, whose model draws no distinction between
+kinds of place a reference sits in.
+
+The application now reads and writes the form: `fn{4}`, and `(fn{4}` where the
+same reference also opens a range. A project that spells its macro differently
+says so; membership in the project's list is what identifies a note locator,
+because `see{Cats}` has exactly the same shape and is a cross-reference.
+
+Two things come free from makeindex and are worth knowing. It files the plain
+locator ahead of the decorated one on its own, which is the order *Chicago*
+asks for; and it emits one `.ilg` warning per page carrying both, which is
+noise rather than a fault.
+
+**Check Index** now reports a note locator typed into the heading text —
+`Costs 123n4` — since that files as part of the heading, several lines from
+`Costs`, carrying a number that is not a page number. In this format there is a
+better place to put it, and the message says so.
+
+### New: Presentation page in Preferences
+
+Heading capitalisation and subheading order, the depth at which a heading is
+worth a warning, whether *passim* is permitted and from how many page
+references, and the name-filing tables — the particles absorbed into a family
+name, and the list of names that file in **direct order** with no inversion at
+all.
+
+That last one is worth finding. *Vincent van Gogh* files as *Gogh, Vincent
+van* and *Leonardo da Vinci* files as itself, and the two are the same shape:
+no rule can tell a surname from a place name. The list is how you say which is
+which, and it starts with the three names the structural rules would otherwise
+get wrong.
+
+The cross-reference wording — what *see* and *see also* actually read as — is
+shown but not editable for a LaTeX project, because in LaTeX those words come
+from the document's own `\see` macro rather than from this application.
+
+### Changed: the Preferences tabs are reordered
+
+**General, Check Index, Sorting, Presentation, UI Themes, LaTeX Settings, RTF
+Export.** The pages shared with the other index editors now come first and the
+two LaTeX-only pages are appended, where previously LaTeX Settings sat above UI
+Themes and RTF Export below it.
+
+The reason is not tidiness. Under the old arrangement each application listed
+its tabs in full, so a page added to the shared set did not appear here until
+it was named — and the Presentation page above was, briefly, exactly that: built,
+working, and invisible. Appending means a shared page arrives everywhere at once.
+
+### New: Check Index and Sorting pages in Preferences
+
+Both are new vertical tabs in **Preferences**, and both settle a gap: Check
+Index has been running its twenty-four checks with no way to switch one off,
+and the sort settings have had no way in at all.
+
+**Check Index** lists every rule with its own explanation as a tooltip,
+grouped the way the report is — inside one entry, between headings,
+cross-references, page references. Switching one off applies to the open
+project only; with no project open you are setting the default that new
+projects start from. Below the rules is the vocabulary the checks judge
+against: the words that introduce a cross-reference, the words that mark a
+general one ("see *specific diseases*"), the leading and trailing words that
+make `of costs` and `costs` worth comparing, and the mixed-case spellings this
+project uses on purpose. The last of those has been seeded with `LaTeX`,
+`BibTeX` and the rest since the checks shipped, and this is the first time you
+can see or change it.
+
+**Sorting** covers letter-by-letter versus word-by-word, whether numbers file
+by value or as text, prefixes to ignore at the front of a subheading, how
+parenthetical text is treated, and the order symbols, numbers and letters come
+in. It also offers a choice the LaTeX index itself cannot: show entries in
+**your** order, or in the order **makeindex will actually produce**.
+
+One control on that page is deliberately not editable here. Word-versus-letter
+ordering already lives on **LaTeX Settings → cmd: makeindex/xindy → Sort
+Ordering Rule**, so the Sorting page shows it and points at the real switch
+rather than offering a second copy that could disagree with the first.
+
+### Fixed: the Sort Ordering Rule never reached makeindex
+
+Letter ordering was offered in Preferences, stored, and then dropped: the `-l`
+flag was never written into the generated `\makeindex` options, so every index
+was built word-by-word whatever the setting said. The flag is now emitted.
+
+The second choice was also labelled `character`, a spelling nothing else in
+the application used — makeindex, the shared sort record and this
+application's own adapter all say `letter`. The list now reads **word** and
+**letter**; projects saved under the old spelling are read and re-saved
+correctly with no migration step.
+
+### Fixed: Check Index settings did not survive a restart
+
+With no project open, the Check Index vocabulary and rule selection were kept
+in memory and lost at exit. They now go to the application's settings like
+every other preference, and are copied into a project the first time it is
+opened.
+
+### New: Check Index (Tools menu)
+
+**Twenty-four checks over the whole index, in one report you can work through
+without losing your place.**
+
+**Tools → Check Index…** looks at everything at once and tells you what it
+finds, grouped into four sections: what is wrong inside a single entry, what
+is inconsistent between headings, where the cross-references point, and what
+the page references say. Click a finding and it selects the entries it is
+about — both of them, where two headings disagree, because you need to see
+both to decide which one is right.
+
+Some of what it finds:
+
+- `Trial` in one place and `Trials` in another; `Costs` and `costs`;
+  `Smith, John` and `Smith John`; `analysis of` beside `analysis`
+- `Jaguar (car)` beside a bare `Jaguar` — but **not** `Jaguar (car)` beside
+  `Jaguar (animal)`, which is the correct way to separate two meanings
+- A heading with exactly one subheading under it, which divides nothing
+- A *see* reference whose target does not exist, points back at itself, or
+  leads to a heading with no page references at all
+- A *see* on a heading that has page numbers of its own, which should be a
+  *see also*
+- Eight page references under one heading with no subheadings to divide them
+- Two page ranges under one heading that cover the same pages
+
+**It never changes anything.** Most of what it finds has no mechanical repair —
+being told two headings disagree does not tell you which one is right — so it
+reports, and you correct in the entry window or the entry table as usual, with
+the undo you already have. The report stays open beside your work.
+
+**It is built not to cry wolf.** `401(k)`, `2(a)(iii)` and `26(b)` are not
+missing a space; `Innovation(s)` is not either. `PDFs`, `NGOs`, `iPhone`,
+`McArthur` and `LaTeX` are not mis-capitalised. `dogs'` and `O'Brien` are not
+unbalanced quotation marks. And `See specific diseases` is a general
+cross-reference, not a broken one. A check that fires on any of those is a
+check you switch off after the first screen, and then it never finds the real
+one.
+
+Not yet: a preferences page for turning individual checks on and off, or for
+adding your own words to the lists it exempts. The project already stores
+both; nothing edits them from the menus yet, so for now every project runs the
+standard set.
+
+### New: Repair Index Entries (Tools menu)
+
+**The first tool that works on the whole index at once, and it shows you what
+it would do before it does any of it.**
+
+The editor has always been able to repair an entry mechanically — an unescaped
+`&` or `%` that the index engine will misread — but only one entry at a time,
+while you are looking at it. A project that picked up the same fault a hundred
+times had to be corrected a hundred times.
+
+**Tools → Repair Index Entries…** scans every entry, lists what it would
+change with the before and after side by side, and lets you untick anything
+you would rather handle yourself. Only what you leave ticked is written.
+
+Three things worth knowing:
+
+- **It is one Undo.** However many entries it repairs, one press of Ctrl+Z puts
+  every one of them back. If something goes wrong partway, nothing is written
+  at all.
+- **It never changes what an entry says**, only how it is written. Every repair
+  is about characters the index engine reads wrongly.
+- **It leaves alone what it cannot fix mechanically.** An unclosed brace still
+  needs you; so does a `~`, which is a legal non-breaking space rather than a
+  mistake. Nothing is guessed at.
+
+### Internal: every index edit now goes through one door (phase 5b)
+
+**Nothing about using the application changes.** Editing a heading, renaming
+one, deleting a reference, duplicating one, and undoing or redoing any of
+those all now write through a single component that also reports which other
+entries moved as a result — rather than each doing its own writing and its own
+arithmetic. There were nine such places; there is one.
+
+The practical benefit is that "which entries moved when this one changed
+length" is worked out in exactly one way. It was already down to one *sum* in
+the previous release; now the writing and the sum happen together, so they
+cannot disagree about which edit they refer to.
+
+One thing worth knowing if you ever look at a session log: a write that gets
+refused now says so with the reason attached, rather than only that something
+failed.
+
+### Internal: the preferences window, and one place that knows where entries are (phase 5a)
+
+**Nothing about using the application changes.** The Preferences window's
+frame, its General tab and its UI Themes tab are shared code now; the LaTeX
+Settings and RTF Export pages stay here. The window looks and behaves exactly
+as it did, including the order of the tabs down the left-hand side, which is
+now stated explicitly rather than left to the shared frame to guess.
+
+The "Page Number Styles" box on the General tab — where you list which macro
+names should show as bold or italic — is now shown only for a format whose
+page styles a project can actually extend. LaTeX's can, so it is there as
+before.
+
+**One real internal fix behind it.** When an index entry is edited or deleted,
+every entry after it in the same file shifts, and the sum that works out which
+ones moved existed in one place while the code that applies it existed in
+another. They are one thing now, in the module that already records what a
+position means. Entries also gained a guaranteed identity: an entry that
+somehow reached the cache without one used to be indistinguishable from any
+other such entry, which could make a whole batch of position updates
+unapplicable. That identity is now derived at the single point where a
+database row becomes an entry, so it cannot be missing.
+
+**A note for anyone running the test suite.** A failure on an error path used
+to open a warning dialog with nobody there to dismiss it, which stopped the
+run dead and looked exactly like an infinite loop. The suite now turns any such
+dialog into an ordinary test failure carrying the dialog's own message.
+
+### Internal: the project database moves, and starts recording its own version (phase 5)
+
+**Nothing about using the application changes, but this one touches your
+project files, so it is worth saying what happens.** The half of the project
+database that holds the index — your headings, references, cross-references
+and project settings — is now shared code. The half that tracks which `.tex`
+files belong to the project stayed here, because that is the part that means
+something different in each of the three editors.
+
+**What happens the first time you open an existing project.** The database is
+brought up to date and, for the first time, stamped with the schema version it
+actually has. No data is rewritten and nothing is removed; three new columns
+appear, all of them empty. There is nothing to do and nothing to notice.
+
+The stamp is the point. The database has carried a `schema_version` field
+since the beginning, and it has read `1.0.0` through every change ever made to
+it, because nothing ever wrote to it after the project was created. It is now
+written by the thing that performs the changes, one step at a time, and the
+whole update happens in a single transaction — so an interrupted upgrade (a
+crash, a power cut) leaves the project exactly as it was rather than half
+converted with no record of it.
+
+Two things this makes possible, neither of them visible yet:
+
+- **Every entry now records which index it belongs to.** A project can hold a
+  Subject Index and a separate Table of Authorities — two genuinely different
+  indexes, not one index with a naming convention. The database understands
+  that now; the screens that would let you *use* it are a later piece of work.
+  Existing entries are all in the default index, which is what they have
+  always been in.
+- **The index's own settings — its title, its column count, whether it goes
+  in the table of contents — are stored per index** rather than once for the
+  project, and your existing values are carried across unchanged. The
+  Preferences dialog is unchanged and still edits the one index you have.
+
+### Internal: the tree and the entry table become shareable (phase 4a)
+
+**Nothing about using the application changes.** The index tree, the emphasis
+renderer, the advisory-warning icons and the tree's controller now live in the
+shared package, and the entry table stopped assuming that every index has
+exactly three levels with a sort key on each — because Word caps at three with
+a single sort key per entry, and InDesign allows four. The table you see is
+identical; it is now *derived* rather than written out, and a test asserts it
+comes out exactly as it always has.
+
+Two duplicate copies of information were removed, both harmless but both the
+kind of thing that eventually disagrees with itself:
+
+- The entry table kept its own record of where every entry sits in its file —
+  path, line, column, character offsets — rebuilt constantly and read by
+  nothing. The real one lives with the entry data.
+- It also kept its own list of which macros mean bold and italic, alongside
+  the one Preferences already writes to. There is one list now.
+
+One real fix: the tree sorted headings by splitting on the first `@`, ignoring
+braces. A heading like `a{b@c}d` sorted under `a{b` — a fragment of its own
+markup. Nothing ever reported it, because a wrong sort order looks like an
+opinion rather than a fault. (A *bare* `@` still starts a sort key, which is
+correct: that is what makeindex does, and the entry checker already warns
+about it.)
+
+### Index entries are now typed records, and the document has a backend (phase 3)
+
+The largest internal change so far, and **nothing about using the
+application should be different.** Every index reference used to be a loose
+dictionary of column names passed from hand to hand; it is now a typed record
+that the shared package defines, converted to and from database rows at
+exactly one place.
+
+Four real bugs turned up while making the change, three of them introduced by
+it and caught by the test suite, one of them pre-existing and shipped:
+
+- **Discarding an edit could revert some fields and not others.** The code
+  that put a record back copied a hand-maintained list of column names, so a
+  column added to the database at any point since would revert everywhere
+  except on discard. It rebuilds from the row now, so there is no list to
+  fall out of date.
+- Undo-then-redo of a *newly inserted* entry took a different internal route
+  from every other undo, because the insert path recorded the entry in one
+  shape and the delete path in another.
+
+There is also a new `LatexTextBackend`: the part of the application that
+knows how to find an `\index` macro in a `.tex` file, move it, and say what
+else moved as a result. Nothing routes through it yet — it exists, is fully
+tested against the shared conformance suite, and is what the Word and
+InDesign editors will each have their own version of. Two things came out of
+building it:
+
+- Saving with no editor tab open reported failure even though the write had
+  already gone to disk.
+- The "read the open buffer, or the file if there is no buffer" decision was
+  written out separately in several places. It is one function now. Getting
+  it wrong means reading a stale file whenever you have unsaved changes in
+  that tab, which is most of the time.
+
+Tests: 1,541 here and 432 in `bookindexcore`, up from 1,494 and 374.
+
+### Entries in a named index now work (phase 2)
+
+`imakeidx` lets a document declare more than one index and send an entry to a
+particular one with `\index[names]{Kant, Immanuel}`. That is not an exotic
+feature: a legal volume routinely needs a Subject Index and a separate Table
+of Authorities, which are two indexes and not one index with a naming
+convention.
+
+This application **read those entries and then quietly mishandled them**:
+
+- The scanner found the entry but threw the `[names]` away, so every entry
+  landed in the default index as far as the app was concerned.
+- Worse, the write path did not know the bracket was there. Renaming a
+  heading or editing a Page cell rebuilt the macro as `\index{...}` — moving
+  the entry out of its index — and the guard that checks "does this span
+  really look like an index macro before I overwrite it" answered *no* for
+  the bracketed form, so a good many edits were refused outright with no
+  visible explanation.
+
+Both halves are fixed. The class is read, preserved through every rewrite,
+and round-trips. If you have a multi-index project, entries in a named index
+are now editable and stay where you put them.
+
+**What is still missing:** there is no user interface for this yet — nothing
+lets you *declare* the indexes or move an entry between them from inside the
+app, and the class is not yet stored in the project database. That arrives
+with the shared persistence layer. What changed now is that the application
+stops damaging what it finds.
+
+### The markup grammar moved behind a shared seam (phase 2)
+
+Every question this application asks about the structure of an index entry —
+how levels nest, where a sort key ends, whether a page style is also a range
+marker — now goes through `LatexDialect`, which implements an interface the
+Word and InDesign editors will implement for their own formats. **Nothing
+about how any of it behaves has changed**, with two exceptions worth naming:
+
+- The tree view's bold/italic rendering was parsing `\textbf{}` inside a Qt
+  paint delegate, which is why the tree could show emphasis and nothing else
+  in the application could. It is a fact about LaTeX markup now, not about
+  painting. One consequence is a small fix: the delegate used to split a
+  level at the first `@` with no regard for braces, so a level like
+  `a{b@c}d` was cut in the wrong place; it now uses the same brace-aware
+  reading as everything else.
+- Which macros mean "bold" and which mean "italic" (Preferences → General)
+  now reaches both the Entry Table and the dialect, rather than only the
+  table. Nothing reads the second copy yet; it exists so the two cannot
+  drift apart later.
+
+The syntax-advice records and the cross-reference records are now the shared
+types, so a warning about a LaTeX entry and a warning about a Word one will
+be the same kind of thing.
+
+Tests: 1,494 here and 374 in `bookindexcore`, up from 1,395 and 312.
+
+### The shared `bookindexcore` package now exists (phase 1)
+
+About 4,800 lines have moved out of this application and into a package it
+shares with the Word and InDesign index editors: name filing, undo/redo, the
+change journal, the staging model, session backups and logging, theming, the
+help viewer, project search, the About box, and the right-click menu plumbing.
+Nothing about any of them changed. **There is nothing new to use, and nothing
+that used to work should behave differently.**
+
+Three small things did change shape, all of them invisible in use:
+
+- **The About box now reports which `bookindexcore` it is running**, next to the
+  Python and Qt versions it already showed. One shared core serving three
+  applications means a bug report that doesn't say which core it ran against
+  can't be acted on.
+- The name-authority lookups (VIAF, Library of Congress) used to identify
+  themselves as "LaTeX Indexing Editor". They still do from this application —
+  but the name is now supplied by whichever application is asking, so a Word
+  user's lookups won't be logged at VIAF as coming from the LaTeX editor.
+- The application no longer bundles copies of the shared modules; it installs
+  the package. For anyone building from source that means one extra step, and
+  `installer/README` has it.
+
+The test suite split with the code: 1,395 tests here, 312 in `bookindexcore`, up
+from 1,696 in one place. Both must pass.
+
+### Groundwork for the shared `bookindexcore` package (phase 0)
+
+Three index editors are being built against three document formats — LaTeX, Word
+and InDesign — and roughly half of this one is format-agnostic. That half is being
+lifted into a package all three share, in phases, each of which leaves this
+application working and its test suite green. **Phase 0 is preparation only: five
+places where the code was tangled in a way that would have been copied into all
+three applications.** There is nothing new to use here.
+
+The one change that reaches your projects: **`project_references` gains an
+`is_cross_reference` column**, and an existing project is upgraded the first time
+this build opens it. Nothing is asked of you and nothing is rewritten except that
+one flag. Whether a reference is a cross-reference used to be worked out inside
+the database queries themselves, by matching the text of the entry's page-style
+field; it is now recorded when the entry is written, by the same code that reads
+every other part of an `\index` tag. That means the database and the rest of the
+application can no longer disagree about what a cross-reference is — and they
+could, slightly: a malformed `see{Target` with no closing brace counted as one in
+the database and as an ordinary entry everywhere else. It is now an ordinary entry
+in both.
+
+One consequence worth knowing if you keep an older build around: a project opened
+in this build still opens in 0.3.0-alpha afterwards. But a cross-reference *added*
+while back on the old build will not be flagged, and this build would then count it
+as an ordinary entry. Don't alternate between builds on the same project.
+
+The rest is invisible: the workspace tree's right-click **Prune** and **Set as root
+file** actions now go through the same path as their double-click equivalents
+rather than a second, near-duplicate one, and the bold/italic page-number style
+names moved next to the rest of the `\index` grammar. Two tests were added that
+check nothing about behaviour and everything about which parts of the code are
+allowed to depend on which — the specific problem phase 0 exists to clear.
+
 ## 0.3.0-alpha — 5 August 2026
 
 This release is mostly about one thing: **the editor now knows what `makeindex`

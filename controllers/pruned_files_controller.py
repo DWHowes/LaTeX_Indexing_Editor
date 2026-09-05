@@ -4,7 +4,7 @@ from PySide6.QtCore import QObject, Slot
 
 from models.project_load_worker import ProjectLoadWorker
 from views.pruned_files_dialog import PrunedFilesDialog
-from controllers.app_style_configuration import AppStyleConfiguration
+from bookindexcore.ui.style import AppStyleConfiguration
 
 
 class PrunedFilesController(QObject):

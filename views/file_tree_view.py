@@ -5,7 +5,7 @@ from PySide6.QtGui import QStandardItem, QStandardItemModel, QPalette, QBrush, Q
 from PySide6.QtCore import Signal, Qt, QModelIndex
 
 from views.latex_folder_filter_proxy import LatexFolderFilterProxy
-from controllers.app_style_configuration import AppStyleConfiguration
+from bookindexcore.ui.style import AppStyleConfiguration
 
 class FileTreeView(QTreeView):
     """
@@ -15,6 +15,13 @@ class FileTreeView(QTreeView):
     file_requested = Signal(str)
     file_prune_requested = Signal(str)
     set_root_requested = Signal(str)
+
+    # The item-data roles this tree stores its two facts under. They used to
+    # live on FileTreePersistence, which meant the persistence layer imported
+    # a Qt *view* type to read them; the roles are a property of this widget's
+    # items, so they belong here and the repository takes paths.
+    DIRECTORY_FLAG_ROLE = Qt.ItemDataRole.UserRole
+    ABSOLUTE_PATH_ROLE = Qt.ItemDataRole.UserRole + 1
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -66,8 +73,8 @@ class FileTreeView(QTreeView):
         for node in flat_nodes_list:
             item = QStandardItem(str(node["name"]))
 
-            item.setData(bool(node["is_dir"]), Qt.ItemDataRole.UserRole)
-            item.setData(str(node["path"]), Qt.ItemDataRole.UserRole + 1)
+            item.setData(bool(node["is_dir"]), self.DIRECTORY_FLAG_ROLE)
+            item.setData(str(node["path"]), self.ABSOLUTE_PATH_ROLE)
 
             if bool(node["is_dir"]):
                 item.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
@@ -97,16 +104,16 @@ class FileTreeView(QTreeView):
         if not item:
             return
             
-        is_dir = bool(item.data(Qt.ItemDataRole.UserRole))
-        file_path = item.data(Qt.ItemDataRole.UserRole + 1)
+        is_dir = bool(item.data(self.DIRECTORY_FLAG_ROLE))
+        file_path = item.data(self.ABSOLUTE_PATH_ROLE)
 
         # Bubble clean coordinates up to controllers to trigger tab management
         if not is_dir and file_path:
             self.file_requested.emit(str(file_path))
 
     def _update_item_root_indicator(self, item: QStandardItem):
-        file_path = os.path.normpath(str(item.data(Qt.ItemDataRole.UserRole + 1) or ""))
-        is_dir = bool(item.data(Qt.ItemDataRole.UserRole))
+        file_path = os.path.normpath(str(item.data(self.ABSOLUTE_PATH_ROLE) or ""))
+        is_dir = bool(item.data(self.DIRECTORY_FLAG_ROLE))
 
         font = item.font()
         if file_path and not is_dir and self.root_file_path and os.path.normcase(file_path) == os.path.normcase(self.root_file_path):
@@ -160,8 +167,8 @@ class FileTreeView(QTreeView):
             child = parent_item.child(row)
             if child is None:
                 continue
-            is_dir = bool(child.data(Qt.ItemDataRole.UserRole))
-            child_path = os.path.normpath(str(child.data(Qt.ItemDataRole.UserRole + 1) or ""))
+            is_dir = bool(child.data(self.DIRECTORY_FLAG_ROLE))
+            child_path = os.path.normpath(str(child.data(self.ABSOLUTE_PATH_ROLE) or ""))
             if not is_dir and child_path == target_path:
                 return child
             if child.hasChildren():
@@ -169,6 +176,24 @@ class FileTreeView(QTreeView):
                 if found is not None:
                     return found
         return None
+
+    def is_directory_node(self, index: QModelIndex) -> bool:
+        """
+        True if *index* points at a folder rather than a file.
+
+        Takes either a proxy or a source index: a proxy forwards data() to
+        its source, and both accessors here read only through data().
+        """
+        if not index.isValid():
+            return False
+        return bool(index.data(self.DIRECTORY_FLAG_ROLE))
+
+    def absolute_path_of(self, index: QModelIndex) -> str:
+        """The node's path, normalized, or "" for an invalid or pathless index."""
+        if not index.isValid():
+            return ""
+        raw_path = str(index.data(self.ABSOLUTE_PATH_ROLE) or "")
+        return os.path.normpath(raw_path) if raw_path else ""
 
     def _file_path_from_proxy_index(self, proxy_index: QModelIndex) -> str:
         if not proxy_index.isValid():
@@ -179,7 +204,7 @@ class FileTreeView(QTreeView):
         item = self.base_model.itemFromIndex(source_index)
         if item is None:
             return ""
-        return str(item.data(Qt.ItemDataRole.UserRole + 1) or "")
+        return str(item.data(self.ABSOLUTE_PATH_ROLE) or "")
 
     def _on_set_root_file(self, proxy_index: QModelIndex):
         file_path = self._file_path_from_proxy_index(proxy_index)

@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 from PySide6.QtCore import QObject, Signal, Slot
 from models import index_tag_grammar as grammar
+from models.latex_dialect import LATEX_DIALECT as dialect
 from models.latex_index_parser import LatexIndexParser
 from models.latex_command_registry_model import LatexCommandRegistryModel
 
@@ -303,7 +304,7 @@ class ProjectLoadWorker(QObject):
                 if self._is_abort_requested: return headings_payload, references_payload
                 if not parts_list or not uid_dict: continue
                     
-                full_heading_path = grammar.join_levels(parts_list)
+                full_heading_path = dialect.join_levels(parts_list)
                 path_key = full_heading_path.lower().strip()
 
                 if path_key not in seen_headings:

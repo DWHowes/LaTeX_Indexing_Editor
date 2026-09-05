@@ -1,8 +1,9 @@
+import dataclasses
 import os
 from shiboken6 import isValid  # PySide6 C++ lifetime validator
 from pathlib import Path
 from typing import Optional, Callable
-from concurrent.futures import ThreadPoolExecutor
+
 
 from PySide6.QtCore import (
     QObject, Slot, QModelIndex, QPersistentModelIndex, Qt, Signal, QTimer
@@ -10,26 +11,34 @@ from PySide6.QtCore import (
 from PySide6.QtWidgets import QMessageBox, QFileDialog, QInputDialog, QApplication, QProgressDialog
 from shiboken6 import isValid
 
-from models import index_tag_grammar as grammar
-from models.index_command_stack import (
+from models.latex_dialect import LATEX_DIALECT as dialect
+from models.latex_record_mapping import (
+    command_of, end_of, line_of, position_of, reference_from_row,
+    row_from_reference,
+)
+from models.command_edits import (
+    edit_command_name, edit_end, edit_position, macro_edit,
+)
+from bookindexcore.model.commands import (
     DEFAULT_LIMIT,
     EntrySnapshot,
     IndexCommandStack,
-    MacroEdit,
     insertion_command,
 )
 from views.entry_modifier_list import set_encap_style_values
 from models.latex_entry_model import ReferenceCarrier
 from models.index_tree_model_engine import IndexTreeModelEngine
-from models.macro_id_generator import MacroIDGenerator
+from bookindexcore.model.ids import MacroIDGenerator
 from models.project_load_worker import SafeProjectLoadThread, ProjectLoadWorker
 from models.index_prefs_config_model import IndexPrefsConfigModel
 from models.rtf_export_model import RtfExportMetadata
 from models.latex_command_registry_model import LatexCommandRegistryModel
-from models.theme_config_model import ThemeConfigModel
+from bookindexcore.ui.theme.config_model import ThemeConfigModel
 from models.entry_modifier_model import EntryModifierModel
-from models.index_edit_staging_model import IndexEditStagingModel
-from models.name_inverter import NameInverter, NameInversionResult
+from bookindexcore.qt.staging import QtIndexEditStagingModel
+from bookindexcore.naming.inverter import NameInversionResult
+from bookindexcore.naming.service import NameInversionService
+from bookindexcore.style.languages import UNSTATED
 
 from controllers.index_tree_controller import IndexTreeController
 from controllers.context_menu_subsystem import FileTreeContextMenuManager, IndexTreeContextMenuManager, EditEntryContextMenuManager
@@ -37,23 +46,61 @@ from controllers.index_prefs_config_controller import IndexPrefsConfigController
 from controllers.rtf_export_controller import RtfExportThread
 from controllers.latex_command_controller import CreateCommandController
 from controllers.project_command_manager_controller import ProjectCommandManagerController
-from controllers.theme_config_controller import ThemeConfigController
+from bookindexcore.ui.theme.controller import ThemeConfigController
 from controllers.entry_modifier_controller import EntryModifierController
+from controllers.bulk_repair_controller import BulkRepairController
+from controllers.check_index_controller import CheckIndexController
+from models.check_index_prefs import CheckIndexPrefs
+from models.presentation_prefs import PresentationPrefs
+from models.sort_prefs import SortPrefs
+from models.toa_prefs import ToaPrefs
+from models.toa_emission import build_plan as build_toa_plan, preamble_for
+from controllers.toa_controller import ToaController
 from controllers.index_edit_controller import IndexEditController
+from controllers.latex_text_backend import LatexTextBackend
 from controllers.range_consistency_controller import RangeConsistencyController
 from controllers.cross_reference_controller import CrossReferenceController
 from controllers.pruned_files_controller import PrunedFilesController
-from controllers.help_controller import HelpController
+from models.app_paths import get_app_root
+from models.app_version import app_identity
+from bookindexcore.ui.help.controller import HelpController
 
-from controllers.app_style_configuration import AppStyleConfiguration
+from bookindexcore.authorities import house_style_for, system_for
+from bookindexcore.ui.dialogs.heading_language_dialog import (
+    HeadingLanguageDialog)
+from bookindexcore.ui.dialogs.toa_review import ToaReviewDialog
+from bookindexcore.ui.progress_dialog import ProgressDialog
+from bookindexcore.ui.style import AppStyleConfiguration
+from bookindexcore.ui.window import WindowLayoutState
 from views.editor_tab import EditorTab
-from views.index_tree_view import IndexTreeView
+from views.index_tree_view import IndexTreeView, SourceCoordinate
 from views.project_sidebar_view import ProjectSidebarView
-from views.advanced_search_window import AdvancedSearchWindow
-from views.name_inversion_dialog import NameInversionDialog
-from views.index_statistics_dialog import IndexStatisticsDialog
+from bookindexcore.ui.search.source import FileLineSource
+from bookindexcore.ui.search.window import AdvancedSearchWindow
+from bookindexcore.ui.dialogs.name_inversion_dialog import NameInversionDialog
+from bookindexcore.ui.dialogs.statistics_dialog import IndexStatisticsDialog
 from views.rtf_viewer_dialog import RtfViewerDialog
 from views.head_note_dialog import HeadNoteDialog
+
+def _placement_coords(result) -> dict:
+    r"""
+    A backend placement's ``EditResult``, in the coordinate shape the
+    new-entry paths already speak.
+
+    The backend reports where a new macro landed as a ``Locator``, whose hint
+    is its own business and happens to hold exactly these four values. This is
+    the one place that reads them back out, so that ``_build_duplicate_entry_dict``
+    and its siblings keep taking the plain dict they always did rather than
+    each learning what a hint is.
+    """
+    hint = result.locator.hint
+    return {
+        "line_number": hint.get("line_number", 1),
+        "column_offset": hint.get("column_offset", 0),
+        "absolute_position": hint.get("absolute_position"),
+        "absolute_end": hint.get("absolute_end"),
+    }
+
 
 class AppPipelineController(QObject):
     name_inversion_completed = Signal(QModelIndex, str)
@@ -74,11 +121,19 @@ class AppPipelineController(QObject):
         self.lc_ctrl = lifecycle_controller
         self.scope_ctrl = scope_controller
         self.session_logger = session_logger
-        self.name_inverter = name_inverter
-        self.worker = worker  
+        self.worker = worker
 
-        # Executor for background VIAF lookups
-        self._executor = ThreadPoolExecutor(max_workers=2)
+        # **The cascade, its thread and its lifetime, from the core.** All
+        # three used to be written out here; they moved into
+        # `bookindexcore.naming.service` when the Word editor became the
+        # second caller. The rules are read through a callable rather than
+        # handed over, because they move under it from three directions and a
+        # record built once at startup keeps the package defaults for the
+        # session -- which is exactly the defect Part 5 of the name work
+        # found here.
+        self._names = NameInversionService(
+            rules_source=lambda: self.presentation_prefs.names(),
+            inverter=name_inverter)
 
         self.name_inversion_completed.connect(self._apply_inverted_name, Qt.ConnectionType.QueuedConnection)
         self.name_lookup_finished.connect(
@@ -132,7 +187,14 @@ class AppPipelineController(QObject):
         # Session-only staging model tracking original/staged/dirty state for
         # in-flight bidirectional edits, keyed by unique_id_number. Must be
         # instantiated before any of its three consumers below.
-        self.index_edit_staging_model = IndexEditStagingModel(parent=self)
+        self.index_edit_staging_model = QtIndexEditStagingModel(parent=self)
+
+        # The DocumentBackend for this application, held so that shared code
+        # given one has something to hold. The coordinate arithmetic it
+        # re-exports is reached directly by the entry store through
+        # latex_record_mapping, so nothing here has to be wired for a
+        # rewrite to keep every later entry's position in step.
+        self.text_backend = LatexTextBackend(self.doc_io)
 
         self.entry_modifier_model = EntryModifierModel(persistence=None)  # persistence injected after project load
         self.entry_modifier_model.set_staging_model(self.index_edit_staging_model)
@@ -152,6 +214,10 @@ class AppPipelineController(QObject):
             index_edit_ctrl=self.index_edit_ctrl,
             staging_model=self.index_edit_staging_model,
             parent=self
+        )
+
+        self.bulk_repair_ctrl = BulkRepairController(
+            self.entry_modifier_model, self.index_edit_ctrl, self.doc_io,
         )
 
         self.range_consistency_ctrl = RangeConsistencyController(
@@ -179,7 +245,16 @@ class AppPipelineController(QObject):
             parent=self,
         )
 
-        self.help_ctrl = HelpController(window=self.window, parent=self)
+        # app_root and identity are injected: app_paths deliberately stays in
+        # this application (see bookindexcore design 7.3 -- moved into the package
+        # its non-frozen branch resolves into site-packages), and one shared
+        # About box has to be told whose application it is describing.
+        self.help_ctrl = HelpController(
+            window=self.window,
+            app_root=get_app_root(),
+            identity=app_identity(),
+            parent=self,
+        )
 
         max_existing_id = self.scope_ctrl.get_max_unique_id()
         starting_id = max_existing_id + 1  # 1 for new project, next available for existing
@@ -193,12 +268,49 @@ class AppPipelineController(QObject):
                                                        )        
 
         self._index_prefs_model = IndexPrefsConfigModel()
+
+        # Both are built before the preferences controller because that
+        # controller now edits them: the shared Check Index and Sorting pages
+        # live in the same window as the LaTeX ones, so the same OK button
+        # writes all three groups.
+        # Their own QSettings groups, so the no-project-open scope is durable
+        # rather than a dict that dies with the process. Separate groups from
+        # IndexPrefs/global because that one is filtered against IndexPrefsData
+        # on the way back in and would read these keys as nothing.
+        self.check_index_prefs = CheckIndexPrefs(
+            global_store=self.prefs.global_store("CheckIndexPrefs/global"))
+        self.sort_prefs = SortPrefs(
+            global_store=self.prefs.global_store("SortPrefs/global"))
+        self.presentation_prefs = PresentationPrefs(
+            global_store=self.prefs.global_store("PresentationPrefs/global"))
+        self.toa_prefs = ToaPrefs(
+            global_store=self.prefs.global_store("ToaPrefs/global"))
+
         self._index_prefs_ctrl = IndexPrefsConfigController(model=self._index_prefs_model,
                                                             prefs_persistence=self.prefs,
                                                             theme_controller=self._theme_controller,
+                                                            check_index_prefs=self.check_index_prefs,
+                                                            sort_prefs=self.sort_prefs,
+                                                            presentation_prefs=self.presentation_prefs,
+                                                            toa_prefs=self.toa_prefs,
                                                             parent_window=self.window,
                                                             on_general_changed=self.apply_general_preferences,
+                                                            on_name_database_moved=self.reopen_name_database,
                                                             )
+
+        # Check Index reports rather than writes, so it takes the backend --
+        # for document order -- and not the edit controller. Built here rather
+        # than beside the other index tools because it reads the index-prefs
+        # model above: in LaTeX the entry-length ceiling belongs to the engine
+        # the project selected, not to the format. Its own settings follow the
+        # open project like every other preference; see
+        # _handle_project_open_completion.
+        self.check_index_ctrl = CheckIndexController(
+            self.entry_modifier_model,
+            self.text_backend,
+            self.check_index_prefs,
+            prefs_config=self._index_prefs_model,
+        )
 
         # Map context menu structures straight to the newly instantiated widgets
         self._file_context_manager = FileTreeContextMenuManager(self.file_tree_widget)
@@ -253,7 +365,7 @@ class AppPipelineController(QObject):
         self.window.window_close_requested.connect(self.coordinate_application_shutdown)
         
         # --- Project Sidebar & Navigation Trees ---
-        self.index_tree_widget.coordinate_navigation_requested.connect(self.handle_index_navigation)
+        self.index_tree_widget.reference_activated.connect(self.handle_index_navigation)
         
         # Map direct file double-clicks to a dedicated single-argument slot contract
         self.file_tree_widget.file_requested.connect(self.handle_file_activation_request)
@@ -261,13 +373,14 @@ class AppPipelineController(QObject):
         self.file_tree_widget.set_root_requested.connect(self._handle_file_set_as_root)
         self.file_tree_widget.file_prune_requested.connect(self._handle_file_prune_requested)
         # The live right-click "Prune" / "Set as root" actions are built by
-        # _file_context_manager and emit *_triggered(QModelIndex) directly --
-        # they do not route through FileTreeView's file_prune_requested /
-        # set_root_requested signals above.
-        self._file_context_manager.prune_file_triggered.connect(self.scope_ctrl.process_file_pruning_request)
-        self._file_context_manager.set_root_file_triggered.connect(self._handle_file_set_as_root_index)
+        # _file_context_manager and emit *_triggered(str) directly -- they do
+        # not route through FileTreeView's file_prune_requested /
+        # set_root_requested signals above, but they now carry the same
+        # payload, so both routes land on the same slot.
+        self._file_context_manager.prune_file_triggered.connect(self._handle_file_prune_requested)
+        self._file_context_manager.set_root_file_triggered.connect(self._handle_file_set_as_root)
         # Keep the workspace tree display in sync with a successful prune --
-        # process_file_pruning_request/prune_project_file only mutate the DB.
+        # prune_project_file only mutates the DB.
         self.scope_ctrl.file_pruned.connect(self.file_tree_widget.remove_file_node)
 
         # Connect the direct tree view update to the indexInserted signal
@@ -298,6 +411,9 @@ class AppPipelineController(QObject):
         self.window.menu_bar.edit_menu_about_to_show.connect(self._refresh_insert_settings_menu_state)
         self.window.menu_bar.create_rtf_file_requested.connect(self._handle_create_rtf_file_request)
         self.window.menu_bar.resync_index_data_requested.connect(self._handle_manual_resync_request)
+        self.window.menu_bar.repair_entries_requested.connect(self._handle_repair_entries_request)
+        self.window.menu_bar.check_index_requested.connect(self._handle_check_index_request)
+        self.window.menu_bar.build_toa_requested.connect(self._handle_build_toa_request)
         self.window.menu_bar.resync_workspace_files_requested.connect(self._handle_manual_workspace_resync_request)
         self.window.menu_bar.manage_pruned_files_requested.connect(self.pruned_files_ctrl.manage_pruned_files)
 
@@ -324,6 +440,14 @@ class AppPipelineController(QObject):
 
         # --- Toolbar Controls ---
         self.window.tool_bar.sidebar_panel_requested.connect(self._orchestrate_sidebar_focus)
+        # And the other direction, which was missing: a panel brought forward
+        # by clicking its own tab left the toolbar's buttons showing the panel
+        # before it. The shared sidebar says which panel is in front however
+        # it got there, and `update_panel_state` does not echo, so the two
+        # cannot chase each other. Found by test_signal_wiring, which asked
+        # why the new signal had no receiver.
+        self.sidebar_view_panel.panel_shown.connect(
+            self.window.tool_bar.update_panel_state)
         self.window.tool_bar.dark_mode_toggle_requested.connect(self._handle_dark_mode_toggle)
         
         self.window.tool_bar.font_family_changed.connect(self._handle_font_family_change)
@@ -354,6 +478,7 @@ class AppPipelineController(QObject):
 
         self._edit_table_context_manager.delete_references_triggered.connect(self.entry_modifier_ctrl.handle_context_menu_delete_request)
         self._edit_table_context_manager.invert_name_triggered.connect(self._handle_index_name_inversion_request)
+        self._edit_table_context_manager.set_name_language_triggered.connect(self._handle_set_name_language_request)
         self._edit_table_context_manager.duplicate_references_triggered.connect(self._handle_duplicate_references_request)
         self._edit_table_context_manager.invert_headings_triggered.connect(self._handle_invert_headings_request)
 
@@ -402,7 +527,172 @@ class AppPipelineController(QObject):
             self.name_lookup_finished.emit(persistent_index, source_name, inversion_result)
 
         self.invert_name_async(
-            source_name, _on_lookup_done, locale=None, prefer_authority=True)
+            source_name, _on_lookup_done,
+            locale=self.heading_language(source_name), prefer_authority=True)
+
+    @Slot(QModelIndex)
+    def _handle_set_name_language_request(self, proxy_index) -> None:
+        """
+        Say what language a name is, without looking anything up.
+
+        **The gap the wiring sweep found**: `HeadingLanguageDialog` is in the
+        core and was reachable from nothing here, so the only way to state a
+        language in this application was to run an authority lookup and answer
+        the inversion dialog. An indexer who already knows a name is Arabic
+        should not have to ask VIAF about it first.
+
+        Nothing about the manuscript changes. What changes is how the filing
+        and inversion rules read the name -- from now on, and in the next book,
+        because `set_heading_language` writes the project row and the name
+        database together.
+
+        The dialog is told **where the current answer came from**, which it
+        shows: *recorded in this project* reads very differently from
+        *remembered from another book*, and an indexer changing one of those
+        should know which they are changing.
+        """
+        if not proxy_index or not proxy_index.isValid():
+            return
+        heading = str(proxy_index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        if not heading:
+            self.window.status_bar.showMessage(
+                "Choose an index term first.", 4000)
+            return
+
+        current = self.heading_language(heading)
+        dialog = HeadingLanguageDialog(
+            heading, current, self.window,
+            sources=self._language_source_note(heading, current))
+        if dialog.exec() != HeadingLanguageDialog.DialogCode.Accepted:
+            return
+
+        self.set_heading_language(heading, dialog.language())
+        self.window.status_bar.showMessage(
+            f"{heading}: language recorded as {dialog.language()}.", 4000)
+
+    def _language_source_note(self, heading_text: str, current: str) -> str:
+        """
+        Which of the two places the current answer is in, as a sentence.
+
+        Read rather than inferred from `heading_language`'s return: that
+        method reports the *answer* and deliberately not its provenance, and
+        an indexer being asked to change something is owed the difference.
+        """
+        if not current or current == UNSTATED:
+            return ""
+        try:
+            persistence = (self.scope_ctrl.get_persistence_model()
+                           if self.scope_ctrl else None)
+            if persistence is not None:
+                heading_id = persistence.find_heading_id(heading_text)
+                if persistence.heading_language(heading_id) != UNSTATED:
+                    return "Recorded for this project."
+        except Exception as exc:
+            print(f"[NAME INVERSION] Could not say where the language for "
+                  f"{heading_text!r} came from: {exc}")
+        return "Remembered from the shared name database."
+
+    def heading_language(self, heading_text: str) -> str:
+        """
+        What language this heading's name is in, by the settled precedence.
+
+        Three sources, most specific first, and the order is the design:
+
+        1. **This project's heading row.** A book is entitled to read a name
+           differently from the last book -- the same word can be a different
+           person.
+        2. **The name database**, which outlives any one project, so a name
+           classified once arrives classified in the next volume.
+        3. **The project default**, which lives in ``NameRules`` and is read
+           by the cascade itself, so nothing here has to apply it.
+
+        Never raises and never creates a heading row: this is a question, and
+        a reader that writes would turn a cancelled dialog into a row nothing
+        points at.
+        """
+        try:
+            persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+            if persistence is not None:
+                heading_id = persistence.find_heading_id(heading_text)
+                stated = persistence.heading_language(heading_id)
+                if stated != UNSTATED:
+                    return stated
+            if self.name_inverter is not None:
+                return self.name_inverter.remembered_language(heading_text)
+        except Exception as exc:
+            print(f"[NAME INVERSION] Language lookup failed for {heading_text!r}: {exc}")
+        return UNSTATED
+
+    def remember_compound_surname(self, surname: str, *,
+                                  everywhere: bool = False) -> None:
+        """
+        Add a multi-word family name to the compound-surname table.
+
+        The whole value of the table is that it generalises: *Vargas Llosa*
+        entered once makes every bearer of it file under V, without anybody
+        having to correct the next one. That is chapter 20's conclusion in
+        *Indexing Names* — no algorithm decides which words of a three-word
+        name are the surname, so the answer is a lookup grown from human-made
+        indexes — and this is where one gets made.
+
+        ``everywhere`` is the indexer's answer to *which books is this for*,
+        asked by the dialog's second checkbox and never assumed here. True, the
+        surname also joins the global template, so it reaches every index
+        started afterwards and — because the table is declared cumulative —
+        every one already open. False, it stays with this project. Both are
+        legitimate: a family name is usually a fact about a person, and
+        occasionally a reading this one volume takes.
+
+        Appending and the duplicate guard both live in ``ScopedSettings``,
+        which owns the routing and folds with ``fold_for_matching`` — the same
+        question the dialog asks before offering and the table asks when it
+        matches. A copy of either here is what that module exists to prevent.
+        """
+        surname = (surname or "").strip()
+        if not surname:
+            return
+        try:
+            self.presentation_prefs.append(
+                "compound_surnames", surname, also_global=everywhere)
+        except Exception as exc:
+            print(f"[NAME INVERSION] Could not remember the compound surname "
+                  f"{surname!r}: {exc}")
+
+    def set_heading_language(self, heading_text: str, language: str) -> None:
+        """
+        Record a language against this heading, in both places it belongs.
+
+        The project row is the answer for this book; the name database is what
+        carries the decision into the next one. Written together because an
+        indexer classifying a name has answered both questions at once, and
+        writing only one of them is how the two come to disagree.
+
+        **The second write is new, and its absence is the defect this docstring
+        described its way past.** Only the project row was written. The name
+        database was reached by ``cache_resolved_heading``, which runs when the
+        heading is *changed* — so stating a language and accepting the
+        suggestion unaltered, which is the commonest thing an indexer does
+        here, recorded the decision for this book alone and asked again in the
+        next one. Classifying a name is meant to be work done once.
+        """
+        try:
+            persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+            if persistence is not None:
+                heading_id = persistence.find_heading_id(heading_text)
+                if heading_id is not None:
+                    persistence.set_heading_language(heading_id, language)
+        except Exception as exc:
+            print(f"[NAME INVERSION] Could not store the language for "
+                  f"{heading_text!r}: {exc}")
+        try:
+            # Separately guarded: the two stores fail for unrelated reasons —
+            # no project open, no name cache configured — and one of them being
+            # unavailable is no reason to withhold the decision from the other.
+            if self.name_inverter is not None:
+                self.name_inverter.remember_language(heading_text, language)
+        except Exception as exc:
+            print(f"[NAME INVERSION] Could not remember the language for "
+                  f"{heading_text!r}: {exc}")
 
     @Slot(object, str, object)
     def _present_name_inversion_dialog(self, persistent_index, source_name: str,
@@ -421,18 +711,49 @@ class AppPipelineController(QObject):
             original_name=source_name,
             authority_value=inversion_result.authority_term or "",
             rule_value=inversion_result.rule_suggestion or inversion_result.display_value,
-            parent=self.window
+            parent=self.window,
+            language=self.heading_language(source_name),
+            # Re-ask the rules when the language changes. Without it the
+            # control states a fact and appears to do nothing: an indexer
+            # marks a name Arabic, watches the suggestion sit unchanged, and
+            # cannot tell whether the setting took. Rule-based only -- a
+            # language change is no reason to go back to the network.
+            resuggest=lambda name, language: self._rule_only_inversion(
+                name, language).rule_suggestion,
+            compound_surnames=self.presentation_prefs.names().compound_surnames,
+            # The list is this project's, so the note about the
+            # authority's capitalisation is built from the rules that
+            # will actually file the heading.
+            cased_prefixes=self.presentation_prefs.names().cased_filing_prefixes,
+            # Offered, never applied. The record gives the language the person
+            # is associated with rather than the language of the name, and it
+            # carries no region -- so a Flemish name arrives as plain Dutch,
+            # which is exactly the distinction the filing rules need. The
+            # dialog shows where it came from and the indexer confirms it.
+            language_from_authority=getattr(
+                inversion_result, "authority_language", ""),
         )
         self._active_dialog = dialog
 
         def on_accepted():
             final_value = dialog.result_value()
             reason = dialog.correction_reason()
+            language = dialog.language()
 
             # Cache if the user changed the auto-resolved value
             original_auto = inversion_result.authority_term or inversion_result.rule_suggestion or ""
             if self.name_inverter and final_value.strip() != original_auto.strip():
-                self.name_inverter.cache_resolved_heading(source_name, final_value, reason=reason, user_edited=True)
+                self.name_inverter.cache_resolved_heading(
+                    source_name, final_value, reason=reason, locale=language,
+                    user_edited=True)
+
+            # Unconditionally, unlike the correction above. Stating a language
+            # and accepting the suggestion is a complete answer, and the whole
+            # point of asking is that it be there next time.
+            self.set_heading_language(source_name, language)
+            self.remember_compound_surname(
+                dialog.compound_surname_to_remember(),
+                everywhere=dialog.remember_surname_everywhere())
 
             self._apply_inverted_name(target_index, final_value)
 
@@ -624,7 +945,7 @@ class AppPipelineController(QObject):
         if not macro_text:
             return
 
-        edit = MacroEdit(
+        edit = macro_edit(
             entry_id=entry_id,
             file_path=file_path,
             absolute_position=position,
@@ -632,9 +953,13 @@ class AppPipelineController(QObject):
             after_text=macro_text,
             command_name=entry_dict.get("macro_command", "index"),
         )
+        # The snapshot holds a *record*, the same as the deletion path's does.
+        # This one used to hold the raw insertion payload, so undo-then-redo
+        # of an insertion handed the restore path a dict where every other
+        # route handed it a record.
         snapshot = EntrySnapshot(
             entry_id=entry_id,
-            record=entry_dict,
+            record=reference_from_row(entry_dict),
             parts_list=tuple(parts_list),
             heading_text=entry_dict.get("heading_raw_text", ""),
             heading_id=entry_dict.get("heading_id"),
@@ -858,21 +1183,6 @@ class AppPipelineController(QObject):
             self.window.status_bar.showMessage("Root file set successfully.", 3000)
         else:
             print("PERSISTENCE ERROR: No file database persistence model has been set.")
-
-    @Slot(QModelIndex)
-    def _handle_file_set_as_root_index(self, proxy_index: QModelIndex):
-        """
-        Adapter for the live right-click "Set as root file" action, which
-        emits a QModelIndex (see _file_context_manager.set_root_file_triggered
-        wiring in _bind_signal_pipelines) rather than the str path
-        _handle_file_set_as_root expects.
-        """
-        persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
-        if not persistence:
-            return
-        file_path = persistence.get_absolute_path(proxy_index)
-        if file_path:
-            self._handle_file_set_as_root(file_path)
 
     @Slot(str)
     def _handle_file_prune_requested(self, absolute_path: str):
@@ -1146,8 +1456,13 @@ class AppPipelineController(QObject):
         self.entry_modifier_model.set_persistence(self.scope_ctrl.get_persistence_model())
         self.entry_modifier_model.load_records(references)
 
-        # Populate the edit entry table view
-        self.entry_table_widget.populate_entry_modifier_display(references)
+        # Populate the edit entry table view from the *model*, not from the
+        # payload. The model is where a row becomes a record, so handing the
+        # view the payload as well would give it a second shape of the same
+        # data to understand -- and the two would drift.
+        self.entry_table_widget.populate_entry_modifier_display(
+            self.entry_modifier_model.fetch_entry_modifier_records()
+        )
         
         # Realign session logging paths natively
         project_root_dir = os.path.dirname(os.path.normpath(db_path))
@@ -1177,6 +1492,13 @@ class AppPipelineController(QObject):
                                                   )
         self.range_consistency_ctrl.set_active_project(self.scope_ctrl.get_persistence_model())
         self.cross_reference_ctrl.set_active_project(self.scope_ctrl.get_persistence_model(), project_root_dir)
+        # Check Index's vocabulary and rule selection become this project's:
+        # globals seed anything the project has not been given, and never
+        # overwrite what it has.
+        self.check_index_prefs.open_project(self.scope_ctrl.get_persistence_model())
+        self.sort_prefs.open_project(self.scope_ctrl.get_persistence_model())
+        self.presentation_prefs.open_project(self.scope_ctrl.get_persistence_model())
+        self.toa_prefs.open_project(self.scope_ctrl.get_persistence_model())
         self.window.status_bar.showMessage(f"Project '{project_name}' loaded successfully.", 3000)
 
         # Enable menu items that are gated behind an active project context
@@ -1308,12 +1630,11 @@ class AppPipelineController(QObject):
         if not edits or not self.entry_modifier_model:
             return
 
+        # Through the backend, which is what `shift_after` is for: a change
+        # this backend did not make, whose consequences it still has to
+        # account for.
         for after_position, delta in edits:
-            shifted_ids = self.entry_modifier_model.shift_coordinates_after(
-                file_path, after_position, delta
-            )
-            for shifted_id in shifted_ids:
-                self.entry_modifier_model.mark_dirty(shifted_id)
+            self.index_edit_ctrl.note_external_shift(file_path, after_position, delta)
 
     def _refresh_file_sync_checksums(self) -> None:
         """
@@ -1635,6 +1956,44 @@ class AppPipelineController(QObject):
         self._resync_index_data_from_disk()
         self.window.status_bar.showMessage("Index data resynced from disk.", 3000)
 
+    def _handle_repair_entries_request(self) -> None:
+        """
+        Runs the bulk repair tool: propose, preview, apply what was approved.
+
+        Marks the project dirty only when something was actually written --
+        the tool returns how many repairs it made, and cancelling or approving
+        nothing returns zero, which must not leave a project looking modified.
+        """
+        if self.scope_ctrl.active_project_name == "Untitled Project":
+            self.window.status_bar.showMessage("No project is open.", 3000)
+            return
+
+        repaired = self.bulk_repair_ctrl.run(self.window)
+        if repaired:
+            self._tree_modified = True
+            self.window.status_bar.showMessage(
+                f"Repaired {repaired} index entries.", 4000)
+
+    def _handle_check_index_request(self) -> None:
+        """
+        Runs Check Index and shows the report.
+
+        Never marks the project modified. The tool reports and does not write,
+        which is the point of it -- most of what it finds has no mechanical
+        repair, and being told two headings disagree does not say which one is
+        right. The corrections are made in the ordinary editing surfaces,
+        where they get the validation and the undo those already have.
+        """
+        if self.scope_ctrl.active_project_name == "Untitled Project":
+            self.window.status_bar.showMessage("No project is open.", 3000)
+            return
+
+        found = self.check_index_ctrl.run(self.window)
+        if found:
+            self.window.status_bar.showMessage(
+                f"Check index: {found} thing{'s' if found != 1 else ''} to "
+                f"look at.", 4000)
+
     def _confirm_resync_over_unsaved_changes(self) -> bool:
         """
         Guards the manual resync when something is still unsaved. Returns
@@ -1722,6 +2081,137 @@ class AppPipelineController(QObject):
         dialog.apply_theme_configuration(bool(AppStyleConfiguration.event_broker().get_property("is_dark_mode")))
         dialog.exec()
 
+    @Slot()
+    def _handle_build_toa_request(self) -> None:
+        r"""
+        Build a Table of Authorities and write it into the manuscript.
+
+        **The emission has existed since T3b and had no way in.**
+        `models.toa_emission` and `controllers.toa_controller` were written,
+        tested, and reachable from nothing; the Authorities preferences page
+        was visible the whole time, so from the one surface an indexer would
+        check the feature looked present. `probes/probe_core_wiring.py` found
+        it on its first run, 1 September 2026.
+
+        Four steps, and the order of them is the whole design.
+
+        **Read the standard from the project, not from here.** The citation
+        system and the publisher's house style are the book's, stored by
+        `ToaPrefs` and chosen on the shared Authorities page. A default
+        chosen in this method would be a standard nobody selected.
+
+        **Show the plan before writing it.** `ToaReviewDialog` lists the
+        authorities rather than the macros -- a book plans hundreds of macros
+        for a few dozen authorities -- and what is ticked is an authority, so
+        unticking one drops every macro that would have been written for it.
+
+        **One run is one undo.** Every macro goes through the ordinary edit
+        controller, so an indexer who dislikes the result presses undo once
+        and one who closes without saving has changed nothing on disk.
+
+        **Say what the preamble needs.** The macros are useless without the
+        matching `\makeindex` and `\printindex` lines, and this application
+        does not write another author's preamble. The note names them, and
+        the LaTeX Settings page's generated block carries them.
+        """
+        if self.scope_ctrl.active_project_name == "Untitled Project":
+            self.window.status_bar.showMessage("No project is open.", 3000)
+            return
+        if self.text_backend is None or not self.text_backend.containers():
+            self.window.status_bar.showMessage(
+                "There is nothing to read yet.", 3000)
+            return
+
+        try:
+            system = system_for(self.toa_prefs.system_name())
+            house = house_style_for(self.toa_prefs.house_name())
+        except (KeyError, ValueError) as error:
+            # A stored name no build recognises. Said rather than swallowed:
+            # the alternative is a table silently built to the wrong standard.
+            QMessageBox.warning(
+                self.window, "Citation standard not recognised",
+                f"{error}\n\nChoose one on the Authorities preferences page.")
+            return
+
+        progress = ProgressDialog(0, None, self.window)
+        progress.setWindowTitle("Reading the manuscript")
+        progress.show()
+        QApplication.processEvents()
+        try:
+            plan = build_toa_plan(
+                self.text_backend, system, self.sort_prefs.rules(),
+                house=house,
+                on_progress=lambda done, total: (
+                    progress.advance(done, total),
+                    QApplication.processEvents()),
+                should_cancel=progress.should_cancel)
+        finally:
+            progress.close()
+
+        if progress.cancelled:
+            self.window.status_bar.showMessage(
+                "Table of authorities cancelled.", 3000)
+            return
+        if plan.is_empty:
+            QMessageBox.information(
+                self.window, "No authorities found",
+                "Nothing in this project parses as a citation, so there is no "
+                "table to build. A subject index reports this, and it is the "
+                "right answer for one.")
+            return
+
+        # No `apply_theme_configuration` call: the review dialog sets no
+        # colours of its own, so it takes the application palette like every
+        # other plain dialog. The two shared dialogs that *do* take one --
+        # About and Statistics -- have hand-set colours to swap.
+        # **The profile goes with the plan**, which does not carry it: the
+        # dialog names what the specification records and this table does not
+        # do, and this is the moment for it, before a macro is written.
+        dialog = ToaReviewDialog(plan, self.window,
+                                 accept_label="Write the macros",
+                                 house=house)
+        if dialog.exec() != ToaReviewDialog.DialogCode.Accepted:
+            self.window.status_bar.showMessage("No macros were written.", 3000)
+            return
+
+        accepted = dialog.accepted_entries()
+        if not accepted:
+            self.window.status_bar.showMessage("No macros were written.", 3000)
+            return
+
+        controller = ToaController(self.text_backend, system,
+                                   self.sort_prefs.rules())
+        result = controller.apply(dataclasses.replace(plan, entries=accepted))
+
+        # **The declarations go into the generated block as well as into the
+        # message.** The macros are inert without them, and an indexer who
+        # reads a summary and closes it has still built a table that will not
+        # print. Written only where something was, so a cancelled run leaves
+        # no declarations for indexes that do not exist.
+        if result.written:
+            declarations, prints = preamble_for(plan.table, in_toc=True)
+            self._index_prefs_model.update_data({
+                "toa_declarations": "\n".join(declarations),
+                "toa_printindex": "\n".join(prints),
+            })
+            persistence = (self.scope_ctrl.get_persistence_model()
+                           if self.scope_ctrl else None)
+            if persistence is not None:
+                self._index_prefs_model.persist_to_project(persistence)
+
+        note = ToaController.preamble_note(plan)
+        message = result.summary()
+        if note:
+            message += ("\n\nThe table will not print until the preamble "
+                        "carries these lines. They are in the LaTeX Settings "
+                        "page's generated block as well.\n\n" + note)
+        QMessageBox.information(self.window, "Table of Authorities", message)
+        # Dirty only when something was written, on the bulk-repair rule: a
+        # run that wrote nothing must not leave a project looking modified.
+        if result.written:
+            self._tree_modified = True
+        self.window.status_bar.showMessage(result.summary(), 4000)
+
     def _resync_index_data_from_disk(self) -> None:
         """
         Fully re-scans every .tex file in the project from disk and
@@ -1774,7 +2264,9 @@ class AppPipelineController(QObject):
             self.idx_ctrl.clear_staged_entries()
 
         self.entry_modifier_model.load_records(references)
-        self.entry_table_widget.populate_entry_modifier_display(references)
+        self.entry_table_widget.populate_entry_modifier_display(
+            self.entry_modifier_model.fetch_entry_modifier_records()
+        )
 
         self._index_commands.clear()
         self._refresh_undo_actions()
@@ -2170,6 +2662,10 @@ class AppPipelineController(QObject):
         self.project_command_controller.set_active_project(None, None)
         self.range_consistency_ctrl.set_active_project(None)
         self.cross_reference_ctrl.set_active_project(None, None)
+        self.check_index_prefs.close_project()
+        self.sort_prefs.close_project()
+        self.presentation_prefs.close_project()
+        self.toa_prefs.close_project()
         self._refresh_index_command_options()
 
         self._tree_modified = False
@@ -2267,18 +2763,53 @@ class AppPipelineController(QObject):
             except RuntimeError:
                 self._search_window = None
 
+        # **A source rather than a list of paths.** The shared search stopped
+        # assuming its content was files on disk when a second host arrived
+        # whose text is a zip of XML with no lines in it; `FileLineSource` is
+        # the shared adapter for hosts whose content really is text files,
+        # which this one's is.
         self._search_window = AdvancedSearchWindow(
-            db_file_paths_provider=self.scope_ctrl.get_active_search_scope,
+            source_provider=self._search_source,
             parent=None
         )
-        
-        self._search_window.navigate_to_target.connect(self.lc_ctrl.navigate_to_embedded_index_coordinate)
+
+        self._search_window.navigate_to_target.connect(self._navigate_to_search_hit)
         self._search_window.closed.connect(self._clear_search_window_reference)
         
         self._search_window.show()
         self._search_window.apply_theme_styles()
         self._search_window.raise_()
         self._search_window.activateWindow()
+
+    def _search_source(self):
+        """
+        The project's active files, as segments the shared search can read.
+
+        **None rather than an empty source when nothing is active**, so the
+        window can say "there is nothing open to search" instead of reporting
+        zero matches, which is true but useless: a pruned project and a term
+        that is genuinely absent are different answers.
+        """
+        paths = self.scope_ctrl.get_active_search_scope()
+        return FileLineSource(paths) if paths else None
+
+    def _navigate_to_search_hit(self, hit):
+        r"""
+        A shared `SearchHit` back into this application's coordinates.
+
+        The hit's `location` is whatever the source put there, and for
+        `FileLineSource` that is `(absolute path, 1-indexed line)`. The column
+        is the hit's offset within the line, plus one, because this editor
+        counts columns from one.
+
+        Search hits land on arbitrary prose rather than on the start of an
+        `\index{...}` macro, so whole-line highlighting is requested instead
+        of the index tree's macro-boundary detection. See
+        `EditorTab.jump_to_coordinates`.
+        """
+        path, line = hit.location
+        self.lc_ctrl.navigate_to_embedded_index_coordinate(
+            path, line, hit.offset + 1, hit.snippet, True)
 
     def _clear_search_window_reference(self):
         """Clears reference handles on window closure."""
@@ -2335,61 +2866,78 @@ class AppPipelineController(QObject):
             print(f"SHUTDOWN CRITICAL FAILURE: {shutdown_err}. Executing hard exit bypass.")
             self._force_application_exit()
 
+    # -- the inversion cascade, which now lives in the core -----------------
+    #
+    # **These five methods were the whole of it, and none of them was about
+    # LaTeX.** Handing the cascade the rules in force, running the lookup off
+    # the UI thread, falling back to a rules-only answer, rebuilding after the
+    # database moves, and stopping the pool before the connection closes: all
+    # of that moved into `bookindexcore.naming.service` when the Word editor
+    # became the second caller, on the rule this project keeps -- fix the
+    # core, adapt every host, move the tests with it.
+    #
+    # What is left here is delegation and the two names this application's own
+    # code and tests already use.
+
+    @property
+    def name_inverter(self):
+        """The cascade the service is holding, or None."""
+        return self._names.inverter if self._names is not None else None
+
+    @name_inverter.setter
+    def name_inverter(self, value) -> None:
+        if self._names is not None:
+            self._names.inverter = value
+
+    def _refresh_name_rules(self) -> None:
+        """
+        Hand the cascade the rules this project is actually working to.
+
+        Read at the point of use rather than pushed on change, because the
+        rules move under it from three directions -- the preferences dialog,
+        opening a project, closing one -- and a push would have to be wired to
+        all three and stay wired. **That is not a preference**: the inverter
+        used to be built at startup with the package defaults and keep them,
+        so every table on the Presentation page was edited into a record the
+        cascade never read.
+        """
+        self._names.refresh_rules()
+
+    def reopen_name_database(self, path: str = "") -> None:
+        """
+        Point the cascade at the name database's new home.
+
+        Called after the Preferences page has moved the file. SQLite keeps a
+        deleted file open quite happily, so without this every correction for
+        the rest of the session would go into a file nothing will ever read
+        again. The path is reported rather than obeyed: `bookindexcore`
+        resolves where the database is.
+        """
+        self._names.reopen()
+        print(f"[NAME INVERSION] Name database reopened at "
+              f"{path or 'its new location'}.")
+
     def invert_name(self, name: str, locale: Optional[str] = None,
                     prefer_authority: bool = True) -> NameInversionResult:
-        """Synchronous inversion -- safe for background work or unit tests.
-
-        Returns the whole NameInversionResult rather than a string: callers
-        need the authority heading and the rule-based suggestion separately in
-        order to offer both.
-        """
-        if self.name_inverter:
-            return self.name_inverter.invert(name, locale=locale, prefer_authority=prefer_authority)
-
-        # No inverter configured: still give a rule-based answer, but never
-        # reach for the network.
-        fallback = NameInverter(viaf_enabled=False)
-        try:
-            return fallback.invert(name, locale=locale, prefer_authority=False)
-        finally:
-            fallback.close()
+        """Synchronous inversion -- safe for background work or unit tests."""
+        return self._names.invert(name, language=locale or UNSTATED,
+                                  prefer_authority=prefer_authority)
 
     def _rule_only_inversion(self, name: str, locale: Optional[str] = None) -> NameInversionResult:
         """Offline last resort. Never raises, never touches the network."""
-        try:
-            return self.invert_name(name, locale=locale, prefer_authority=False)
-        except Exception:
-            return NameInversionResult(
-                display_value=name, authority_term=None,
-                rule_suggestion=name, used_authority=False)
+        return self._names.rule_only(name, locale or UNSTATED)
 
     def invert_name_async(self, name: str, callback: Callable[[NameInversionResult], None],
                           locale: Optional[str] = None, prefer_authority: bool = True) -> None:
-        """Run inversion, including the network lookup, off the UI thread.
+        """
+        Run inversion, including the network lookup, off the UI thread.
 
         `callback` runs on a worker thread and always receives a
-        NameInversionResult -- on failure it gets the rule-based inversion
-        rather than a bare string, so callers have one shape to handle. Marshal
-        to the UI thread before touching any widget.
+        `NameInversionResult`. Marshal to the UI thread before touching any
+        widget.
         """
-        if not self.name_inverter:
-            callback(self._rule_only_inversion(name, locale))
-            return
-
-        future = self._executor.submit(self.name_inverter.invert, name, locale, prefer_authority)
-
-        def _done(fut):
-            try:
-                result = fut.result()
-            except Exception as exc:
-                print(f"[NAME INVERSION] Lookup failed for {name!r}: {exc}")
-                result = self._rule_only_inversion(name, locale)
-            try:
-                callback(result)
-            except Exception as exc:
-                print(f"[NAME INVERSION] Callback failed for {name!r}: {exc}")
-
-        future.add_done_callback(_done)
+        self._names.invert_async(name, callback, language=locale or UNSTATED,
+                                 prefer_authority=prefer_authority)
 
     def safely_terminate_application_lifecycle(self) -> None:
         """Ensures background worker threads are fully closed out before shutdown."""
@@ -2406,12 +2954,10 @@ class AppPipelineController(QObject):
         self._load_thread = None
         self.worker = None
         
-        # Save window geometry before closing
-        self.prefs.serialize_layout_state({
-            "geometry": self.window.saveGeometry(),
-            "state": self.window.saveState(),
-            "splitter_state": self.window.layout_splitter.saveState()
-        })   
+        # How the window was left, through the shared helper both editors use
+        # since step 11f.
+        WindowLayoutState(self.prefs.settings).save(
+            self.window, {"main": self.window.layout_splitter})
 
         self._force_application_exit()
 
@@ -2421,18 +2967,13 @@ class AppPipelineController(QObject):
         except Exception:
             pass
 
-        # Stop the pool before the cache connection goes away. Closing first
-        # left an in-flight lookup writing to a closed database. wait=False so
-        # a hung network call cannot stall the exit; a late write lands on a
-        # closed connection and is swallowed by NameInverter's own guards.
+        # The pool stops before the database connection does, and the service
+        # owns that order: closing the other way round leaves an in-flight
+        # lookup writing a correction into a closed connection, where the
+        # inverter's own guards swallow it and the indexer's decision is gone
+        # with nothing reported anywhere.
         try:
-            self._executor.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            pass
-
-        try:
-            if self.name_inverter:
-                self.name_inverter.close()
+            self._names.close()
         except Exception:
             pass
 
@@ -2463,7 +3004,7 @@ class AppPipelineController(QObject):
     def _handle_manual_index_insertion(self, parts_list: list, metadata: dict):
         entry_dict = {
             "unique_id_number":   metadata["id"],
-            "heading_raw_text":   grammar.join_levels(parts_list),
+            "heading_raw_text":   dialect.join_levels(parts_list),
             "file_path":          metadata.get("path", ""),
             "line_number":        metadata.get("line", 0),
             "column_offset":      metadata.get("col", 0),
@@ -2497,8 +3038,8 @@ class AppPipelineController(QObject):
             # Closer shares the opener's heading_id — look it up via range_partner_id
             partner_id = entry_dict["range_partner_id"]
             if partner_id is not None:
-                partner_record = self.entry_modifier_ctrl.model._records.get(partner_id)
-                entry_dict["heading_id"] = partner_record.get("heading_id") if partner_record else None
+                partner_record = self.entry_modifier_ctrl.model.get_record(partner_id)
+                entry_dict["heading_id"] = partner_record.heading_id if partner_record else None
             else:
                 entry_dict["heading_id"] = None
         else:
@@ -2524,11 +3065,12 @@ class AppPipelineController(QObject):
             and entry_dict["absolute_end"] is not None
         ):
             delta = entry_dict["absolute_end"] - entry_dict["absolute_position"]
-            shifted_ids = self.entry_modifier_ctrl.model.shift_coordinates_after(
+            # The macro was written by the editor's own cursor, not by the
+            # backend, so this is the same "somebody else changed the text"
+            # route the generated-block injections take.
+            self.index_edit_ctrl.note_external_shift(
                 entry_dict["file_path"], entry_dict["absolute_position"], delta
             )
-            for shifted_id in shifted_ids:
-                self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
 
         # Only the opener goes to the tree
         if not entry_dict["is_range_closer"]:
@@ -2572,12 +3114,12 @@ class AppPipelineController(QObject):
         duplicated_count = 0
         skipped_count = 0
         for entry_id in entry_ids:
-            original = self.entry_modifier_ctrl.model._records.get(entry_id)
-            if not original or original.get("is_range_closer"):
+            original = self.entry_modifier_ctrl.model.get_record(entry_id)
+            if not original or original.is_range_closer:
                 skipped_count += 1
                 continue
 
-            partner_id = original.get("range_partner_id")
+            partner_id = original.range_partner_id
             if partner_id is not None:
                 ok = self._duplicate_range_pair(original, partner_id, persistence)
             else:
@@ -2599,11 +3141,11 @@ class AppPipelineController(QObject):
         elif skipped_count:
             self.window.status_bar.showMessage("Could not duplicate the selected reference(s).", 4000)
 
-    def _duplicate_standalone_entry(self, original: dict, persistence) -> bool:
+    def _duplicate_standalone_entry(self, original, persistence) -> bool:
         """Duplicates a single, non-range entry. Returns True on success."""
-        file_path = original.get("file_path")
-        abs_pos = original.get("absolute_position")
-        abs_end = original.get("absolute_end")
+        file_path = original.container
+        abs_pos = position_of(original)
+        abs_end = end_of(original)
         if not file_path or abs_pos is None or abs_end is None:
             return False
 
@@ -2611,13 +3153,10 @@ class AppPipelineController(QObject):
         if not macro_text:
             return False
 
-        coords = self.doc_io.insert_macro_at_position(file_path, abs_end, macro_text)
-        if coords is None:
+        result = self.index_edit_ctrl.place_macro(file_path, abs_end, macro_text)
+        if not result.ok:
             return False
-
-        shifted_ids = self.entry_modifier_ctrl.model.shift_coordinates_after(file_path, abs_pos, len(macro_text))
-        for shifted_id in shifted_ids:
-            self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
+        coords = _placement_coords(result)
 
         new_entry = self._build_duplicate_entry_dict(original, coords, self.macro_id_generator.get_and_increment_id())
         self._resolve_and_register_new_entry(new_entry, persistence, add_to_tree=True)
@@ -2629,15 +3168,15 @@ class AppPipelineController(QObject):
         via range_partner_id exactly like a live range insert. Returns
         True on success.
         """
-        closer = self.entry_modifier_ctrl.model._records.get(partner_id)
+        closer = self.entry_modifier_ctrl.model.get_record(partner_id)
         if not closer:
             return False
 
-        file_path = opener.get("file_path")
-        opener_pos = opener.get("absolute_position")
-        opener_end = opener.get("absolute_end")
-        closer_pos = closer.get("absolute_position")
-        closer_end = closer.get("absolute_end")
+        file_path = opener.container
+        opener_pos = position_of(opener)
+        opener_end = end_of(opener)
+        closer_pos = position_of(closer)
+        closer_end = end_of(closer)
         if not file_path or None in (opener_pos, opener_end, closer_pos, closer_end):
             return False
 
@@ -2646,26 +3185,21 @@ class AppPipelineController(QObject):
         if not opener_text or not closer_text:
             return False
 
-        # Insert the opener's copy first, then re-read the closer's
-        # location before touching it -- the opener-copy insert may have
-        # shifted it, since the closer always sits later in the file.
-        new_opener_coords = self.doc_io.insert_macro_at_position(file_path, opener_end, opener_text)
-        if new_opener_coords is None:
+        # Place the opener's copy first, then re-read the closer's location
+        # before touching it -- the opener-copy placement may have shifted it,
+        # since the closer always sits later in the file.
+        opener_result = self.index_edit_ctrl.place_macro(file_path, opener_end, opener_text)
+        if not opener_result.ok:
             return False
-        shifted = self.entry_modifier_ctrl.model.shift_coordinates_after(file_path, opener_pos, len(opener_text))
-        for shifted_id in shifted:
-            self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
+        new_opener_coords = _placement_coords(opener_result)
 
-        closer_now = self.entry_modifier_ctrl.model._records.get(partner_id)
-        closer_pos_now = closer_now.get("absolute_position")
-        closer_end_now = closer_now.get("absolute_end")
+        closer_now = self.entry_modifier_ctrl.model.get_record(partner_id)
+        closer_end_now = end_of(closer_now)
 
-        new_closer_coords = self.doc_io.insert_macro_at_position(file_path, closer_end_now, closer_text)
-        if new_closer_coords is None:
+        closer_result = self.index_edit_ctrl.place_macro(file_path, closer_end_now, closer_text)
+        if not closer_result.ok:
             return False
-        shifted2 = self.entry_modifier_ctrl.model.shift_coordinates_after(file_path, closer_pos_now, len(closer_text))
-        for shifted_id in shifted2:
-            self.entry_modifier_ctrl.model.mark_dirty(shifted_id)
+        new_closer_coords = _placement_coords(closer_result)
 
         new_opener_id = self.macro_id_generator.get_and_increment_id()
         new_closer_id = self.macro_id_generator.get_and_increment_id()
@@ -2687,23 +3221,23 @@ class AppPipelineController(QObject):
     @staticmethod
     def _build_duplicate_entry_dict(original: dict, coords: dict, new_id: int) -> dict:
         """Builds a fresh entry_dict copying original's content fields onto a new ID/location."""
-        file_path = original.get("file_path", "")
+        file_path = original.container
         return {
             "unique_id_number":   new_id,
-            "heading_raw_text":   original.get("heading_raw_text", ""),
+            "heading_raw_text":   original.heading_raw,
             "file_path":          file_path,
             "line_number":        coords["line_number"],
             "column_offset":      coords["column_offset"],
             "absolute_position":  coords["absolute_position"],
             "absolute_end":       coords["absolute_end"],
-            "encap":              original.get("encap", "standard"),
+            "encap":              row_from_reference(original)["encap"],
             "uid":                f"{file_path}:{coords['line_number']}:{coords['column_offset']}",
-            "see_references":     original.get("see_references"),
-            "seealso_references": original.get("seealso_references"),
-            "has_references":     original.get("has_references", True),
+            "see_references":     original.extra.get("see_references"),
+            "seealso_references": original.extra.get("seealso_references"),
+            "has_references":     original.extra.get("has_references", True),
             "range_partner_id":   None,
             "is_range_closer":    False,
-            "macro_command":      original.get("macro_command", "index"),
+            "macro_command":      command_of(original),
         }
 
     def _resolve_and_register_new_entry(
@@ -2723,7 +3257,7 @@ class AppPipelineController(QObject):
                 entry_dict["heading_raw_text"]
             )
 
-        parts_list = grammar.level_path(entry_dict["heading_raw_text"])
+        parts_list = dialect.level_path(entry_dict["heading_raw_text"])
 
         if add_to_tree:
             self.window.latex_index_window.add_completion_entry(parts_list)
@@ -2870,7 +3404,7 @@ class AppPipelineController(QObject):
     @Slot(int)
     def _orchestrate_sidebar_focus(self, panel_index: int):
         self.sidebar_view_panel.bring_panel_to_foreground(panel_index)
-        self.window.tool_bar.update_toolbar_radio_state(panel_index)
+        self.window.tool_bar.update_panel_state(panel_index)
 
     @Slot(bool)
     def _handle_dark_mode_toggle(self, is_dark: bool):
@@ -2943,38 +3477,40 @@ class AppPipelineController(QObject):
         print(f"Project Loading Failure: {err_msg}")
         QMessageBox.critical(self.window, "Project Loading Failure", f"An out-of-thread error occurred:\n{err_msg}")
 
-    @Slot(str, int, int, str, object, object, str, object)
-    def handle_index_navigation(
-        self,
-        path: str,
-        line: int,
-        col: int,
-        fallback: str,
-        absolute_position=None,
-        absolute_end=None,
-        macro_command: str = "index",
-        unique_id_number=None,
-    ):
+    @Slot(object)
+    def handle_index_navigation(self, reference):
         r"""
         Fires when the user clicks a "[uid]" reference link in the index
         tree's References column (IndexTreeView._unpack_delegate_payload).
 
-        The path/line/col/absolute_position/absolute_end/macro_command
-        arguments are a snapshot captured when this tree node was last
-        (re)populated (see IndexTreeView._populate_row_metadata) -- they go
-        stale the moment a rename or coordinate shift touches this entry
-        (IndexEditController._rewrite_single_reference /
-        EntryModifierModel.shift_coordinates_after both update only the
-        live EntryModifierModel cache, with no path back into every tree
-        node's own cached payload). unique_id_number lets this controller
-        re-resolve the entry's CURRENT location from that live cache before
-        navigating, so the highlighted span reflects the entry's actual
-        position rather than whatever it was when the tree was last built.
-        Falls back to the snapshot values if the uid is missing or no
-        longer present in the cache.
+        Takes one TreeReference. Its `location` is this application's own
+        SourceCoordinate, built by IndexTreeView.tree_reference_from_row, and
+        it is **a snapshot**: captured when this tree node was last
+        (re)populated, it goes stale the moment a rename or coordinate shift
+        touches this entry (IndexEditController._rewrite_single_reference /
+        EntryModifierModel.shift_coordinates_after both update only the live
+        EntryModifierModel cache, with no path back into every tree node's own
+        cached payload). So the entry id is resolved against that live cache
+        first and the snapshot is the fallback, which is exactly what this
+        method did before step 9b -- what has changed is that the tree no
+        longer carries the seven coordinate fields itself, nor passes the id
+        alongside them so that this could be done at all.
         """
-        if unique_id_number is not None and self.entry_modifier_model:
-            live_location = self.entry_modifier_model.get_location_metadata(int(unique_id_number))
+        if reference is None:
+            return
+
+        location = getattr(reference, "location", None) or SourceCoordinate()
+        path = location.file_path
+        line = location.line_number
+        col = location.column_offset
+        fallback = location.fallback_label
+        absolute_position = location.absolute_position
+        absolute_end = location.absolute_end
+        macro_command = location.macro_command
+
+        entry_id = getattr(reference, "entry_id", None)
+        if entry_id is not None and self.entry_modifier_model:
+            live_location = self.entry_modifier_model.get_location_metadata(int(entry_id))
             if live_location is not None:
                 path = live_location.get("file_path") or path
                 line = live_location.get("line_number") or line
@@ -2983,6 +3519,9 @@ class AppPipelineController(QObject):
                 absolute_position = live_location.get("absolute_position")
                 absolute_end = live_location.get("absolute_end")
                 macro_command = live_location.get("macro_command") or macro_command
+
+        if not path:
+            return
 
         if self.lc_ctrl:
             self.lc_ctrl.navigate_to_embedded_index_coordinate(
@@ -2996,6 +3535,12 @@ class AppPipelineController(QObject):
     def _handle_index_entry_window_toggle(self):
         if not self.window.latex_index_window:
             return
-        is_visible = self.window.latex_index_window.toggle_view_visibility()
-        self.window.tool_bar.update_toolbar_radio_state(is_visible)
+        # **Nothing on the toolbar follows this.** It used to call the
+        # toolbar's panel-state method with `is_visible`, a bool where a panel
+        # index was wanted, so showing the entry window checked the *Index
+        # References* sidebar button and hiding it checked *Workspace Files*.
+        # Found at step 11a while moving the toolbar into bookindexcore: the
+        # shared method is named for what it does, and the call read as
+        # nonsense the moment it was.
+        self.window.latex_index_window.toggle_view_visibility()
         

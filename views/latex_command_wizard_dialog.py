@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QFrame,
 )
 
-from controllers.app_style_configuration import AppStyleConfiguration
+from bookindexcore.ui.style import AppStyleConfiguration
 
 class LatexCommandWizardDialog(QDialog):
     r"""

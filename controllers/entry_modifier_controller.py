@@ -2,6 +2,7 @@ from PySide6.QtCore import QObject, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from models import index_tag_grammar as grammar
+from models.latex_dialect import LATEX_DIALECT as dialect
 
 
 class EntryModifierController(QObject):
@@ -83,10 +84,18 @@ class EntryModifierController(QObject):
         # Register in model cache so get_heading_text / get_display_label work
         self.model.register_new_entry(entry_dict)
 
-        # Append a single row to the view — no full repopulation
-        # Do not append entry if it is the closer of an index range
-        if not entry_dict.get("is_range_closer", False):
-            self.view.append_entry_row(entry_dict)
+        # Append a single row to the view — no full repopulation.
+        #
+        # The *model's* record, not the dict that came in: the view reads
+        # records now, and the model is where a row becomes one. Handing the
+        # view the raw payload instead would give it a second record shape to
+        # understand, which is the whole thing this migration removes.
+        record = self.model.get_record(
+            entry_dict.entry_id if hasattr(entry_dict, "entry_id")
+            else entry_dict["unique_id_number"]
+        )
+        if record is not None and not record.is_range_closer:
+            self.view.append_entry_row(record)
 
     # ------------------------------------------------------------------
     # Per-cell edit -> stage
@@ -136,14 +145,10 @@ class EntryModifierController(QObject):
             if not disp:
                 return ""
             if sort and sort.lower() != disp.lower():
-                return grammar.build_level(sort, disp)
+                return dialect.build_level(sort, disp)
             return disp
 
-        levels = [
-            _level(fields["main_disp"], fields["main_sort"]),
-            _level(fields["sub1_disp"], fields["sub1_sort"]),
-            _level(fields["sub2_disp"], fields["sub2_sort"]),
-        ]
+        levels = [_level(display, sort) for sort, display in fields["levels"]]
         # Drop empty sub-levels (main is required — enforced upstream by
         # the view/delegate, not re-validated here) but preserve depth
         # order: a populated sub2 with an empty sub1 shouldn't happen in
@@ -238,19 +243,21 @@ class EntryModifierController(QObject):
             if not disp:
                 return ""
             if sort and sort.lower() != disp.lower():
-                return grammar.build_level(sort, disp)
+                return dialect.build_level(sort, disp)
             return disp
 
         attempted = 0
         succeeded = 0
         for entry_id in (entry_ids or []):
             fields = self.view.get_row_field_values(entry_id)
-            if fields is None or fields.get("sub2_disp", "").strip():
+            pairs = (fields or {}).get("levels", [])
+            deeper_than_two = any(display.strip() for _sort, display in pairs[2:])
+            if fields is None or deeper_than_two:
                 continue
 
             levels = [
-                _level(fields["sub1_disp"], fields["sub1_sort"]),
-                _level(fields["main_disp"], fields["main_sort"]),
+                _level(pairs[1][1], pairs[1][0]),
+                _level(pairs[0][1], pairs[0][0]),
             ]
             levels = [lvl for lvl in levels if lvl]
             if not levels:

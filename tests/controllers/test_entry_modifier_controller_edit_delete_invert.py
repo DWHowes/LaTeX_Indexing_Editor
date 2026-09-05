@@ -25,10 +25,10 @@ from PySide6.QtWidgets import QTabWidget, QMessageBox
 
 from models.latex_index_parser import LatexIndexParser
 from models.entry_modifier_model import EntryModifierModel
-from models.index_edit_staging_model import IndexEditStagingModel
+from bookindexcore.qt.staging import QtIndexEditStagingModel
 from models.index_tree_model_engine import IndexTreeModelEngine
-from models.text_sanitizer import TextSanitizer
-from models.session_backup_manager import SessionBackupManager
+from bookindexcore.util.text import TextSanitizer
+from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from controllers.index_edit_controller import IndexEditController
 from controllers.entry_modifier_controller import EntryModifierController
@@ -66,8 +66,13 @@ def _add_top_level_node(tree, token: str, refs: list[dict]):
     root = tree.base_model.invisibleRootItem()
     col0 = QStandardItem(token)
     col0.setData(token, Qt.ItemDataRole.ToolTipRole)
-    col1 = QStandardItem(" ".join(f"[{r['unique_id_number']}]" for r in refs))
-    col1.setData(list(refs), Qt.ItemDataRole.UserRole + 1)
+    # **Seeded the way the tree itself would seed it.** Since extraction step
+    # 9b a node's UserRole+1 payload is a list of TreeReference, not of raw
+    # load rows, and the column text is composed in one place; a test that
+    # hand-builds the old shape is testing a payload the app no longer makes.
+    records = [tree.tree_reference_from_row(r) for r in refs]
+    col1 = QStandardItem(tree.render_reference_column(records))
+    col1.setData(records, Qt.ItemDataRole.UserRole + 1)
     root.appendRow([col0, col1])
 
 
@@ -100,7 +105,7 @@ def _build_stack(tmp_path, qtbot, tex_content, heading_raw_text="Main"):
     _add_top_level_node(tree, heading_raw_text, refs)
     _register_heading(tree.engine, heading_raw_text, refs)
 
-    staging_model = IndexEditStagingModel()
+    staging_model = QtIndexEditStagingModel()
     entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
     entry_model.load_records(refs)
 
@@ -211,7 +216,11 @@ class TestHandleContextMenuDeleteRequest:
         content = open(file_path, encoding="utf-8").read()
         assert r"\index{Main}" not in content
         assert uid not in entry_model._records
-        assert view.get_location_metadata(uid) is None
+        # The row itself is gone from the table. This used to assert that the
+        # view's own copy of the entry's coordinates had been cleaned up --
+        # but that copy was a duplicate of the model's that nothing ever read,
+        # so what it really protected was the row's removal.
+        assert view.get_row_field_values(uid) is None
 
     def test_declined_delete_leaves_everything_unchanged(self, tmp_path, qtbot, monkeypatch):
         controller, view, _tree, entry_model, _staging, _idx, file_path, refs = _build_stack(
@@ -297,7 +306,7 @@ class TestInvertHeadingsForSelected:
         _register_heading(tree.engine, "Main!Sub1", [invertible_ref])
         _register_heading(tree.engine, "Other!Sub1!Sub2", [blocked_ref])
 
-        staging_model = IndexEditStagingModel()
+        staging_model = QtIndexEditStagingModel()
         entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
         entry_model.load_records([invertible_ref, blocked_ref])
 

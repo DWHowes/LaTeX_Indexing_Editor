@@ -33,28 +33,28 @@ def _suppress_information_dialog(monkeypatch):
 
 class TestValidateHierarchyDirectly:
     def test_populated_main_only_is_valid(self):
-        fields = {"main_disp": "Main", "sub1_disp": "", "sub2_disp": ""}
+        fields = {"levels": [("", "Main"), ("", ""), ("", "")]}
         assert _validate_hierarchy(fields) is None
 
     def test_main_sub1_sub2_all_populated_is_valid(self):
-        fields = {"main_disp": "Main", "sub1_disp": "Sub1", "sub2_disp": "Sub2"}
+        fields = {"levels": [("", "Main"), ("", "Sub1"), ("", "Sub2")]}
         assert _validate_hierarchy(fields) is None
 
     def test_empty_main_is_invalid(self):
-        fields = {"main_disp": "", "sub1_disp": "", "sub2_disp": ""}
+        fields = {"levels": [("", ""), ("", ""), ("", "")]}
         error = _validate_hierarchy(fields)
         assert error is not None
         assert "main" in error.lower()
 
     def test_sub2_without_sub1_is_invalid(self):
-        fields = {"main_disp": "Main", "sub1_disp": "", "sub2_disp": "Sub2"}
+        fields = {"levels": [("", "Main"), ("", ""), ("", "Sub2")]}
         error = _validate_hierarchy(fields)
         assert error is not None
         assert "sub1" in error.lower()
 
     def test_sub1_with_empty_sub2_is_valid(self):
         """Sub1 alone (no Sub2) is fine -- Sub2 is simply absent, not an error."""
-        fields = {"main_disp": "Main", "sub1_disp": "Sub1", "sub2_disp": ""}
+        fields = {"levels": [("", "Main"), ("", "Sub1"), ("", "")]}
         assert _validate_hierarchy(fields) is None
 
 
@@ -80,7 +80,7 @@ class TestOnCellDataChangedValidEdits:
 
         view.base_model.item(0, COL_SUB1_DISP).setText("Renamed")
 
-        assert view._last_valid_row_state[1]["sub1_disp"] == "Renamed"
+        assert view._last_valid_row_state[1]["levels"][1][1] == "Renamed"
 
     def test_editing_the_encap_column_syncs_bold_styling(self, qtbot):
         view = _build(qtbot, heading="Main")
@@ -116,7 +116,7 @@ class TestOnCellDataChangedInvalidEdits:
         view = _build(qtbot, heading="Main!Sub1")
         # A valid edit first, to move the stash forward...
         view.base_model.item(0, COL_SUB1_DISP).setText("Sub1Renamed")
-        assert view._last_valid_row_state[1]["sub1_disp"] == "Sub1Renamed"
+        assert view._last_valid_row_state[1]["levels"][1][1] == "Sub1Renamed"
 
         # ...then an invalid edit that must revert Main back to "Main",
         # not just undo its own column.
@@ -144,3 +144,49 @@ class TestReadOnlyIdColumn:
         view.base_model.item(0, COL_ID).setData(999, Qt.ItemDataRole.DisplayRole)
 
         assert calls == []
+
+
+class TestTheLayoutDrivesTheFieldShape:
+    """
+    The table used to name its fields ``main_disp``/``sub1_disp``/``sub2_disp``,
+    which *was* the three-level assumption: a four-level format had nowhere to
+    put the fourth, and a format with one sort key per entry had three places
+    to put one value. Fields follow the layout now.
+    """
+
+    def test_the_field_shape_has_one_pair_per_level(self):
+        from bookindexcore.model.entry_table import layout_for
+        from models.latex_dialect import LATEX_DIALECT
+        from views.entry_modifier_list import _parse_heading_raw_text
+
+        layout = layout_for(LATEX_DIALECT)
+        parsed = _parse_heading_raw_text("Main!Sub1!Sub2|textbf")
+
+        assert len(parsed["levels"]) == layout.level_count
+        assert parsed["levels"] == [("", "Main"), ("", "Sub1"), ("", "Sub2")]
+        assert parsed["encap"] == "textbf"
+
+    def test_a_shallow_heading_is_padded_to_the_table_width(self):
+        from views.entry_modifier_list import _parse_heading_raw_text
+
+        parsed = _parse_heading_raw_text("Main")
+        assert parsed["levels"] == [("", "Main"), ("", ""), ("", "")]
+
+    def test_sort_keys_travel_with_their_level(self):
+        from views.entry_modifier_list import _parse_heading_raw_text
+
+        parsed = _parse_heading_raw_text("kant@Kant!early@Early works")
+        assert parsed["levels"][0] == ("kant", "Kant")
+        assert parsed["levels"][1] == ("early", "Early works")
+
+    def test_the_gap_message_names_the_levels_it_found(self):
+        """
+        The old rule was a single hard-coded "Sub2 requires Sub1" test. It is
+        a scan over the levels now, because how many there are is the
+        dialect's to say -- so the message has to be built rather than
+        written out.
+        """
+        message = _validate_hierarchy({"levels": [("", "Main"), ("", ""), ("", "Sub2")]})
+
+        assert message is not None
+        assert "Sub2" in message and "Sub1" in message

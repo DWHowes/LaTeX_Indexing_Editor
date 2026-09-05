@@ -21,9 +21,9 @@ from PySide6.QtWidgets import QTabWidget
 
 from models.latex_index_parser import LatexIndexParser
 from models.entry_modifier_model import EntryModifierModel
-from models.index_edit_staging_model import IndexEditStagingModel
-from models.text_sanitizer import TextSanitizer
-from models.session_backup_manager import SessionBackupManager
+from bookindexcore.qt.staging import QtIndexEditStagingModel
+from bookindexcore.util.text import TextSanitizer
+from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from controllers.index_edit_controller import IndexEditController
 from views.index_tree_view import IndexTreeView
@@ -82,9 +82,9 @@ def _build_stack(tmp_path, qtbot, tex_content: str, heading_raw_text: str):
         "macro_command": uid_dict["macro_command"],
         "is_range_closer": False,
     }
-    col1.setData([ref], Qt.ItemDataRole.UserRole + 1)
+    col1.setData([tree.tree_reference_from_row(ref)], Qt.ItemDataRole.UserRole + 1)
 
-    staging_model = IndexEditStagingModel()
+    staging_model = QtIndexEditStagingModel()
     entry_model = EntryModifierModel(persistence=None, staging_model=staging_model)
     entry_model.load_records([ref])
 
@@ -275,7 +275,7 @@ class TestOrphanCleanupAfterDeletion:
 
         persistence = FileTreePersistence(db_path=str(tmp_path / "db.sqlite"))
         heading_id = persistence.resolve_or_insert_heading("Main", "Main", depth=0)
-        entry_model._records[uid]["heading_id"] = heading_id
+        entry_model.get_record(uid).heading_id = heading_id
         entry_model.set_persistence(persistence)
 
         return controller, entry_model, persistence, uid, heading_id, file_path
@@ -371,10 +371,13 @@ class TestOrphanCleanupAfterDeletion:
         col0 = QStandardItem("Main")
         col0.setData("Main", Qt.ItemDataRole.ToolTipRole)
         col1 = QStandardItem("")
-        col1.setData([first_ref, second_ref], Qt.ItemDataRole.UserRole + 1)
+        col1.setData(
+            [tree.tree_reference_from_row(first_ref),
+             tree.tree_reference_from_row(second_ref)],
+            Qt.ItemDataRole.UserRole + 1)
         root.appendRow([col0, col1])
 
-        staging_model = IndexEditStagingModel()
+        staging_model = QtIndexEditStagingModel()
         entry_model = EntryModifierModel(persistence=persistence, staging_model=staging_model)
         entry_model.load_records([first_ref, second_ref])
 

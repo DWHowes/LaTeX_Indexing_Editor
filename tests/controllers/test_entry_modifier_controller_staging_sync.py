@@ -17,7 +17,7 @@ import pytest
 from PySide6.QtCore import QObject, Signal
 
 from models.entry_modifier_model import EntryModifierModel
-from models.index_edit_staging_model import IndexEditStagingModel
+from bookindexcore.qt.staging import QtIndexEditStagingModel
 from controllers.entry_modifier_controller import EntryModifierController
 from views.entry_modifier_list import EntryModifierList
 
@@ -34,7 +34,7 @@ def wired_controller(qtbot):
     qtbot.addWidget(view)
 
     model = EntryModifierModel(persistence=None, staging_model=None)
-    staging_model = IndexEditStagingModel()
+    staging_model = QtIndexEditStagingModel()
     index_edit_ctrl = _FakeIndexEditController()
 
     controller = EntryModifierController(
@@ -65,26 +65,26 @@ def wired_controller(qtbot):
 def test_tree_originated_stage_edit_previews_live_in_the_table(wired_controller):
     _controller, view, staging_model = wired_controller
 
-    assert view.get_row_field_values(42)["sub1_disp"] == "OldSub"
+    assert view.get_row_field_values(42)["levels"][1][1] == "OldSub"
 
     # Simulates IndexEditController._process_heading_rename calling
     # stage_edit for a rename that hasn't been written to disk yet.
     staging_model.stage_edit(42, "Main!NewSub")
 
     fields = view.get_row_field_values(42)
-    assert fields["sub1_disp"] == "NewSub"
+    assert fields["levels"][1][1] == "NewSub"
 
 
 def test_discard_reverts_the_live_preview_back_to_original(wired_controller):
     _controller, view, staging_model = wired_controller
 
     staging_model.stage_edit(42, "Main!NewSub")
-    assert view.get_row_field_values(42)["sub1_disp"] == "NewSub"
+    assert view.get_row_field_values(42)["levels"][1][1] == "NewSub"
 
     # Simulates the tree-side rename being rejected/rolled back.
     staging_model.discard(42)
 
-    assert view.get_row_field_values(42)["sub1_disp"] == "OldSub"
+    assert view.get_row_field_values(42)["levels"][1][1] == "OldSub"
 
 
 def test_table_originated_stage_edit_does_not_disrupt_its_own_row(wired_controller):
@@ -107,7 +107,7 @@ def test_table_originated_stage_edit_does_not_disrupt_its_own_row(wired_controll
 
     # The live-preview handler fires from this same stage_edit call; it
     # must not have reverted or altered what the user just typed.
-    assert view.get_row_field_values(42)["sub1_disp"] == "TypedByUser"
+    assert view.get_row_field_values(42)["levels"][1][1] == "TypedByUser"
 
 
 def test_commit_still_works_after_staging(wired_controller):
@@ -117,5 +117,5 @@ def test_commit_still_works_after_staging(wired_controller):
     staging_model.stage_edit(42, "Main!NewSub")
     staging_model.commit(42)
 
-    assert view.get_row_field_values(42)["sub1_disp"] == "NewSub"
+    assert view.get_row_field_values(42)["levels"][1][1] == "NewSub"
     assert staging_model.is_dirty(42) is False

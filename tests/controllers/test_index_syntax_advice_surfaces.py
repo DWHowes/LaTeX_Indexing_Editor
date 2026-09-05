@@ -18,6 +18,7 @@ from models import index_syntax_check as syntax
 from views.entry_modifier_list import (
     EntryModifierList, COL_MAIN_DISP, COL_MAIN_SORT, COL_SUB1_DISP, COL_ENCAP,
 )
+from bookindexcore.ui.entry_window import levels
 from views.latex_index_window import LatexIndexWindow
 from views import index_syntax_advice as advice
 
@@ -102,7 +103,7 @@ class TestIndexEntryWindowAdvice:
         """All six -- a sort key is never printed, but a "%" in one still
         comments out the rest of the entry."""
         watched = set(window._syntax_notices)
-        assert watched == set(window._display_fields()) | set(window.sort_entries)
+        assert watched == set(window.fields.display_fields) | set(window.sort_entries)
 
     def test_a_clean_field_shows_nothing(self, window):
         window.main_entry.setText("negligence")
@@ -263,5 +264,5 @@ class TestEntryTableAdvice:
 
         # The field additionally offers the repair; everything else matches.
         assert cell_tooltip in field_tooltip.replace(
-            f"<p><i>{window._FIX_HINT}</i></p>", ""
+            f"<p><i>{levels._FIX_HINT}</i></p>", ""
         )

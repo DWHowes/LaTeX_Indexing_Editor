@@ -1,13 +1,28 @@
-from PySide6.QtWidgets import QMainWindow, QSplitter, QTabWidget, QSizePolicy, QInputDialog
+from PySide6.QtWidgets import QMainWindow, QSplitter, QStyle, QTabWidget, QSizePolicy, QInputDialog
 from PySide6.QtCore import Signal, QSize, Qt, Slot
 from PySide6.QtGui import QGuiApplication
 
 from controllers.latex_index_controller import LatexIndexController
 
+from bookindexcore.ui import shortcuts
+from bookindexcore.ui.window import MainStatusBar, MainToolBar, PanelButton
+
+from models.app_paths import get_app_root
 from views.main_menu_bar import MainMenuBar
-from views.main_tool_bar import MainToolBar
-from views.main_status_bar import MainStatusBar
 from views.latex_index_window import LatexIndexWindow
+
+#: The three sidebar panels, in the order ProjectSidebarView mounts them. The
+#: toolbar addresses panels by index, so this list and that one are the same
+#: list said twice; keeping them adjacent in the file that builds the window
+#: is the cheapest way to keep them honest.
+SIDEBAR_PANELS = (
+    PanelButton("Show Workspace Files", shortcuts.FOCUS_FILES,
+                QStyle.StandardPixmap.SP_DirHomeIcon),
+    PanelButton("Show Index References", shortcuts.FOCUS_INDEX,
+                QStyle.StandardPixmap.SP_FileDialogContentsView),
+    PanelButton("Show Edit Entries Panel", shortcuts.FOCUS_ENTRIES,
+                QStyle.StandardPixmap.SP_MessageBoxWarning),
+)
 
 class LatexEditor(QMainWindow):
     """
@@ -34,7 +49,8 @@ class LatexEditor(QMainWindow):
     def init_ui_layout(self):
         """Pure Structural Layout Architecture Configuration."""
         self.menu_bar = MainMenuBar(self)
-        self.tool_bar = MainToolBar(self)
+        self.tool_bar = MainToolBar(self, SIDEBAR_PANELS,
+                                    icon_root=get_app_root() / "icons")
         self.status_bar = MainStatusBar(self)
         
         self.tabs = QTabWidget(self)

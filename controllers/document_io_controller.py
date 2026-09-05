@@ -1,6 +1,7 @@
 import os
 from contextlib import contextmanager
 from PySide6.QtCore import QObject, Signal, Slot
+from models import index_tag_grammar as grammar
 from views.editor_tab import EditorTab
 
 class DocumentIOController(QObject):
@@ -349,6 +350,29 @@ class DocumentIOController(QObject):
                     return editor
         return None
 
+    def read_text(self, file_path: str) -> "str | None":
+        """
+        The file's current text: the open buffer if there is one, the disk
+        contents otherwise.
+
+        The open-editor-vs-disk branch is the one thing every reader here
+        has to get right and the one thing it is easy to skip -- a reader
+        that goes straight to disk sees a stale file whenever the user has
+        unsaved changes in that tab, which is most of the time. It was
+        written out separately in each reader; this is that branch, once.
+
+        Returns None if the file cannot be read.
+        """
+        open_editor = self._find_open_editor(file_path)
+        if open_editor:
+            return open_editor.document().toPlainText()
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception as e:
+            print(f"[IO ERROR] read_text: could not read {file_path}: {e}")
+            return None
+
     def read_macro_span(
         self,
         file_path: str,
@@ -375,16 +399,9 @@ class DocumentIOController(QObject):
         sees exactly what a rewrite would be reading. Returns None if the
         file can't be read.
         """
-        open_editor = self._find_open_editor(file_path)
-        if open_editor:
-            doc_text = open_editor.document().toPlainText()
-        else:
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    doc_text = f.read()
-            except Exception as e:
-                print(f"[IO ERROR] read_macro_span: could not read {file_path}: {e}")
-                return None
+        doc_text = self.read_text(file_path)
+        if doc_text is None:
+            return None
 
         if absolute_end > len(doc_text) or absolute_position < 0:
             print(
@@ -422,9 +439,8 @@ class DocumentIOController(QObject):
         cursor.setPosition(absolute_position)
         cursor.setPosition(absolute_end, QTextCursor.MoveMode.KeepAnchor)
 
-        expected_prefix = f"\\{expected_macro_name}{{"
         existing = cursor.selectedText()
-        if not existing.startswith(expected_prefix):
+        if grammar.macro_body_start(existing, expected_macro_name) == -1:
             print(
                 f"[IO GUARD] Span at {absolute_position}:{absolute_end} "
                 f"is {existing[:30]!r} — does not look like a \\{expected_macro_name} macro, "
@@ -467,9 +483,8 @@ class DocumentIOController(QObject):
             )
             return None
 
-        expected_prefix = f"\\{expected_macro_name}{{"
         existing_span = content[absolute_position:absolute_end]
-        if not existing_span.startswith(expected_prefix):
+        if grammar.macro_body_start(existing_span, expected_macro_name) == -1:
             print(
                 f"[IO GUARD] Span at {absolute_position}:{absolute_end} "
                 f"is {existing_span[:30]!r} — does not look like a \\{expected_macro_name} macro, "

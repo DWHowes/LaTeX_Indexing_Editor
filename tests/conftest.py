@@ -8,22 +8,34 @@ from pathlib import Path
 # display, which is what makes it usable in CI and from a plain terminal.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+# The shared store is per *user* and shared by every index editor, so the one
+# an unguarded `NameInverter.shared()` reaches for is the developer's real set
+# of confirmed corrections -- and since 4 September 2026 their house profiles,
+# alphabets and model assessments as well. Pointed somewhere disposable before
+# anything can import it, for the same reason as the line above, and **both
+# names** because the store was renamed and the old variable is still read.
+import tempfile
+_disposable = os.path.join(tempfile.gettempdir(),
+                           "latex-indexing-editor-tests", "indexing.db")
+os.environ.setdefault("BOOKINDEXCORE_STORE", _disposable)
+os.environ.setdefault("BOOKINDEXCORE_NAME_DB", _disposable)
+
 import pytest
 from PySide6.QtCore import QSettings
 
 from models.file_tree_persistence import FileTreePersistence
-from models.session_logger import SessionLogger
+from bookindexcore.session.logger import SessionLogger
 from models.preferences_persistence import PreferencesPersistence
-from models.text_sanitizer import TextSanitizer
-from models.session_backup_manager import SessionBackupManager
-from models.name_inverter import NameInverter
+from bookindexcore.util.text import TextSanitizer
+from bookindexcore.session.backup import SessionBackupManager
+from bookindexcore.naming.inverter import NameInverter
 
 from views.latex_editor import LatexEditor
 from controllers.app_pipeline_controller import AppPipelineController
 from controllers.document_io_controller import DocumentIOController
 from controllers.workspace_lifecycle_controller import WorkspaceLifecycleController
-from controllers.app_style_configuration import AppStyleConfiguration
-from controllers.external_file_watcher_engine import ExternalFileWatcherEngine
+from bookindexcore.ui.style import AppStyleConfiguration
+from bookindexcore.qt.watcher import TextFileWatcherEngine
 from controllers.project_scope_controller import ProjectScopeController
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -60,6 +72,42 @@ def _reset_theme_broker_connections():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         AppStyleConfiguration.event_broker().theme_mutated.disconnect()
+
+
+@pytest.fixture(autouse=True)
+def _no_modal_dialogs(monkeypatch):
+    """
+    Turns every static QMessageBox into a failure instead of a block.
+
+    A modal dialog in an automated run is not a slow test, it is a stopped
+    one, and from the outside it is indistinguishable from an infinite loop --
+    which is what makes it expensive. It has cost this project real debugging
+    time twice: both times a genuine regression on an error path opened
+    ``QMessageBox.warning`` with nobody there to dismiss it, and both times the
+    visible symptom was a suite that simply never finished.
+
+    Raising instead converts that into a named test failing with the dialog's
+    own message in the assertion, which points straight at the error path that
+    was taken. A test that legitimately drives a prompt overrides this from
+    its own body -- ``monkeypatch.setattr`` inside the test runs after the
+    fixture, so the later patch wins.
+
+    Deliberately autouse and suite-wide rather than opt-in: the tests that
+    need it are exactly the ones nobody predicted would need it.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    def _blocked(kind):
+        def blocked(*args, **kwargs):
+            text = args[2] if len(args) > 2 else kwargs.get("text", "")
+            raise AssertionError(
+                f"QMessageBox.{kind} would have blocked the run: {text!r}. "
+                f"An error path was taken -- see the captured stdout above."
+            )
+        return blocked
+
+    for kind in ("warning", "critical", "information", "question", "about"):
+        monkeypatch.setattr(QMessageBox, kind, staticmethod(_blocked(kind)))
 
 
 @pytest.fixture
@@ -141,7 +189,14 @@ def booted_app(tmp_path_factory, qapp):
 
     text_sanitizer = TextSanitizer()
     backup_manager = SessionBackupManager()
-    name_inverter = NameInverter(viaf_cache_path=str(tmp_dir / "name_cache.db"), viaf_enabled=True)
+    # An explicit path rather than `NameInverter.shared()`, which is what the
+    # real main.py calls: the shared one is the developer's own name database,
+    # per user and shared by every editor, and a test suite has no business
+    # writing to it. `tests/conftest.py` also points BOOKINDEXCORE_NAME_DB at a
+    # throwaway file, so anything that reaches for the shared one anyway lands
+    # somewhere harmless rather than in the real corrections.
+    name_inverter = NameInverter(name_database_path=str(tmp_dir / "name_cache.db"),
+                                 viaf_enabled=True)
 
     editor_window = LatexEditor()
     editor_window.set_preferences_model(preferences_model)
@@ -149,7 +204,7 @@ def booted_app(tmp_path_factory, qapp):
     doc_controller = DocumentIOController(backup_manager, text_sanitizer, editor_window.tabs, editor_window)
     editor_window.latex_index_controller.set_doc_io(doc_controller)
 
-    file_watcher_engine = ExternalFileWatcherEngine(editor_window)
+    file_watcher_engine = TextFileWatcherEngine(editor_window)
     lifecycle_controller = WorkspaceLifecycleController(
         text_sanitizer=text_sanitizer,
         file_watcher=file_watcher_engine,
@@ -186,3 +241,20 @@ def booted_app(tmp_path_factory, qapp):
         name_inverter.close()
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def a_store_of_its_own(tmp_path, monkeypatch):
+    """
+    One shared store per test, because the store is now genuinely shared.
+
+    It holds the name decisions, the house profiles, the alphabets and the
+    model assessments in one file for the whole machine, so a test that writes
+    one is a test the next one can read unless something stops it. The module
+    level `setdefault` above keeps the suite off the developer's real store;
+    this keeps the tests off each other's.
+    """
+    disposable = str(tmp_path / "store" / "indexing.db")
+    monkeypatch.setenv("BOOKINDEXCORE_STORE", disposable)
+    monkeypatch.setenv("BOOKINDEXCORE_NAME_DB", disposable)
+    return disposable

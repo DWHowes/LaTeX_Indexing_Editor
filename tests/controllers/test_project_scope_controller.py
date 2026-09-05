@@ -4,33 +4,23 @@ actual production bugs (prune calling a nonexistent method, prune/set-root
 signals built but never connected). Persistence-layer effects are already
 covered under tests/persistence/; this file is specifically about the
 controller's OWN behavior: which signals fire, when, and with what
-arguments, plus the QModelIndex-driven entry point and the file-tree-payload
-flattening helper that only lives here.
+arguments, plus the file-tree-payload flattening helper that only lives here.
+
+This controller deals only in paths. It used to carry a second, index-taking
+prune entry point that read the tree's item roles through FileTreePersistence;
+resolving an index is the view's job and now happens in
+FileTreeContextMenuManager, so those tests live in
+test_context_menu_subsystem.py.
 """
 import os
 
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QStandardItem, QStandardItemModel
 
 from controllers.project_scope_controller import ProjectScopeController, _flatten_tex_file_nodes
-
-DIRECTORY_FLAG_ROLE = Qt.ItemDataRole.UserRole
-ABSOLUTE_PATH_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
 def _seed(fp, *paths):
     fp.upsert_project_files([{"absolute_path": p, "file_name": os.path.basename(p)} for p in paths])
-
-
-def _index_for(is_dir: bool, path: str):
-    """A real QModelIndex with the two roles process_file_pruning_request reads, matching FileTreeView's own item setup."""
-    model = QStandardItemModel()
-    item = QStandardItem("name")
-    item.setData(is_dir, DIRECTORY_FLAG_ROLE)
-    item.setData(path, ABSOLUTE_PATH_ROLE)
-    model.appendRow(item)
-    return model.index(0, 0), model  # keep model alive for the caller
 
 
 class _SignalRecorder:
@@ -88,51 +78,6 @@ class TestUnpruneProjectFile:
 
         assert scope_ctrl.unprune_project_file("nope.tex") is False
         assert scope_mutated.calls == []
-
-
-class TestProcessFilePruningRequest:
-    def test_file_node_prunes_and_emits_both_signals(self, scope_ctrl, fresh_persistence):
-        _seed(fresh_persistence, "a.tex")
-        index, _model = _index_for(is_dir=False, path="a.tex")
-        scope_mutated = _SignalRecorder(scope_ctrl.scope_mutated)
-        file_pruned = _SignalRecorder(scope_ctrl.file_pruned)
-
-        scope_ctrl.process_file_pruning_request(index)
-
-        assert len(scope_mutated.calls) == 1
-        assert file_pruned.calls == [(os.path.normpath("a.tex"),)]
-        assert fresh_persistence.fetch_active_unpruned_paths() == []
-
-    def test_directory_node_is_ignored(self, scope_ctrl, fresh_persistence):
-        _seed(fresh_persistence, "a.tex")
-        index, _model = _index_for(is_dir=True, path="somedir")
-        scope_mutated = _SignalRecorder(scope_ctrl.scope_mutated)
-        file_pruned = _SignalRecorder(scope_ctrl.file_pruned)
-
-        scope_ctrl.process_file_pruning_request(index)
-
-        assert scope_mutated.calls == []
-        assert file_pruned.calls == []
-
-    def test_invalid_index_does_not_raise(self, scope_ctrl):
-        from PySide6.QtCore import QModelIndex
-        scope_ctrl.process_file_pruning_request(QModelIndex())  # must not raise
-
-    def test_untracked_file_node_emits_scope_mutated_but_not_file_pruned(self, scope_ctrl):
-        """
-        process_file_pruning_request always emits scope_mutated once it has
-        a resolvable path (regardless of whether the DB actually had a row
-        to prune), but only emits file_pruned when prune_file_record
-        reports an actual row change.
-        """
-        index, _model = _index_for(is_dir=False, path="untracked.tex")
-        scope_mutated = _SignalRecorder(scope_ctrl.scope_mutated)
-        file_pruned = _SignalRecorder(scope_ctrl.file_pruned)
-
-        scope_ctrl.process_file_pruning_request(index)
-
-        assert len(scope_mutated.calls) == 1
-        assert file_pruned.calls == []
 
 
 class TestFlattenTexFileNodes:

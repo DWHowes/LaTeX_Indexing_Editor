@@ -20,8 +20,10 @@ QMenu.exec is monkeypatched for the couple of tests that do exercise
 _intercept_context_request's own valid/invalid-index guard, since a real
 call blocks forever waiting for a click that can never come headlessly.
 """
-from PySide6.QtCore import QItemSelectionModel, QPoint, Qt
-from PySide6.QtGui import QStandardItem
+import os
+
+from PySide6.QtCore import QItemSelectionModel, QModelIndex, QPoint, Qt
+from PySide6.QtGui import QAction, QStandardItem
 from PySide6.QtWidgets import QMenu
 
 from controllers.context_menu_subsystem import (
@@ -182,7 +184,14 @@ class TestFileTreeContextMenuManager:
 
         assert "Prune 'b.tex' (Contains No Index Text)" in [a.text() for a in menu.actions()]
 
-    def test_set_root_action_emits_the_index(self, qtbot):
+    def test_set_root_action_emits_the_path(self, qtbot):
+        """
+        A path, not the QModelIndex it came from. Both actions used to emit
+        the index and leave the receiving controller to ask the *persistence
+        layer* to read the item roles out of it -- which is how a Qt view
+        type ended up imported by the database module. Resolving an index is
+        this layer's job.
+        """
         view, manager = self._build(qtbot)
         index = view.base_model.index(0, 0)
         menu = QMenu()
@@ -191,10 +200,9 @@ class TestFileTreeContextMenuManager:
 
         _trigger(menu, "Set 'a.tex' as root file")
 
-        assert len(recorder.calls) == 1
-        assert recorder.calls[0][0].row() == 0
+        assert recorder.calls == [(os.path.normpath("/proj/a.tex"),)]
 
-    def test_prune_action_emits_the_index(self, qtbot):
+    def test_prune_action_emits_the_path(self, qtbot):
         view, manager = self._build(qtbot)
         index = view.base_model.index(0, 0)
         menu = QMenu()
@@ -203,7 +211,39 @@ class TestFileTreeContextMenuManager:
 
         _trigger(menu, "Prune 'a.tex' (Contains No Index Text)")
 
-        assert len(recorder.calls) == 1
+        assert recorder.calls == [(os.path.normpath("/proj/a.tex"),)]
+
+    def test_a_directory_node_is_never_pruned(self, qtbot):
+        """
+        A folder carries a path like any other node, so the guard has to be
+        explicit. It used to sit in ProjectScopeController, which could only
+        apply it by reading the index through the persistence layer.
+        """
+        view = FileTreeView()
+        qtbot.addWidget(view)
+        view.populate_file_hierarchy([
+            {"name": "chapters", "path": "/proj/chapters", "is_dir": True, "children": []},
+        ])
+        manager = FileTreeContextMenuManager(view)
+        index = view.base_model.index(0, 0)
+        menu = QMenu()
+        manager.populate_menu_actions(menu, index)
+        recorder = _SignalRecorder(manager.prune_file_triggered)
+
+        _trigger(menu, "Prune 'chapters' (Contains No Index Text)")
+
+        assert recorder.calls == []
+
+    def test_an_invalid_index_emits_nothing_and_does_not_raise(self, qtbot):
+        view, manager = self._build(qtbot)
+        recorder = _SignalRecorder(manager.prune_file_triggered)
+        action = QAction("Prune", None)
+        action.setData(QModelIndex())
+        action.triggered.connect(manager._on_prune_clicked)
+
+        action.trigger()
+
+        assert recorder.calls == []
 
 
 class TestEditEntryContextMenuManager:
@@ -235,6 +275,36 @@ class TestEditEntryContextMenuManager:
         _trigger(menu, "Invert name")
 
         assert recorder.calls[0][0].column() == COL_MAIN_DISP
+
+    def test_set_name_language_targets_the_main_column_too(self, qtbot):
+        """
+        The same target as *Invert name* beside it, and for the same reason:
+        the language is a fact about the name in the Main heading, whichever
+        cell the click landed on.
+        """
+        view, manager = self._build(qtbot, [{"unique_id_number": 1, "heading_raw_text": "Main!Sub1"}])
+        index = self._proxy_index(view, 0, COL_SUB1_DISP)
+        menu = QMenu()
+        manager.populate_menu_actions(menu, index)
+        recorder = _SignalRecorder(manager.set_name_language_triggered)
+
+        _trigger(menu, "Set name language...")
+
+        assert recorder.calls[0][0].column() == COL_MAIN_DISP
+
+    def test_the_two_name_actions_sit_together(self, qtbot):
+        """
+        Beside inversion rather than further down the menu, because it is the
+        same question asked without a lookup. A shared dialog reachable from
+        nothing was what `probes/probe_core_wiring.py` reported here.
+        """
+        view, manager = self._build(qtbot, [{"unique_id_number": 1, "heading_raw_text": "Main"}])
+        menu = QMenu()
+        manager.populate_menu_actions(menu, self._proxy_index(view, 0))
+
+        labels = [action.text() for action in menu.actions()
+                  if not action.isSeparator()]
+        assert labels[:2] == ["Invert name", "Set name language..."]
 
     def test_delete_targets_just_the_clicked_row_when_nothing_is_selected(self, qtbot):
         view, manager = self._build(qtbot, [

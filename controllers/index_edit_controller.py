@@ -1,18 +1,48 @@
 import os
+from contextlib import contextmanager
+
 from PySide6.QtCore import QObject, Signal, Slot, Qt, QTimer
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import QMessageBox
 
 from models import index_tag_grammar as grammar
-from models.index_command_stack import (
+from models.latex_dialect import LATEX_DIALECT as dialect
+from models.latex_record_mapping import (
+    command_of, end_of, position_of, row_from_reference,
+)
+from bookindexcore.model.records import IndexReference
+from models.command_edits import (
+    edit_command_name, edit_end, edit_position, macro_edit,
+)
+from bookindexcore.model.commands import (
     EntrySnapshot,
+    copy_record,
     HeadingChange,
-    MacroEdit,
     deletion_command,
     edit_command,
 )
+from bookindexcore.backend.locator import Locator, SourceEdit
+from bookindexcore.ui.tree.reference import TreeReference
 from views.index_tree_view import IndexTreeView
 from controllers.document_io_controller import DocumentIOController
+from controllers.latex_text_backend import LatexTextBackend
+
+
+
+def _ref_entry_id(ref) -> int:
+    """
+    The entry id of a reference payload stored on a tree node.
+
+    Tolerant of three shapes on purpose. The entry *table* is fed records by
+    the pipeline; the tree's ``UserRole+1`` ref-lists hold ``TreeReference``
+    values since extraction step 9b; and a raw load payload still reaches
+    some of these paths directly. **All four sites that used to inline this
+    expression now call it**, which is what made adding the third shape one
+    edit rather than four.
+    """
+    if isinstance(ref, (IndexReference, TreeReference)):
+        return int(ref.entry_id or 0)
+    return int(ref.get("unique_id_number") or ref.get("id") or 0)
 
 
 class IndexEditController(QObject):
@@ -58,6 +88,20 @@ class IndexEditController(QObject):
         self._entry_model = entry_modifier_model
         self._staging_model = staging_model
 
+        # This application's DocumentBackend, constructed here rather than
+        # injected. Injecting it with a None default is what turned a stale
+        # coordinate into a hung test suite once already: every construction
+        # site that did not supply one silently stopped keeping positions in
+        # step. It is cheap, it needs only the doc_io this controller already
+        # holds, and AppPipelineController reads it back off here so that
+        # there is exactly one entry table.
+        self.text_backend = LatexTextBackend(doc_io)
+
+        #: Containers already adopted inside a `bulk_writes` block, or None
+        #: when not in one. See `bulk_writes` for why adopting once per
+        #: command rather than once per write is correct as well as faster.
+        self._bulk_adopted: set | None = None
+
         # Wire double-click to our handler — we disconnect the existing
         # navigation handler and re-route so we can split col 0 / col 1 behaviour.
         # The tree's existing doubleClicked connection (_process_embedded_metrics_click)
@@ -71,6 +115,162 @@ class IndexEditController(QObject):
         # Guard flag — set True while we are programmatically updating the model
         # so _on_tree_item_edited doesn't re-enter.
         self._rewriting = False
+
+    # ------------------------------------------------------------------
+    # The write seam
+    # ------------------------------------------------------------------
+
+    @contextmanager
+    def bulk_writes(self):
+        r"""
+        Adopt the backend's entry table **once** for a run of writes, instead
+        of once per write.
+
+        Correct rather than merely faster, and the reason is the backend's own
+        design: :meth:`LatexTextBackend._shift_after` *maintains* the table as
+        each edit lands, so a table adopted at the start of a command is still
+        accurate at the end of it. Re-adopting per write was rebuilding, from
+        the store, a table the backend had just finished updating itself.
+
+        The saving is a whole factor of the cost. A command of *e* edits over
+        an index of *n* entries was ``O(e x n)`` in adoption alone, on top of
+        the ``O(e x n)`` the relocation sweep genuinely needs. Measured over a
+        rename of every entry: 4,000 entries went from 109 seconds to a
+        fraction of that. It is still quadratic in the worst case -- each edit
+        really does move everything after it -- but the constant is what
+        decides whether a tool is usable.
+
+        Nested use is safe: an inner block joins the outer one rather than
+        re-adopting, in the same way :meth:`IndexRepository.transaction` joins
+        rather than nesting.
+        """
+        if self._bulk_adopted is not None:
+            yield
+            return
+        self._bulk_adopted = set()
+        try:
+            yield
+        finally:
+            self._bulk_adopted = None
+
+    def _adopt(self, container: str) -> None:
+        """
+        Bring the backend's table up to date with the store, unless a
+        :meth:`bulk_writes` block has already done it for this container.
+        """
+        if self._bulk_adopted is not None:
+            if container in self._bulk_adopted:
+                return
+            self._bulk_adopted.add(container)
+        # Every record, not the ones this controller thinks are in the file:
+        # adopt_entries normalises and filters, which puts the one place that
+        # knows a container is a *path* in charge of deciding what counts as
+        # the same file. Two spellings of one path would otherwise leave the
+        # table short of entries, and a missing entry is one that never gets
+        # told it moved.
+        self.text_backend.adopt_entries(container, self._entry_model.all_records())
+
+    def _write_span(self, entry_id: int, before: str, after: str) -> bool:
+        r"""
+        Rewrites one entry's source span through the backend, and brings the
+        cache in step with whatever the backend says moved.
+
+        **This is the whole of §4.2's arrangement, at one call site.** The
+        backend performs the write, reports the entry's new position, and
+        reports every other entry that moved as ``LocatorUpdate``s; the store
+        applies those without asking what a position is. Passing ``""`` as
+        ``after`` deletes, which is why deletion does not need its own method.
+
+        The table is adopted immediately beforehand rather than scanned. The
+        backend mints anchors from where macros are *now*; this application's
+        anchors were minted at the scan that first filled its database and are
+        identity rather than position. After any edit the two disagree, and
+        the backend stops finding the entry it is being asked about --
+        reporting, not unreasonably, that no such entry exists.
+
+        Returns False without leaving a partial write behind. The backend
+        refuses rather than guesses when the span no longer reads as
+        ``before``, which is what stops a rewrite landing in the middle of a
+        neighbouring word after somebody else has edited the file.
+        """
+        record = self._entry_model.get_record(entry_id)
+        if record is None:
+            print(f"[WRITE] no cached record for entry {entry_id}")
+            return False
+
+        self._adopt(record.locator.container)
+
+        result = self.text_backend.apply(SourceEdit(
+            entry_id=entry_id, locator=record.locator, before=before, after=after,
+        ))
+        if not result.ok:
+            print(f"[WRITE] refused for entry {entry_id}: {result.message}")
+            return False
+
+        if result.locator is not None:
+            # Merged, not assigned. A backend builds the hint it owns --
+            # offsets and the macro name -- and knows nothing of the other
+            # things this application keeps in there, so replacing wholesale
+            # drops them. line_number and column_offset are NOT NULL columns,
+            # so the symptom was a save that failed at the database rather
+            # than anywhere near the edit that caused it.
+            record.locator = record.locator.with_hint(**result.locator.hint)
+            self._entry_model.mark_dirty(entry_id)
+
+        for moved_id in self._entry_model.apply_relocations(result.relocations):
+            self._entry_model.mark_dirty(moved_id)
+
+        return True
+
+    def place_macro(self, container: str, position: int, text: str):
+        r"""
+        Writes a new macro at ``position``, and brings the cache in step.
+
+        The companion to :meth:`_write_span` for the one operation that names
+        no existing entry. Its locator carries a place and no anchor, which is
+        what ``apply`` reads as "put a new one here" — the shape the protocol
+        gained in phase 5b, because the old ``insert(at)`` meant *beside an
+        existing entry* and could not express a caret in a chapter that has no
+        entries yet.
+
+        Returns the backend's ``EditResult``. The caller needs the locator off
+        it: the anchor the backend minted is the new entry's identity, and
+        there is no other way to learn it.
+        """
+        self._adopt(container)
+
+        result = self.text_backend.apply(SourceEdit(
+            entry_id=None,
+            locator=Locator(container, "", {"absolute_position": position}),
+            before="",
+            after=text,
+        ))
+        if not result.ok:
+            print(f"[WRITE] placement refused in {os.path.basename(container)}: {result.message}")
+            return result
+
+        for moved_id in self._entry_model.apply_relocations(result.relocations):
+            self._entry_model.mark_dirty(moved_id)
+        return result
+
+    def note_external_shift(self, container: str, position: int, delta: int) -> list:
+        """
+        Keeps positions in step after text this backend did not write.
+
+        The generated-block injections — the preamble, custom commands, head
+        notes, ``cross_refs.tex`` — splice straight into a file, so every entry
+        after the splice point moves with no ``SourceEdit`` involved. The
+        backend has an entry point for exactly that, and skipping it leaves
+        entries whose coordinates are stale, which the next write guard
+        refuses rather than corrects.
+        """
+        self._adopt(container)
+        moved = self._entry_model.apply_relocations(
+            self.text_backend.shift_after(container, position, delta)
+        )
+        for moved_id in moved:
+            self._entry_model.mark_dirty(moved_id)
+        return moved
 
     # ------------------------------------------------------------------
     # Inline edit activation
@@ -218,8 +418,7 @@ class IndexEditController(QObject):
         # the tree node itself out of sync with its own subtree.
         conflict_ids = sorted({
             uid for uid in (
-                int(ref.get("unique_id_number") or ref.get("id") or 0)
-                for ref in affected_refs
+                _ref_entry_id(ref) for ref in affected_refs
             )
             if uid and self._staging_model.is_dirty(uid)
         })
@@ -306,13 +505,13 @@ class IndexEditController(QObject):
 
         for head in engine._active_headings:
             heading_text = head.get("heading_text") or head.get("name") or ""
-            parts = grammar.split_levels_clean(heading_text)
+            parts = dialect.split_levels_clean(heading_text)
             if len(parts) < depth:
                 continue
             if [p.lower() for p in parts[:depth]] != old_prefix_norm:
                 continue
             new_parts = list(new_path_parts) + parts[depth:]
-            new_heading_text = grammar.join_levels(new_parts)
+            new_heading_text = dialect.join_levels(new_parts)
             head["heading_text"] = new_heading_text
             head["name"] = new_heading_text
 
@@ -365,7 +564,7 @@ class IndexEditController(QObject):
         whole sweep and records a single command for it rather than one
         per reference.
         """
-        uid = int(ref.get("unique_id_number") or ref.get("id") or 0)
+        uid = _ref_entry_id(ref)
         if uid == 0:
             return False
 
@@ -390,8 +589,8 @@ class IndexEditController(QObject):
         if new_heading == current_heading:
             return False
 
-        record = self._entry_model._records.get(uid)
-        command_name = record.get("macro_command", "index") if record else "index"
+        record = self._entry_model.get_record(uid)
+        command_name = command_of(record) if record else "index"
 
         # Record the intended value before attempting the .tex write, so the
         # staging model reflects "what the controller currently believes
@@ -414,28 +613,26 @@ class IndexEditController(QObject):
         # and tree reconciliation both key on the bare heading chain.
         new_macro_body = self._reattach_encap(old_macro, new_heading, command_name)
 
-        new_macro = f"\\{command_name}{{{new_macro_body}}}"
-        delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro, expected_macro_name=command_name)
-        if delta is None:
+        # The index class is outside the braces and so is not in
+        # heading_raw_text either. Same argument as the encap above, same
+        # consequence if it is dropped: a rename would move the entry out of
+        # its named index and into the default one.
+        new_macro = grammar.build_macro(
+            new_macro_body, command=command_name,
+            index_class=grammar.index_class_of(old_macro, grammar.command_pattern(command_name)),
+        )
+        if not self._write_span(uid, old_macro, new_macro):
             # Write did not happen — revert the staged value so it doesn't
             # drift out of sync with what's actually on the .tex source.
             self._staging_model.discard(uid)
             return False
 
-        self._entry_model.update_entry_coordinates(uid, abs_pos, abs_pos + len(new_macro))
-        self._entry_model.mark_dirty(uid)
-
         if record:
-            record["heading_raw_text"] = new_heading
-
-        if delta != 0:
-            shifted_ids = self._entry_model.shift_coordinates_after(file_path, abs_pos, delta)
-            for shifted_id in shifted_ids:
-                self._entry_model.mark_dirty(shifted_id)
+            record.heading_raw = new_heading
 
         if recorder is not None and old_macro:
             recorder.append((
-                MacroEdit(uid, file_path, abs_pos, old_macro, new_macro, command_name),
+                macro_edit(uid, file_path, abs_pos, old_macro, new_macro, command_name),
                 HeadingChange(uid, current_heading, new_heading),
             ))
 
@@ -477,10 +674,10 @@ class IndexEditController(QObject):
 
         substituted = False
         new_levels = []
-        old_sort = grammar.sort_key_of(old_token).lower()
+        old_sort = dialect.sort_key_of(old_token).lower()
 
         for level in tag.levels:
-            if not substituted and grammar.sort_key_of(level).lower() == old_sort:
+            if not substituted and dialect.sort_key_of(level).lower() == old_sort:
                 new_levels.append(new_token)
                 substituted = True
             else:
@@ -584,8 +781,8 @@ class IndexEditController(QObject):
         than a reason to fail the whole edit, since by the time this
         runs the primary entry's own rewrite has already succeeded.
         """
-        record = self._entry_model._records.get(entry_id)
-        partner_id = record.get("range_partner_id") if record else None
+        record = self._entry_model.get_record(entry_id)
+        partner_id = record.range_partner_id if record else None
         if not partner_id:
             return True
 
@@ -601,14 +798,18 @@ class IndexEditController(QObject):
             print(f"[CONTROLLER WARNING] _sync_range_partner: incomplete coordinates for partner {partner_id}")
             return False
 
-        partner_record = self._entry_model._records.get(partner_id)
-        partner_command = partner_record.get("macro_command", "index") if partner_record else "index"
-        partner_prefix = f"\\{partner_command}{{"
+        partner_record = self._entry_model.get_record(partner_id)
+        partner_command = command_of(partner_record) if partner_record else "index"
 
         current_partner_macro = self._doc_io.read_macro_span(partner_file, partner_pos, partner_end)
+        # Where the body starts depends on whether the macro carries an
+        # index class, so it is asked for rather than assumed: the fixed
+        # prefix this used to slice by is one character short of the truth
+        # for every entry in a named index.
+        body_start = grammar.macro_body_start(current_partner_macro or "", partner_command)
         if (
             current_partner_macro is None
-            or not current_partner_macro.startswith(partner_prefix)
+            or body_start == -1
             or not current_partner_macro.endswith("}")
         ):
             print(
@@ -620,7 +821,7 @@ class IndexEditController(QObject):
         new_heading_no_encap = self._strip_encap_suffix(new_heading)
         new_encap = grammar.split_encap(new_heading, strip=False)[1]
 
-        partner_inner = current_partner_macro[len(partner_prefix):-1]
+        partner_inner = current_partner_macro[body_start + 1:-1]
         partner_heading_only = self._strip_encap_suffix(partner_inner)
         partner_encap = (
             partner_inner[len(partner_heading_only) + 1:]
@@ -631,7 +832,7 @@ class IndexEditController(QObject):
         # Carry the primary's page style over to the partner, keeping the
         # partner's own marker -- see this method's docstring for why the
         # two halves are treated differently.
-        partner_role = grammar.range_role(partner_encap)
+        partner_role = dialect.range_role(partner_encap)
         primary_role, primary_command = grammar.split_range_encap(new_encap)
         if partner_role and primary_role:
             partner_encap = grammar.build_range_encap(partner_role, primary_command)
@@ -642,22 +843,18 @@ class IndexEditController(QObject):
         if new_partner_heading == partner_inner:
             return True  # already in sync — nothing to do
 
-        new_partner_macro = f"\\{partner_command}{{{new_partner_heading}}}"
-        delta = self._doc_io.rewrite_macro_span(partner_file, partner_pos, partner_end, new_partner_macro, expected_macro_name=partner_command)
-        if delta is None:
+        new_partner_macro = grammar.build_macro(
+            new_partner_heading, command=partner_command,
+            index_class=grammar.index_class_of(
+                current_partner_macro, grammar.command_pattern(partner_command)
+            ),
+        )
+        if not self._write_span(partner_id, current_partner_macro, new_partner_macro):
             print(f"[CONTROLLER WARNING] _sync_range_partner: rewrite rejected for partner {partner_id}")
             return False
 
-        self._entry_model.update_entry_coordinates(partner_id, partner_pos, partner_pos + len(new_partner_macro))
-        self._entry_model.mark_dirty(partner_id)
-
         if partner_record:
-            partner_record["heading_raw_text"] = new_heading_no_encap
-
-        if delta != 0:
-            shifted_ids = self._entry_model.shift_coordinates_after(partner_file, partner_pos, delta)
-            for shifted_id in shifted_ids:
-                self._entry_model.mark_dirty(shifted_id)
+            partner_record.heading_raw = new_heading_no_encap
 
         return True
 
@@ -688,35 +885,27 @@ class IndexEditController(QObject):
         if new_canonical_heading == old_heading:
             return True
 
-        record = self._entry_model._records.get(entry_id)
-        command_name = record.get("macro_command", "index") if record else "index"
+        record = self._entry_model.get_record(entry_id)
+        command_name = command_of(record) if record else "index"
 
         old_macro = self._doc_io.read_macro_span(file_path, abs_pos, abs_end) or ""
 
-        new_macro = f"\\{command_name}{{{new_canonical_heading}}}"
-        delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, new_macro, expected_macro_name=command_name)
-        if delta is None:
+        new_macro = grammar.build_macro(
+            new_canonical_heading, command=command_name,
+            index_class=grammar.index_class_of(old_macro, grammar.command_pattern(command_name)),
+        )
+        if not self._write_span(entry_id, old_macro, new_macro):
             return False
 
         if old_macro:
             self.command_recorded.emit(edit_command(
                 "Edit index entry",
-                [MacroEdit(entry_id, file_path, abs_pos, old_macro, new_macro, command_name)],
+                [macro_edit(entry_id, file_path, abs_pos, old_macro, new_macro, command_name)],
                 [HeadingChange(entry_id, old_heading, new_canonical_heading)],
             ))
 
-        self._entry_model.update_entry_coordinates(
-            entry_id, abs_pos, abs_pos + len(new_macro)
-        )
-        self._entry_model.mark_dirty(entry_id)                     # NEW
-
         if record:
-            record["heading_raw_text"] = new_canonical_heading
-
-        if delta != 0:
-            shifted_ids = self._entry_model.shift_coordinates_after(file_path, abs_pos, delta)
-            for shifted_id in shifted_ids:                          # NEW
-                self._entry_model.mark_dirty(shifted_id)           # NEW
+            record.heading_raw = new_canonical_heading
 
         # Keep this entry's range partner (if any) in sync -- this is the
         # actual fix for table edits only ever updating the range opener
@@ -765,8 +954,8 @@ class IndexEditController(QObject):
 
         heading_text = self._entry_model.get_heading_text(entry_id)
 
-        record = self._entry_model._records.get(entry_id)
-        command_name = record.get("macro_command", "index") if record else "index"
+        record = self._entry_model.get_record(entry_id)
+        command_name = command_of(record) if record else "index"
 
         # Snapshot before the write: the record, its heading and its tree
         # path are all about to be torn down, and undo has to put every
@@ -774,21 +963,18 @@ class IndexEditController(QObject):
         snapshot = self._snapshot_entry(entry_id)
         old_macro = self._doc_io.read_macro_span(file_path, abs_pos, abs_end) or ""
 
-        delta = self._doc_io.rewrite_macro_span(file_path, abs_pos, abs_end, "", expected_macro_name=command_name)
-        if delta is None:
+        # An empty `after` is a deletion -- SourceEdit says so, and expressing
+        # it as an edit rather than a separate kind is what lets a command
+        # holding a mixture invert by inverting each of its edits.
+        if not self._write_span(entry_id, old_macro, ""):
             return False
-
-        if delta != 0:
-            shifted_ids = self._entry_model.shift_coordinates_after(file_path, abs_pos, delta)
-            for shifted_id in shifted_ids:
-                self._entry_model.mark_dirty(shifted_id)
 
         self._cleanup_deleted_entry(entry_id, heading_text, heading_id)
 
         if snapshot is not None and old_macro:
             self.command_recorded.emit(deletion_command(
                 "Delete index entry",
-                [MacroEdit(entry_id, file_path, abs_pos, old_macro, "", command_name)],
+                [macro_edit(entry_id, file_path, abs_pos, old_macro, "", command_name)],
                 [snapshot],
             ))
         return True
@@ -799,18 +985,18 @@ class IndexEditController(QObject):
         record, the tree path it sits under, and its heading identity.
         Returns None if the entry isn't in the cache.
         """
-        record = self._entry_model._records.get(entry_id)
+        record = self._entry_model.get_record(entry_id)
         if record is None:
             return None
 
-        heading_text = record.get("heading_raw_text", "")
+        heading_text = record.heading_raw
         return EntrySnapshot(
             entry_id=entry_id,
             record=record,
-            parts_list=tuple(grammar.level_path(heading_text)),
+            parts_list=tuple(dialect.level_path(heading_text)),
             heading_text=heading_text,
-            heading_id=record.get("heading_id"),
-            is_range_closer=bool(record.get("is_range_closer")),
+            heading_id=record.heading_id,
+            is_range_closer=record.is_range_closer,
         )
 
     def count_refs_under_node(self, target_item: QStandardItem) -> int:
@@ -832,14 +1018,14 @@ class IndexEditController(QObject):
         entry_ids: list[int] = []
         seen: set[int] = set()
         for ref in self._collect_refs_from_node(target_item):
-            uid = int(ref.get("unique_id_number") or ref.get("id") or 0)
+            uid = _ref_entry_id(ref)
             if not uid or uid in seen:
                 continue
             seen.add(uid)
             entry_ids.append(uid)
 
-            record = self._entry_model._records.get(uid)
-            partner_id = record.get("range_partner_id") if record else None
+            record = self._entry_model.get_record(uid)
+            partner_id = record.range_partner_id if record else None
             if partner_id and partner_id not in seen:
                 seen.add(partner_id)
                 entry_ids.append(partner_id)
@@ -975,7 +1161,7 @@ class IndexEditController(QObject):
 
     def _prune_single_node(self, parts: list[str], engine) -> None:
         """Removes exactly one tree node by path plus its heading row, if any."""
-        heading_id = self._find_heading_id_by_text(engine, grammar.join_levels(parts))
+        heading_id = self._find_heading_id_by_text(engine, dialect.join_levels(parts))
         self._remove_tree_node_by_path(parts)
 
         if heading_id is not None:
@@ -1036,8 +1222,8 @@ class IndexEditController(QObject):
         dirty_ids = self._entry_model.get_dirty_ids_for_file(file_path)
         for entry_id in dirty_ids:
             old_heading = self._entry_model.get_heading_text(entry_id)
-            record = self._entry_model._records.get(entry_id) or {}
-            is_closer = bool(record.get("is_range_closer"))
+            record = self._entry_model.get_record(entry_id) or {}
+            is_closer = record.is_range_closer
 
             db_row = self._entry_model.revert_dirty_record(entry_id)
             if db_row is None:
@@ -1090,14 +1276,20 @@ class IndexEditController(QObject):
         in that case, so the operation stays undoable once the cause is
         resolved.
         """
-        from models.index_command_stack import DELETE, EDIT, INSERT
+        from bookindexcore.model.commands import DELETE, EDIT, INSERT
 
         applied: list = []
-        for edit in command.edits:
-            if not self._apply_macro_edit(edit):
-                self._roll_back_applied_edits(applied)
-                return False
-            applied.append(edit)
+        # One adoption for the whole command, including any rollback: the
+        # backend maintains its own table as each edit lands, so rebuilding it
+        # per edit was redoing work the backend had just done. On a command
+        # that renames every entry of a large index this is the difference
+        # between usable and not -- see `bulk_writes`.
+        with self.bulk_writes():
+            for edit in command.edits:
+                if not self._apply_macro_edit(edit):
+                    self._roll_back_applied_edits(applied)
+                    return False
+                applied.append(edit)
 
         if command.kind == DELETE:
             for snapshot in command.entries:
@@ -1114,45 +1306,63 @@ class IndexEditController(QObject):
         return True
 
     def _apply_macro_edit(self, edit) -> bool:
-        """
-        Writes one recorded span edit, then keeps every coordinate that
-        depends on it in step. Returns False if the span doesn't currently
-        hold what the edit expects to replace.
-        """
-        file_path = edit.file_path
-        position = edit.absolute_position
-        old_end = position + len(edit.before_text)
+        r"""
+        Replays one recorded span edit, then keeps every coordinate that
+        depends on it in step.
 
-        if edit.before_text:
+        The undo/redo path, and the one place all three operations arrive
+        through the same door -- a recorded edit with no ``before_text`` is
+        re-inserting something a deletion removed, and one with no
+        ``after_text`` is removing something an insertion added.
+
+        **The record may not exist yet**, which is why this cannot simply call
+        :meth:`_write_span`. Undoing a deletion re-writes the macro *first*
+        and recreates the record afterwards (``_recreate_entry``), so there is
+        nothing in the cache to look a locator up on. Placement takes the
+        position from the recorded edit instead, which is exactly the case the
+        anchorless locator exists for.
+
+        Returns False without leaving a partial write behind: an edit whose
+        span no longer holds what was recorded aborts, and the caller rolls
+        back whatever the command had already applied.
+        """
+        file_path = edit.locator.container
+        position = edit_position(edit)
+
+        if edit.before:
+            record = self._entry_model.get_record(edit.entry_id)
+            if record is not None:
+                if not self._write_span(edit.entry_id, edit.before, edit.after):
+                    return False
+                return True
+
+            # No cached record, so there is no locator to name the entry by
+            # and `apply` has nothing to find. The span is still on disk, so
+            # it is rewritten directly and the backend is told what moved --
+            # the same "somebody else changed the text" route the injections
+            # take. **The one write in this application that does not go
+            # through `backend.apply`**, and it is here because identity is
+            # what the backend needs and identity is exactly what a record
+            # that no longer exists cannot supply.
+            old_end = position + len(edit.before)
             current = self._doc_io.read_macro_span(file_path, position, old_end)
-            if current != edit.before_text:
+            if current != edit.before:
                 print(
                     f"[UNDO GUARD] span at {position} in {os.path.basename(file_path)} "
-                    f"holds {current!r}, expected {edit.before_text!r} — aborting"
+                    f"holds {current!r}, expected {edit.before!r} — aborting"
                 )
                 return False
             delta = self._doc_io.rewrite_macro_span(
-                file_path, position, old_end, edit.after_text,
-                expected_macro_name=edit.command_name,
+                file_path, position, old_end, edit.after,
+                expected_macro_name=edit_command_name(edit),
             )
             if delta is None:
                 return False
-        else:
-            if self._doc_io.insert_macro_at_position(file_path, position, edit.after_text) is None:
-                return False
-            delta = len(edit.after_text)
+            self.note_external_shift(file_path, position, delta)
+            return True
 
-        # The edited entry's own span, when the record is there to update.
-        # It isn't for an insertion -- the record is created afterwards,
-        # already carrying these coordinates.
-        if edit.after_text and self._entry_model.get_location_metadata(edit.entry_id) is not None:
-            self._entry_model.update_entry_coordinates(edit.entry_id, position, edit.absolute_end)
-            self._entry_model.mark_dirty(edit.entry_id)
-
-        if delta:
-            for shifted_id in self._entry_model.shift_coordinates_after(file_path, position, delta):
-                self._entry_model.mark_dirty(shifted_id)
-
+        if not self.place_macro(file_path, position, edit.after).ok:
+            return False
         return True
 
     def _roll_back_applied_edits(self, applied: list) -> None:
@@ -1165,7 +1375,7 @@ class IndexEditController(QObject):
             if not self._apply_macro_edit(edit.inverted()):
                 print(
                     "[UNDO GUARD] rollback of a partially applied command failed — "
-                    f"{os.path.basename(edit.file_path)} may need a resync"
+                    f"{os.path.basename(edit.locator.container)} may need a resync"
                 )
 
     def _recreate_entry(self, snapshot, command) -> None:
@@ -1180,20 +1390,22 @@ class IndexEditController(QObject):
         re-inserted -- so the restored record takes the resolved id, not
         the remembered one.
         """
-        record = dict(snapshot.record)
+        record = copy_record(snapshot.record)
 
         # Coordinates come from the edit that just re-wrote this entry's
         # macro, not from the snapshot: everything around it may have
         # moved between the deletion and this restore.
         for edit in command.edits:
-            if edit.entry_id == snapshot.entry_id and edit.after_text:
-                record["absolute_position"] = edit.absolute_position
-                record["absolute_end"] = edit.absolute_end
+            if edit.entry_id == snapshot.entry_id and edit.after:
+                record.locator = record.locator.with_hint(
+                    absolute_position=edit_position(edit),
+                    absolute_end=edit_end(edit),
+                )
                 break
 
         heading_id = self._resolve_heading_for_restore(snapshot)
         if heading_id is not None:
-            record["heading_id"] = heading_id
+            record.heading_id = heading_id
 
         self._entry_model.register_new_entry(record)
 
@@ -1234,11 +1446,11 @@ class IndexEditController(QObject):
         cache, the staging baseline and the tree. The macro text itself
         was already rewritten by this command's edits.
         """
-        record = self._entry_model._records.get(change.entry_id)
+        record = self._entry_model.get_record(change.entry_id)
         if record is None:
             return
 
-        record["heading_raw_text"] = change.after_heading
+        record.heading_raw = change.after_heading
         self._staging_model.register_original(change.entry_id, change.after_heading)
         self._entry_model.mark_dirty(change.entry_id)
         self._reconcile_heading_node(
@@ -1267,8 +1479,8 @@ class IndexEditController(QObject):
 
             if heading_id is not None:
                 remaining = [
-                    r for r in self._entry_model._records.values()
-                    if r.get("heading_id") == heading_id
+                    r for r in self._entry_model.all_records()
+                    if r.heading_id == heading_id
                 ]
                 if not remaining:
                     self._remove_orphaned_heading(self._tree.engine, heading_id, heading_text)
@@ -1309,7 +1521,7 @@ class IndexEditController(QObject):
         detach side — closes that gap.
         """
         engine = self._tree.engine
-        record = self._entry_model._records.get(entry_id)
+        record = self._entry_model.get_record(entry_id)
 
         # Both old_heading and new_heading may carry a "|encap" suffix
         # (new_heading always does when EntryModifierController
@@ -1348,24 +1560,29 @@ class IndexEditController(QObject):
         # new one. append_entry (rather than calling _insert_visual_node
         # directly) also re-sorts and re-expands the tree afterward so a
         # freshly created node is immediately visible in place.
-        parts = grammar.split_levels_clean(new_heading_clean)
+        parts = dialect.split_levels_clean(new_heading_clean)
         if parts and record:
             # suppress_transaction=True: record already exists (it's being
             # re-attached after a rename or a discard revert, not inserted
             # for the first time) -- see append_entry's docstring for why
             # this must not stage a duplicate "new entry" DB transaction.
-            self._tree.append_entry(parts, [record], suppress_transaction=True)
+            # The tree still stores raw payload dicts on its nodes, so it is
+            # handed a row rather than the record. Phase 4 moves the tree and
+            # this conversion goes with it.
+            self._tree.append_entry(
+                parts, [row_from_reference(record)], suppress_transaction=True
+            )
 
         # Update the reference record's heading_id in the model cache
         if record:
-            record["heading_id"] = new_heading_id
+            record.heading_id = new_heading_id
 
         # --- Check whether old heading is now orphaned ---
         old_heading_id = self._find_heading_id_by_text(engine, old_heading_clean)
         if old_heading_id is not None:
             remaining = [
-                r for r in self._entry_model._records.values()
-                if r.get("heading_id") == old_heading_id
+                r for r in self._entry_model.all_records()
+                if r.heading_id == old_heading_id
             ]
             if not remaining:
                 self._remove_orphaned_heading(engine, old_heading_id, old_heading_clean)
@@ -1396,7 +1613,7 @@ class IndexEditController(QObject):
         skipping this reassignment for closers entirely.
         """
         engine = self._tree.engine
-        record = self._entry_model._records.get(entry_id)
+        record = self._entry_model.get_record(entry_id)
         if record is None:
             return
 
@@ -1406,13 +1623,13 @@ class IndexEditController(QObject):
         new_heading_id = self._find_heading_id_by_text(engine, new_heading_clean)
         if new_heading_id is None:
             new_heading_id = self._create_heading_in_engine(engine, new_heading_clean)
-        record["heading_id"] = new_heading_id
+        record.heading_id = new_heading_id
 
         old_heading_id = self._find_heading_id_by_text(engine, old_heading_clean)
         if old_heading_id is not None:
             remaining = [
-                r for r in self._entry_model._records.values()
-                if r.get("heading_id") == old_heading_id
+                r for r in self._entry_model.all_records()
+                if r.heading_id == old_heading_id
             ]
             if not remaining:
                 self._remove_orphaned_heading(engine, old_heading_id, old_heading_clean)
@@ -1461,7 +1678,7 @@ class IndexEditController(QObject):
         ]
 
         # Remove the tree node — find it by ToolTipRole token match
-        parts = grammar.split_levels_clean(heading_text)
+        parts = dialect.split_levels_clean(heading_text)
         if parts:
             self._remove_tree_node_by_path(parts)
 
@@ -1478,7 +1695,7 @@ class IndexEditController(QObject):
         confirmed no records remain under that heading_id, via
         _remove_orphaned_heading.
         """
-        parts = grammar.split_levels_clean(heading_text)
+        parts = dialect.split_levels_clean(heading_text)
         if not parts:
             return
 
@@ -1498,12 +1715,14 @@ class IndexEditController(QObject):
 
         remaining = [
             r for r in stored
-            if int(r.get("unique_id_number") or r.get("id") or 0) != entry_id
+            if _ref_entry_id(r) != entry_id
         ]
         sibling_col1.setData(remaining, role_uid)
-        sibling_col1.setText(
-            " ".join(f"[{r['unique_id_number']}]" for r in remaining) if remaining else ""
-        )
+        # **One answer, not two.** This string was composed here and inside
+        # the tree; step 9b made render_reference_column the single place it
+        # is built, which is what lets a host that supplies no per-reference
+        # label have its references numbered instead.
+        sibling_col1.setText(self._tree.render_reference_column(remaining))
 
     def _find_tree_node_by_path(self, parts: list[str]) -> QStandardItem | None:
         """

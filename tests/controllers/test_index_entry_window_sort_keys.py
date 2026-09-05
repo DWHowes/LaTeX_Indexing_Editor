@@ -19,7 +19,8 @@ The rules these tests hold:
 import pytest
 from PySide6.QtCore import QSettings
 
-from views.latex_index_window import LatexIndexWindow, SortKeyLineEdit
+from bookindexcore.ui.entry_window import SortKeyLineEdit
+from views.latex_index_window import LatexIndexWindow
 
 MAIN, SUB1, SUB2 = 0, 1, 2
 
@@ -266,13 +267,14 @@ class TestReset:
 
 class TestSortKeyLineEdit:
     def test_it_is_the_type_the_window_uses(self, window):
+        """
+        The shared one, since step 11d. What a sort field does *once it is
+        owned* is tested in `bookindexcore`, against a dialect that is not
+        LaTeX; what this application still asserts is that it is the widget in
+        use here, and that it follows this dialect's reading of formatting.
+        """
         assert all(isinstance(f, SortKeyLineEdit) for f in window.sort_entries)
 
-    def test_follow_is_a_no_op_once_owned(self):
-        field = SortKeyLineEdit()
-        field.is_user_owned = True
-        field.setText("mine")
-
-        field.follow(r"\textit{something else}")
-
-        assert field.text() == "mine"
+    def test_it_follows_this_dialects_reading_of_formatting(self, window):
+        window.main_entry.setText(r"\textit{The Quality of Mercy}")
+        assert window.sort_entries[MAIN].text() == "The Quality of Mercy"

@@ -322,7 +322,8 @@ class TestCrossReferences:
 
     def test_spec_round_trip(self):
         for encap in ("see{X}", "seealso{Main!Sub}", r"see{\textit{X}}"):
-            assert grammar.parse_encap_xref(encap).to_encap() == encap
+            spec = grammar.parse_encap_xref(encap)
+            assert grammar.build_encap_xref(spec.kind, spec.target) == encap
 
     def test_build_xref_macro(self):
         assert grammar.build_xref_macro("Main", "see", "Other") == r"\index{Main|see{Other}}"
@@ -446,6 +447,73 @@ class TestBuildRangeEncap:
         assert grammar.parse_macro(tag.to_macro()).range_role == "open"
 
 
+class TestNoteLocators:
+    r"""
+    ``\index{X|fn{4}}`` -- the one thing LaTeX can do here that neither
+    page-layout host can, and the reason ``supports_note_locators`` is a
+    declaration rather than an assumption.
+    """
+
+    def test_a_note_locator_parses(self):
+        found = grammar.parse_note_locator("fn{4}")
+        assert found is not None
+        assert (found.macro, found.note, found.range_role) == ("fn", "4", None)
+
+    def test_a_note_locator_that_also_opens_a_range(self):
+        """
+        The two are one string in the file, so a caller that read the note and
+        forgot the marker would write back a range with one end.
+        """
+        found = grammar.parse_note_locator("(fn{4}")
+        assert (found.note, found.range_role) == ("4", "open")
+
+    def test_a_cross_reference_is_not_one(self):
+        """Identical shape, different thing. Membership in the project's list
+        of note macros is what identifies a note locator, not the shape."""
+        assert grammar.parse_note_locator("see{Cats}") is None
+        assert grammar.parse_note_locator("seealso{Cats!domestic}") is None
+
+    def test_an_ordinary_page_style_is_not_one(self):
+        assert grammar.parse_note_locator("textbf") is None
+        assert grammar.parse_note_locator("(textbf") is None
+
+    def test_a_project_macro_taking_an_argument_is_not_one_unless_declared(self):
+        r"""A project's ``\toacite{...}`` has the shape and is a page style."""
+        assert grammar.parse_note_locator("toacite{5}") is None
+        assert grammar.parse_note_locator(
+            "toacite{5}", note_values=("fn", "toacite")) is not None
+
+    @pytest.mark.parametrize("encap", ["", None, "   ", "fn{", "fn}",
+                                       "fn{4}{5}", "{4}"])
+    def test_it_is_total(self, encap):
+        assert grammar.parse_note_locator(encap) is None
+
+    def test_it_round_trips(self):
+        for encap in ("fn{4}", "(fn{4}", ")fn{12}"):
+            found = grammar.parse_note_locator(encap)
+            assert grammar.build_note_locator(
+                found.note, found.macro, found.range_role) == encap
+
+    def test_an_empty_note_yields_no_encap_rather_than_an_empty_macro(self):
+        """
+        ``fn{}`` renders ``123n`` and files as a page style nobody defined, so
+        the honest output for "no note" is no encap at all.
+        """
+        assert grammar.build_note_locator("") == ""
+        assert grammar.build_note_locator("", range_role="open") == "("
+
+    def test_it_serializes_into_a_whole_tag(self):
+        tag = grammar.IndexTag(("Smith, John",), grammar.build_note_locator("4"))
+        assert tag.to_macro() == r"\index{Smith, John|fn{4}}"
+        assert grammar.parse_note_locator(
+            grammar.parse_macro(tag.to_macro()).encap).note == "4"
+
+    def test_the_worked_example_is_what_a_reader_sees(self):
+        """For the prenote's formatting legend: the printed form, not the
+        markup that produced it."""
+        assert grammar.note_locator_example() == "123n4"
+
+
 class TestMacroPattern:
     def test_matches_plain_index(self):
         assert grammar.MACRO_PATTERN.search(r"text \index{A}").group(1) == "index"
@@ -527,7 +595,24 @@ class TestParseMacro:
         assert grammar.parse_macro("\\index {Main}").levels == ("Main",)
 
     def test_intervening_text_before_brace_rejected(self):
-        assert grammar.parse_macro(r"\index[opt]{Main}") is None
+        assert grammar.parse_macro(r"\index Main{X}") is None
+
+    def test_optional_argument_is_the_index_class(self):
+        """
+        This used to be rejected outright, on the reading that an optional
+        argument was intervening text. It is imakeidx's index selector, and
+        rejecting it meant an entry in a named index could not be parsed --
+        so it could not be renamed or edited either.
+        """
+        tag = grammar.parse_macro(r"\index[names]{Kant, Immanuel}")
+        assert tag is not None
+        assert tag.index_class == "names"
+        assert tag.levels == ("Kant, Immanuel",)
+
+    def test_comment_between_command_and_optional_argument(self):
+        tag = grammar.parse_macro("\\index % which index?\n  [names]{Kant}")
+        assert tag.index_class == "names"
+        assert tag.levels == ("Kant",)
 
 
 class TestIndexTag:
@@ -595,6 +680,8 @@ class TestIndexTag:
         r"\index{Main!Sub|bold}",
         r"\index{Main|see{Other}}",
         r"\index{\textit{Main}!Sub|(}",
+        r"\index[names]{Kant, Immanuel}",
+        r"\index[authorities]{Donoghue v Stevenson!facts|(textbf}",
     ])
     def test_macro_round_trip(self, macro):
         assert grammar.parse_macro(macro).to_macro() == macro
@@ -619,6 +706,111 @@ class TestBuilders:
 
     def test_build_tag_empty_levels(self):
         assert grammar.build_tag([]) == r"\index{}"
+
+    def test_build_macro_with_index_class(self):
+        assert grammar.build_macro("Kant", index_class="names") == r"\index[names]{Kant}"
+
+    def test_build_tag_with_index_class(self):
+        assert grammar.build_tag(["A", "B"], "bold", "isidx", "names") == r"\isidx[names]{A!B|bold}"
+
+
+class TestIndexClasses:
+    r"""
+    imakeidx's ``\index[name]{...}``: which of a project's named indexes an
+    entry belongs to. Legal work needs this routinely -- a Subject Index and
+    a Table of Authorities in one volume are two indexes, not one index with
+    a naming convention.
+    """
+
+    def test_absent_bracket_is_the_default_index(self):
+        assert grammar.index_class_of(r"\index{Kant}") == ""
+
+    def test_bracket_is_read(self):
+        assert grammar.index_class_of(r"\index[names]{Kant}") == "names"
+
+    def test_whitespace_around_the_name_is_not_part_of_it(self):
+        assert grammar.index_class_of(r"\index[ names ]{Kant}") == "names"
+
+    def test_nested_brackets_are_read_whole(self):
+        assert grammar.index_class_of(r"\index[a[b]]{Kant}") == "a[b]"
+
+    def test_unterminated_bracket_is_not_an_optional_argument(self):
+        assert grammar.index_class_of(r"\index[names{Kant}") == ""
+
+    def test_text_that_is_not_a_macro_reports_the_default_index(self):
+        assert grammar.index_class_of("Kant, Immanuel") == ""
+        assert grammar.index_class_of("") == ""
+
+    def test_filing_adds_the_bracket(self):
+        assert grammar.with_index_class(r"\index{Kant}", "names") == r"\index[names]{Kant}"
+
+    def test_refiling_replaces_rather_than_accumulates(self):
+        once = grammar.with_index_class(r"\index{Kant}", "names")
+        assert grammar.with_index_class(once, "subject") == r"\index[subject]{Kant}"
+
+    def test_unfiling_removes_the_bracket(self):
+        assert grammar.with_index_class(r"\index[names]{Kant}", "") == r"\index{Kant}"
+
+    def test_unfiling_an_unfiled_macro_changes_nothing(self):
+        assert grammar.with_index_class(r"\index{Kant}", "") == r"\index{Kant}"
+
+    def test_the_body_is_untouched_by_filing(self):
+        filed = grammar.with_index_class(r"\index{Widgets@\textbf{Widgets}!Sub|(bf}", "names")
+        assert filed == r"\index[names]{Widgets@\textbf{Widgets}!Sub|(bf}"
+
+    def test_a_non_macro_is_returned_unchanged(self):
+        assert grammar.with_index_class("Kant, Immanuel", "names") == "Kant, Immanuel"
+
+    def test_custom_command_keeps_its_name(self):
+        pattern = grammar.build_macro_pattern(["isidx"])
+        assert grammar.with_index_class(r"\isidx{Kant}", "names", pattern) == r"\isidx[names]{Kant}"
+
+    def test_the_class_is_not_part_of_the_body(self):
+        """
+        ``to_body`` feeds ``heading_raw_text``, which is keyed on and
+        compared against. A class leaking into it would make the same term
+        in two indexes look like two different headings.
+        """
+        tag = grammar.parse_macro(r"\index[names]{Kant!early}")
+        assert tag.to_body() == "Kant!early"
+        assert tag.index_class == "names"
+
+    def test_with_index_class_on_the_tag(self):
+        tag = grammar.parse_body("Kant").with_index_class("names")
+        assert tag.to_macro() == r"\index[names]{Kant}"
+
+
+class TestMacroBodyStart:
+    """
+    The write guard's question. It used to be asked as ``startswith("\\index{")``,
+    which answers "no" for every entry in a named index -- and a guard that
+    answers no aborts the rewrite, so those entries silently could not be
+    edited at all.
+    """
+
+    def test_plain_macro(self):
+        assert grammar.macro_body_start(r"\index{Kant}") == len(r"\index")
+
+    def test_macro_with_index_class(self):
+        assert grammar.macro_body_start(r"\index[names]{Kant}") == len(r"\index[names]")
+
+    def test_custom_command(self):
+        assert grammar.macro_body_start(r"\isidx[names]{Kant}", "isidx") == len(r"\isidx[names]")
+
+    def test_wrong_command_is_rejected(self):
+        assert grammar.macro_body_start(r"\isidx{Kant}", "index") == -1
+
+    def test_a_custom_command_is_not_admitted_by_default(self):
+        """
+        Unlike build_macro_pattern, which always admits plain \\index too.
+        Overwriting an \\isidx span with an \\index macro is exactly the
+        confusion this guard exists to prevent.
+        """
+        assert grammar.macro_body_start(r"\index{Kant}", "isidx") == -1
+
+    def test_not_a_macro(self):
+        assert grammar.macro_body_start("Kant") == -1
+        assert grammar.macro_body_start("") == -1
 
 
 class TestStripStringMacro:

@@ -14,10 +14,14 @@ modal UI machinery" convention.
 import pytest
 from PySide6.QtCore import QSettings
 
+from models.check_index_prefs import DISABLED_RULES_KEY, CheckIndexPrefs
 from models.index_prefs_config_model import IndexPrefsConfigModel
-from models.theme_config_model import ThemeConfigModel
+from models.presentation_prefs import PresentationPrefs
+from models.sort_prefs import SortPrefs
+from models.toa_prefs import ToaPrefs
+from bookindexcore.ui.theme.config_model import ThemeConfigModel
 from models.preferences_persistence import PreferencesPersistence
-from controllers.theme_config_controller import ThemeConfigController
+from bookindexcore.ui.theme.controller import ThemeConfigController
 from controllers.index_prefs_config_controller import IndexPrefsConfigController
 
 
@@ -30,7 +34,18 @@ def _isolated_qsettings(tmp_path, qtbot):
 def _controller(qtbot):
     prefs = PreferencesPersistence()
     theme_controller = ThemeConfigController(ThemeConfigModel(), prefs)
-    controller = IndexPrefsConfigController(IndexPrefsConfigModel(), prefs, theme_controller)
+    # The four shared groups are given their real QSettings-backed stores,
+    # so that what these tests exercise is the routing the application does
+    # and not a dict standing in for it.
+    controller = IndexPrefsConfigController(
+        IndexPrefsConfigModel(), prefs, theme_controller,
+        check_index_prefs=CheckIndexPrefs(
+            global_store=prefs.global_store("CheckIndexPrefs/global")),
+        sort_prefs=SortPrefs(global_store=prefs.global_store("SortPrefs/global")),
+        presentation_prefs=PresentationPrefs(
+            global_store=prefs.global_store("PresentationPrefs/global")),
+        toa_prefs=ToaPrefs(global_store=prefs.global_store("ToaPrefs/global")),
+    )
     return controller, prefs
 
 
@@ -94,3 +109,166 @@ class TestHandleModelUpdate:
 
         assert controller._theme_controller.model.get_dark().window == "#NEWDARK"
         assert controller._theme_controller.model.get_light().window == "#NEWLIGHT"
+
+
+class TestOnePayloadThreeDestinations:
+    """
+    The shared Check Index and Sorting pages live in this window, so one OK
+    writes several settings groups. Each takes the keys it owns from the
+    merged payload -- ``ScopedSettings.save`` and ``update_data`` both already
+    did that -- so nothing in the controller splits the dictionary.
+    """
+
+    def test_each_group_takes_its_own_keys(self, qtbot):
+        controller, _prefs = _controller(qtbot)
+
+        controller._handle_model_update({
+            "fmt_page_delimiter": "; ",                  # LaTeX
+            DISABLED_RULES_KEY: ["headings.case"],       # Check Index
+            "evaluate_numbers": True,                    # Sorting
+            "passim_enabled": True,                      # Presentation
+            "authorities_citation_system": "oscola",     # Authorities
+        }, {}, {})
+
+        assert controller._model.serialize_to_dict()["fmt_page_delimiter"] == "; "
+        assert controller._check_index_prefs.load()[DISABLED_RULES_KEY] == [
+            "headings.case"]
+        assert controller._sort_prefs.load()["evaluate_numbers"] is True
+        assert controller._presentation_prefs.style().passim_enabled is True
+        assert controller._toa_prefs.system_name() == "oscola"
+
+    def test_the_authorities_page_is_read_back_as_well_as_written(
+            self, qtbot, monkeypatch):
+        """
+        **The defect this pair exists for**, and the half that was missing:
+        the page was collected and its keys reached no store, so an indexer's
+        citation standard went nowhere *and* the page showed its construction
+        default on the next open, which was then written over the choice.
+
+        Asserting the save alone would not have caught it. The window is
+        opened with a stand-in dialog and what it was *told* is asserted,
+        because a store that is written and never read back looks exactly
+        like one that works.
+        """
+        controller, _prefs = _controller(qtbot)
+        controller._handle_model_update(
+            {"authorities_citation_system": "mcgill"}, {}, {})
+
+        told = {}
+
+        class _Signal:
+            def connect(self, slot):
+                pass
+
+        class _Dialog:
+            def __init__(self, parent=None):
+                pass
+
+            def __getattr__(self, name):
+                # Every other call the flow makes on the real dialog, which
+                # this test is not about. Signals are attributes that are
+                # `connect`ed rather than called, so the stand-in has to
+                # answer both shapes.
+                if name.startswith("sig_"):
+                    return _Signal()
+                return lambda *args, **kwargs: None
+
+            def populate_authorities_fields(self, values):
+                told.update(values)
+
+            def exec(self):
+                return 0
+
+        monkeypatch.setattr(
+            "controllers.index_prefs_config_controller.IndexPrefsConfigDialog",
+            _Dialog)
+        controller.execute_configuration_flow()
+
+        assert told["authorities_citation_system"] == "mcgill"
+
+    def test_the_shared_keys_do_not_leak_into_the_latex_globals(self, qtbot):
+        """
+        `IndexPrefs/global` is filtered against `IndexPrefsData` on the way
+        back in, so anything else written there is stored and never read.
+        The model's own serialisation goes in rather than the raw payload.
+        """
+        controller, prefs = _controller(qtbot)
+
+        controller._handle_model_update(
+            {"fmt_page_delimiter": "; ", "evaluate_numbers": True}, {}, {})
+
+        prefs.settings.beginGroup("IndexPrefs/global")
+        try:
+            stored = set(prefs.settings.childKeys())
+        finally:
+            prefs.settings.endGroup()
+        assert "evaluate_numbers" not in stored
+        assert "fmt_page_delimiter" in stored
+
+    def test_the_shared_groups_follow_the_open_project(self, qtbot, fresh_persistence):
+        controller, _prefs = _controller(qtbot)
+        controller._check_index_prefs.open_project(fresh_persistence)
+        controller._sort_prefs.open_project(fresh_persistence)
+        controller._presentation_prefs.open_project(fresh_persistence)
+
+        controller._handle_model_update({
+            DISABLED_RULES_KEY: ["headings.case"],
+            "evaluate_numbers": True,
+            "passim_enabled": True,
+        }, {}, {})
+
+        metadata = fresh_persistence.get_all_project_metadata()
+        # Comma-separated, and this line used to pin the Python repr that
+        # `ScopedSettings._encode` wrote for every list -- which `coerce_like`
+        # then read back as `["['headings.case']"]`, one item with a bracket
+        # and a quote welded to each end. The round-trip below is what the
+        # assertion was reaching for and is now checked directly, because the
+        # stored spelling is the store's business and the value coming back
+        # intact is not.
+        assert metadata["pref_" + DISABLED_RULES_KEY] == "headings.case"
+        assert metadata["pref_evaluate_numbers"] == "True"
+        assert controller._check_index_prefs.load()[DISABLED_RULES_KEY] == [
+            "headings.case"]
+
+
+class TestTheNameDatabaseMoving:
+    """
+    A relocation is not a preference being saved.
+
+    It has already happened by the time it arrives — the file is on disk in its
+    new place — so it does not travel in the payload and it does not wait for
+    OK. All this controller does is pass it on, because the one thing that has
+    to happen next is the *application's*: something is holding a sqlite
+    connection to the path that used to exist, and sqlite will keep writing to
+    a deleted file quite happily.
+    """
+
+    def test_the_relocation_reaches_the_application(self, qtbot):
+        seen = []
+        controller, _prefs = _controller(qtbot)
+        controller._on_name_database_moved = seen.append
+
+        controller._handle_name_database_relocated(r"D:\somewhere\names.db")
+
+        assert seen == [r"D:\somewhere\names.db"]
+
+    def test_an_application_that_did_not_ask_is_not_an_error(self, qtbot):
+        """
+        Optional, like the General callback beside it, so this controller stays
+        constructible on its own.
+        """
+        controller, _prefs = _controller(qtbot)
+        controller._handle_name_database_relocated("anywhere")   # must not raise
+
+    def test_nothing_about_the_location_is_stored_here(self, qtbot):
+        """
+        Where the database lives is recorded by `bookindexcore` in a pointer
+        every editor reads. A copy in this application's settings would be a
+        second answer that can disagree with it — which is the fault the shared
+        location was introduced to remove.
+        """
+        controller, prefs = _controller(qtbot)
+        controller._handle_name_database_relocated(r"D:\somewhere\names.db")
+
+        prefs.settings.sync()
+        assert not [k for k in prefs.settings.allKeys() if "name_database" in k]

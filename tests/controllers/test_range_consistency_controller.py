@@ -157,8 +157,8 @@ class TestApplyFixes:
         assert (applied, skipped, failed) == (1, 0, 0)
         # first_close_id=2, second_open_id=3 get deleted; first_open_id=1 and second_close_id=4 survive and get relinked.
         assert set(index_edit_ctrl.deleted_ids) == {2, 3}
-        assert entry_model._records[1]["range_partner_id"] == 4
-        assert entry_model._records[4]["range_partner_id"] == 1
+        assert entry_model.get_record(1).range_partner_id == 4
+        assert entry_model.get_record(4).range_partner_id == 1
 
     def test_already_consumed_entry_is_skipped_not_attempted(self, qtbot):
         controller, entry_model, index_edit_ctrl = _controller(qtbot)

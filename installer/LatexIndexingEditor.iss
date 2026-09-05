@@ -34,7 +34,7 @@ SolidCompression=yes
 WizardStyle=modern
 ; The installer's own icon. The uninstall entry points at the exe, which
 ; carries the same icon embedded by PyInstaller.
-SetupIconFile=..\icons\lidx.ico
+SetupIconFile=..\icons\lix.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesInstallIn64BitMode=x64
 

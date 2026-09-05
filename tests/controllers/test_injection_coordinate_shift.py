@@ -24,11 +24,13 @@ text -- see LatexIndexController._attach_span_coordinates.
 """
 import re
 
+from models.latex_record_mapping import end_of, position_of, reference_from_row
+
 import pytest
 
 from models.entry_modifier_model import EntryModifierModel
-from models.session_backup_manager import SessionBackupManager
-from models.text_sanitizer import TextSanitizer
+from bookindexcore.session.backup import SessionBackupManager
+from bookindexcore.util.text import TextSanitizer
 from controllers.document_io_controller import DocumentIOController
 
 
@@ -46,12 +48,14 @@ def _records_for(text: str, file_path: str) -> dict:
     """One record per \\index macro in text, coordinates as found."""
     records = {}
     for uid, match in enumerate(re.finditer(r"\\index\{[^}]*\}", text), start=1):
-        records[uid] = {
+        records[uid] = reference_from_row({
+            "unique_id_number": uid,
+            "uid": f"{file_path}:{uid}",
             "file_path": file_path,
             "absolute_position": match.start(),
             "absolute_end": match.end(),
             "heading_raw_text": match.group(0),
-        }
+        })
     return records
 
 
@@ -86,20 +90,20 @@ def _assert_every_span_still_resolves(model, path):
     """
     text = path.read_text(encoding="utf-8")
     for uid, record in model._records.items():
-        span = text[record["absolute_position"]:record["absolute_end"]]
-        assert span == record["heading_raw_text"], (
-            f"entry {uid} span drifted: expected {record['heading_raw_text']!r}, got {span!r}"
+        span = text[position_of(record):end_of(record)]
+        assert span == record.heading_raw, (
+            f"entry {uid} span drifted: expected {record.heading_raw!r}, got {span!r}"
         )
 
 
 class TestSettingsInjection:
     def test_entries_after_the_preamble_block_are_shifted(self, wired):
         doc_io, model, path = wired
-        before = model._records[1]["absolute_position"]
+        before = model.get_record(1).locator.hint["absolute_position"]
 
         assert doc_io.inject_latex_settings(str(path), "PREAMBLE", "PRINTINDEX") is True
 
-        assert model._records[1]["absolute_position"] > before
+        assert model.get_record(1).locator.hint["absolute_position"] > before
         _assert_every_span_still_resolves(model, path)
 
     def test_both_blocks_are_accounted_for(self, wired):
@@ -109,13 +113,13 @@ class TestSettingsInjection:
         second insertion was recorded, not just the preamble one.
         """
         doc_io, model, path = wired
-        first_before = model._records[1]["absolute_position"]
-        second_before = model._records[2]["absolute_position"]
+        first_before = model.get_record(1).locator.hint["absolute_position"]
+        second_before = model.get_record(2).locator.hint["absolute_position"]
 
         doc_io.inject_latex_settings(str(path), "PREAMBLE", "PRINTINDEX")
 
-        assert model._records[1]["absolute_position"] - first_before > 0
-        assert model._records[2]["absolute_position"] - second_before > 0
+        assert model.get_record(1).locator.hint["absolute_position"] - first_before > 0
+        assert model.get_record(2).locator.hint["absolute_position"] - second_before > 0
         _assert_every_span_still_resolves(model, path)
 
     def test_shifted_entries_are_marked_dirty_for_the_next_save(self, wired):
@@ -141,11 +145,11 @@ class TestSettingsInjection:
     def test_a_shorter_re_injection_moves_entries_back(self, wired):
         doc_io, model, path = wired
         doc_io.inject_latex_settings(str(path), "A" * 200, "PRINTINDEX")
-        after_long = model._records[1]["absolute_position"]
+        after_long = model.get_record(1).locator.hint["absolute_position"]
 
         doc_io.inject_latex_settings(str(path), "A", "PRINTINDEX")
 
-        assert model._records[1]["absolute_position"] < after_long
+        assert model.get_record(1).locator.hint["absolute_position"] < after_long
         _assert_every_span_still_resolves(model, path)
 
     def test_a_failed_injection_shifts_nothing(self, tmp_path):
@@ -161,7 +165,7 @@ class TestSettingsInjection:
         doc_io.content_shifted.connect(
             lambda fp, edits: [model.shift_coordinates_after(fp, a, d) for a, d in edits]
         )
-        before = dict(model._records[1])
+        before = model._records[1].evolve()
 
         assert doc_io.inject_latex_settings(str(path), "PREAMBLE", "PRINTINDEX") is False
 
@@ -171,11 +175,11 @@ class TestSettingsInjection:
 class TestOtherInjectors:
     def test_custom_commands_injection_shifts_coordinates(self, wired):
         doc_io, model, path = wired
-        before = model._records[1]["absolute_position"]
+        before = model.get_record(1).locator.hint["absolute_position"]
 
         assert doc_io.inject_project_commands(str(path), "\\newcommand{\\x}{y}") is True
 
-        assert model._records[1]["absolute_position"] > before
+        assert model.get_record(1).locator.hint["absolute_position"] > before
         _assert_every_span_still_resolves(model, path)
 
     def test_head_note_injection_shifts_coordinates(self, wired):
@@ -185,7 +189,7 @@ class TestOtherInjectors:
         every span must still resolve.
         """
         doc_io, model, path = wired
-        before = dict(model._records[1])
+        before = model._records[1].evolve()
 
         assert doc_io.inject_head_note(str(path), "\\indexprologue{Note}") is True
 
@@ -195,11 +199,11 @@ class TestOtherInjectors:
     def test_cross_references_injection_shifts_coordinates(self, wired):
         """Anchors just after \\begin{document}, i.e. before both entries."""
         doc_io, model, path = wired
-        before = model._records[1]["absolute_position"]
+        before = model.get_record(1).locator.hint["absolute_position"]
 
         assert doc_io.inject_cross_references(str(path)) is True
 
-        assert model._records[1]["absolute_position"] > before
+        assert model.get_record(1).locator.hint["absolute_position"] > before
         _assert_every_span_still_resolves(model, path)
 
     def test_stacked_injections_all_compose(self, wired):
@@ -229,7 +233,7 @@ class TestRewriteStillLandsAfterInjection:
         record = model._records[1]
 
         delta = doc_io.rewrite_macro_span(
-            str(path), record["absolute_position"], record["absolute_end"], r"\index{Renamed}"
+            str(path), position_of(record), end_of(record), r"\index{Renamed}"
         )
 
         assert delta is not None, "rewrite_macro_span rejected the post-injection span"
