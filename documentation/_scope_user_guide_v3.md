@@ -1,6 +1,12 @@
 # User Guide V3: the last thing Phase 6a owes
 
-**Scope, 5 September 2026. AWAITING APPROVAL.** `main` at `42fc8ec`.
+**Scope, 5 September 2026. DONE, all three sittings, 5 September 2026**
+(`f990a8a`, `d277e20`, `7cdd35d`). `main` was at `42fc8ec` when this was
+written.
+
+**2026-09-08**: the edited file was left named `User Guide V2.docx` after
+all three sittings landed in it; renamed to `User Guide V3.docx`, and the
+stale pre-V2 `User Guide.docx` (no V3 content) moved to `_archive/`.
 
 ## What is there now
 
