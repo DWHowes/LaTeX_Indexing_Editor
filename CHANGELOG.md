@@ -49,7 +49,7 @@ behind is still there and is yours to delete.**
 in the repository root on every run. They anchor it now, through an
 `anchored_backup_manager` helper in `tests/conftest.py`.
 
-Suite: **1777 passing**, up from 1761. The new `tests/unit/test_session_log.py`
+Suite: **1786 passing**, up from 1761. The new `tests/unit/test_session_log.py`
 carries the positive control the defect would have failed on 5 September:
 launch from an unrelated directory, and assert nothing is written there.
 
