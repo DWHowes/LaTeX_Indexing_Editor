@@ -33,6 +33,7 @@ from models.check_index_prefs import (
 from models.entry_modifier_model import EntryModifierModel
 from models.latex_index_parser import LatexIndexParser
 from views.index_tree_view import IndexTreeView
+from conftest import anchored_backup_manager
 
 
 class _FakeEngine:
@@ -74,7 +75,7 @@ def _stack(tmp_path, qtbot, tex, prefs=None):
     entry_model = EntryModifierModel(persistence=None, staging_model=staging)
     tabs = QTabWidget()
     qtbot.addWidget(tabs)
-    doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), tabs, None)
+    doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), tabs, None)
     backend = LatexTextBackend(doc_io)
     # Built only so the stack matches the running application's; nothing here
     # writes, which is the whole character of this tool.

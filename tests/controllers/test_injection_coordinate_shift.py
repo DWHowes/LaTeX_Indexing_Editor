@@ -32,6 +32,7 @@ from models.entry_modifier_model import EntryModifierModel
 from bookindexcore.session.backup import SessionBackupManager
 from bookindexcore.util.text import TextSanitizer
 from controllers.document_io_controller import DocumentIOController
+from conftest import anchored_backup_manager
 
 
 BASE_DOC = (
@@ -69,7 +70,7 @@ def wired(tmp_path):
     path = tmp_path / "base.tex"
     path.write_text(BASE_DOC, encoding="utf-8")
 
-    doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), None, None)
+    doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), None, None)
     model = EntryModifierModel(persistence=None)
     model._records = _records_for(BASE_DOC, str(path))
 
@@ -159,7 +160,7 @@ class TestSettingsInjection:
         """
         path = tmp_path / "base.tex"
         path.write_text("plain text \\index{Alpha}\n", encoding="utf-8")
-        doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), None, None)
+        doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), None, None)
         model = EntryModifierModel(persistence=None)
         model._records = _records_for(path.read_text(encoding="utf-8"), str(path))
         doc_io.content_shifted.connect(
@@ -247,7 +248,7 @@ class TestEditListShape:
         left behind, so a consumer must apply them in order. A re-injection
         records the two strips before the two inserts.
         """
-        doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), None, None)
+        doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), None, None)
         first_pass: list = []
         text = doc_io._splice_generated_blocks(BASE_DOC, "PREAMBLE", "PRINTINDEX", first_pass)
 
@@ -258,7 +259,7 @@ class TestEditListShape:
         assert [delta > 0 for _anchor, delta in second_pass] == [False, False, True, True]
 
     def test_no_edits_are_reported_when_the_splice_fails(self):
-        doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), None, None)
+        doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), None, None)
         edits: list = []
 
         assert doc_io._splice_generated_blocks("no anchors here", "P", "I", edits) is None

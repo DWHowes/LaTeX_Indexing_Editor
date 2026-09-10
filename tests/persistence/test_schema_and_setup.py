@@ -5,6 +5,7 @@ configure_project_database_path, update_active_database_connection,
 reset_to_default_state.
 """
 import sqlite3
+from pathlib import Path
 
 from bookindexcore.persistence import CORE_SCHEMA_VERSION, HOST_VERSION_KEY
 
@@ -133,14 +134,26 @@ def test_reset_to_default_state_clears_db_path_and_project_name(fresh_persistenc
     assert fresh_persistence._pending_project_name == "Untitled LaTeX Project"
 
 
-def test_static_helpers():
-    from pathlib import Path
+def test_an_unanchored_persistence_creates_no_database(tmp_path, monkeypatch):
+    """
+    ***What the two static helpers this replaces were for.***
 
-    home = FileTreePersistence.get_system_home_directory()
-    assert home == str(Path.home())
+    They resolved `Path.home()/workspace_index_data.db` so `main.py` had
+    something to construct this class with before a project existed, and the
+    constructor then created and migrated a full schema into the user's home
+    directory on every launch. Nothing read it: the same instance is repointed
+    by `configure_project_database_path` as soon as a project opens.
 
-    resolved = FileTreePersistence.resolve_workspace_database_path("/some/root")
-    assert resolved == str(Path("/some/root") / "workspace_index_data.db")
+    An empty path is the state the core already supported, and this asserts
+    the part that makes it usable -- that nothing is written anywhere.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+    persistence = FileTreePersistence(db_path="")
+
+    assert persistence.db_path == ""
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_get_active_database_path_and_model(fresh_persistence):

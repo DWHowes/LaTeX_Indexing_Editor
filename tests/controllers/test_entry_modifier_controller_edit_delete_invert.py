@@ -37,6 +37,8 @@ from views.entry_modifier_list import (
     EntryModifierList, COL_MAIN_DISP, COL_SUB1_DISP, COL_SUB2_DISP,
 )
 
+from conftest import anchored_backup_manager
+
 
 def _parse_entries(tmp_path, tex_content, filename="chapter.tex"):
     path = tmp_path / filename
@@ -111,7 +113,7 @@ def _build_stack(tmp_path, qtbot, tex_content, heading_raw_text="Main"):
 
     tabs = QTabWidget()
     qtbot.addWidget(tabs)
-    doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), tabs, None)
+    doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), tabs, None)
 
     index_edit_ctrl = IndexEditController(
         tree_view=tree, doc_io=doc_io, entry_modifier_model=entry_model, staging_model=staging_model,
@@ -312,7 +314,7 @@ class TestInvertHeadingsForSelected:
 
         tabs = QTabWidget()
         qtbot.addWidget(tabs)
-        doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), tabs, None)
+        doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), tabs, None)
         index_edit_ctrl = IndexEditController(
             tree_view=tree, doc_io=doc_io, entry_modifier_model=entry_model, staging_model=staging_model,
         )

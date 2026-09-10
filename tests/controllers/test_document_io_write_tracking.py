@@ -33,10 +33,11 @@ from bookindexcore.session.backup import SessionBackupManager
 from bookindexcore.util.text import TextSanitizer
 from controllers.document_io_controller import DocumentIOController
 from views.editor_tab import EditorTab
+from conftest import anchored_backup_manager
 
 
 def _doc_io(tabs=None):
-    return DocumentIOController(SessionBackupManager(), TextSanitizer(), tabs, None)
+    return DocumentIOController(anchored_backup_manager(), TextSanitizer(), tabs, None)
 
 
 def _open_tab(tabs, qtbot, file_path, content):

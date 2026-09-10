@@ -26,6 +26,7 @@ from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from controllers.latex_text_backend import LatexTextBackend
 from bookindexcore.util.text import TextSanitizer
+from conftest import anchored_backup_manager
 
 CHAPTER_ONE = (
     "Some prose here.\\index{Kant, Immanuel}\n"
@@ -40,7 +41,7 @@ def _build(tmp_path):
     (tmp_path / "ch1.tex").write_text(CHAPTER_ONE, encoding="utf-8")
     (tmp_path / "ch2.tex").write_text(CHAPTER_TWO, encoding="utf-8")
 
-    doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), None, None)
+    doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), None, None)
     backend = LatexTextBackend(doc_io)
     containers = backend.open(tmp_path)
     return backend, containers

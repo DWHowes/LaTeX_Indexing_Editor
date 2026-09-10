@@ -27,6 +27,7 @@ from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from controllers.index_edit_controller import IndexEditController
 from views.index_tree_view import IndexTreeView
+from conftest import anchored_backup_manager
 
 
 class _FakeEngine:
@@ -89,7 +90,7 @@ def _build_stack(tmp_path, qtbot, tex_content: str, heading_raw_text: str):
     entry_model.load_records([ref])
 
     text_sanitizer = TextSanitizer()
-    backup_manager = SessionBackupManager()
+    backup_manager = anchored_backup_manager()
     tabs = QTabWidget()
     qtbot.addWidget(tabs)
     doc_io = DocumentIOController(backup_manager, text_sanitizer, tabs, None)
@@ -381,7 +382,7 @@ class TestOrphanCleanupAfterDeletion:
         entry_model = EntryModifierModel(persistence=persistence, staging_model=staging_model)
         entry_model.load_records([first_ref, second_ref])
 
-        doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), QTabWidget(), None)
+        doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), QTabWidget(), None)
         controller = IndexEditController(
             tree_view=tree, doc_io=doc_io, entry_modifier_model=entry_model, staging_model=staging_model,
         )

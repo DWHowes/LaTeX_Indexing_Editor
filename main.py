@@ -3,7 +3,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
 from views.latex_editor import LatexEditor
-from bookindexcore.session.logger import SessionLogger
+from models.session_log import start_logging
 from models.preferences_persistence import PreferencesPersistence
 from bookindexcore.util.text import TextSanitizer
 from bookindexcore.session.backup import SessionBackupManager
@@ -28,8 +28,13 @@ if __name__ == "__main__":
     * Initialize the core models, controllers, and views
     * Start the application
     """
-    logger = SessionLogger()
-    
+    # Where the log goes is this application's decision and is taken in
+    # models/session_log.py; the core refuses to guess one. Constructed
+    # before the try: below, as it has to be -- it exists to capture what
+    # follows -- but it cannot now raise: start_logging() and the core both
+    # degrade to an unlogged session rather than to a dead one.
+    logger = start_logging()
+
     try:
         app = QApplication(sys.argv)
 
@@ -101,10 +106,15 @@ if __name__ == "__main__":
             doc_io=doc_controller
         )
 
-        # Ask the Model Layer for a safe, cross-platform default search location
-        default_home = FileTreePersistence.get_system_home_directory()
-        initial_db_path = FileTreePersistence.resolve_workspace_database_path(default_home)
-        file_persistence = FileTreePersistence(db_path=initial_db_path)         
+        # **No database until a project opens.** This used to be pointed at
+        # `Path.home()/workspace_index_data.db`, which created and migrated a
+        # full schema in the user's home directory purely so this object
+        # existed before a project did -- `configure_project_database_path`
+        # repoints the same instance the moment one is opened, and nothing
+        # ever read the placeholder. `IndexRepository` already treats an empty
+        # path as the unanchored state and skips its schema work, so the
+        # honest spelling was available the whole time.
+        file_persistence = FileTreePersistence(db_path="")
         scope_controller = ProjectScopeController(file_persistence)
 
         editor_window.set_file_persistence(file_persistence)
@@ -144,7 +154,8 @@ if __name__ == "__main__":
         except Exception:
             pass
 
-        logger.stop_intercept()
+        if logger is not None:
+            logger.stop_intercept()
         sys.exit(exit_code)
         
     except Exception as e:
@@ -153,5 +164,6 @@ if __name__ == "__main__":
             name_inverter.close()
         except Exception:
             pass        
-        logger.stop_intercept()
+        if logger is not None:
+            logger.stop_intercept()
         sys.exit(1)

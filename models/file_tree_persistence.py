@@ -114,15 +114,17 @@ class FileTreePersistence(IndexRepository):
 
     # -- database path resolution -------------------------------------------
 
-    @staticmethod
-    def get_system_home_directory() -> str:
-        """Returns the cross-platform absolute path to the user's home directory."""
-        return str(Path.home())
-
-    @staticmethod
-    def resolve_workspace_database_path(root_directory_path: str) -> str:
-        """Calculates the absolute file destination for the index database asset."""
-        return str(Path(root_directory_path) / "workspace_index_data.db")
+    # ***There was a `get_system_home_directory` and a
+    # `resolve_workspace_database_path` here, and between them they created
+    # `workspace_index_data.db` in the user's home directory on every
+    # launch.*** They existed so `main.py` had a path to construct this object
+    # with before a project existed; `configure_project_database_path` below
+    # repoints the same instance the moment one is opened, and nothing ever
+    # read the placeholder. `IndexRepository.initialize_database_schema`
+    # returns early on an empty path, so the unanchored state was already
+    # supported and the honest spelling was `FileTreePersistence(db_path="")`.
+    # Removed 10 September 2026; the file each launch left behind is the
+    # indexer's to delete.
 
     def configure_project_database_path(self, target_directory: str, validated_project_name: str) -> str:
         """

@@ -396,6 +396,33 @@ coordinates — and delegates everything between the braces.
 ### `session_logger.py`
 **Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
 
+### `session_log.py` (`tests/unit/test_session_log.py`)
+
+**Where the log goes is this application's decision, and this is where it is
+asserted.** The core stopped guessing on 10 September 2026: with no directory
+given it writes no file at all, so a host that stops saying where would go
+quietly unlogged. These tests are the other end of that contract.
+
+`test_nothing_is_written_into_the_working_directory` is *the positive control
+for the whole phase*, and it is a control rather than a hypothetical: the
+editor was launched from an unrelated directory on 5 September 2026 and left a
+`session_logs` folder in it, which is still there. Launch from somewhere with
+nothing to do with the application, and nothing may appear in it.
+
+`test_an_unwritable_root_leaves_the_application_running` covers the latent
+startup crash. `SessionLogger` was constructed one line above `main.py`'s
+`try:` and called `os.makedirs` unguarded, so an elevated install at
+`C:\Program Files` would have killed startup with no window and no message.
+
+`TestFollowingTheProject` covers both halves of the indexer's rule: the log
+moves into the project on open, and **out again on close**, which had no
+caller at all until this phase.
+
+`test_it_is_local_rather_than_roaming` is Windows-only and exists because the
+Word editor's own store was resolving Qt's `AppDataLocation` -- Roaming --
+while the shared store is deliberately Local. Both applications answer to
+`store.location.vendor_root` now, and this is what keeps them agreeing.
+
 ### Import direction (`test_layering.py`)
 
 The one file in this layer whose subject is not a module but the **shape of
@@ -492,6 +519,16 @@ alone. No bugs found.
 
 ### `session_backup_manager.py`
 **Moved to `bookindexcore` in extraction phase 1.** The subject of this section no longer lives in this repository, and neither do its tests. The notes that were here — including the bugs they were written for — are now in `../bookindexcore/tests/README.md`. This heading is kept because other sections link to it.
+
+**One thing about this suite's own use of it, found 10 September 2026.**
+Twenty-six tests constructed a `SessionBackupManager` with no project anchored
+and leaned on its `os.getcwd()` fallback, which is how a `.session_backups`
+folder came to be written into the repository root on every single run. The
+core refuses to guess a root now, so they go through
+`anchored_backup_manager()` in the root `conftest.py`, which hands back a
+manager pointed at a throwaway directory. *What these tests care about is that
+a backup is taken and can be restored, not where it lands; what the fixed
+defect cares about is that it is never the working directory.*
 
 ### `latex_entry_model.py`
 
@@ -1098,8 +1135,9 @@ conventions.
 The root `conftest.py`'s `booted_app` fixture constructs the *entire* real
 application object graph, the same construction chain as `main.py`, with
 every real-machine touchpoint (Windows registry via `QSettings`, the real
-user home directory, the `data/name_cache.db` sqlite file, `.session_logs/`)
-redirected into `tmp_path`. Nothing calls `.show()` or `app.exec()` — tests
+user home directory, the `data/name_cache.db` sqlite file, `session_logs/`,
+and since 10 September 2026 the session backup root) redirected into
+`tmp_path`. Nothing calls `.show()` or `app.exec()` — tests
 only construct and inspect.
 
 `test_signal_wiring.py` is the structural regression net for the bug class

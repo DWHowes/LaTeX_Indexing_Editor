@@ -37,6 +37,7 @@ from controllers.document_io_controller import DocumentIOController
 from controllers.latex_index_controller import LatexIndexController
 from views.editor_tab import EditorTab
 from views.latex_index_window import LatexIndexWindow
+from conftest import anchored_backup_manager
 
 
 class _InsertRecorder:
@@ -65,7 +66,7 @@ def _build_stack(tmp_path, qtbot, initial_text="Hello world", with_path=True, wi
     controller = LatexIndexController(view, tabs)
 
     if with_doc_io:
-        doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), tabs, None)
+        doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), tabs, None)
         controller.set_doc_io(doc_io)
 
     id_gen = MacroIDGenerator(starting_id=1)

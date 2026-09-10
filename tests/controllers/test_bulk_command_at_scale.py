@@ -73,6 +73,7 @@ from models.entry_modifier_model import EntryModifierModel
 from models.latex_index_parser import LatexIndexParser
 from models.latex_record_mapping import end_of, position_of
 from views.index_tree_view import IndexTreeView
+from conftest import anchored_backup_manager
 
 #: Enough to make an accidentally quadratic path obvious and a coordinate
 #: drift certain, while keeping the test somewhere around a second.
@@ -104,7 +105,7 @@ def _stack(qtbot, path):
     entry_model = EntryModifierModel(persistence=None, staging_model=staging)
     tabs = QTabWidget()
     qtbot.addWidget(tabs)
-    doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), tabs, None)
+    doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), tabs, None)
     controller = IndexEditController(
         tree_view=tree, doc_io=doc_io,
         entry_modifier_model=entry_model, staging_model=staging,

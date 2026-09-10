@@ -24,10 +24,11 @@ from bookindexcore.session.backup import SessionBackupManager
 from bookindexcore.util.text import TextSanitizer
 from controllers.document_io_controller import DocumentIOController
 from views.editor_tab import EditorTab
+from conftest import anchored_backup_manager
 
 
 def _doc_io(tabs=None):
-    return DocumentIOController(SessionBackupManager(), TextSanitizer(), tabs, None)
+    return DocumentIOController(anchored_backup_manager(), TextSanitizer(), tabs, None)
 
 
 def _open_tab(tabs, qtbot, file_path, content):
@@ -111,7 +112,7 @@ class TestSaveTexFileToDisk:
         f = tmp_path / "a.tex"
         f.write_text("original", encoding="utf-8")
         editor = _open_tab(tabs, qtbot, f, "Hello")
-        backup_manager = SessionBackupManager()
+        backup_manager = anchored_backup_manager()
         doc_io = DocumentIOController(backup_manager, TextSanitizer(), tabs, None)
 
         doc_io.save_tex_file_to_disk(editor, str(f))
@@ -161,7 +162,7 @@ class TestDiscardUnsavedChanges:
         # BEFORE the backup is registered -- register_file_for_session
         # only takes a copy if the target already exists at that moment.
         f.write_text("original", encoding="utf-8")
-        backup_manager = SessionBackupManager()
+        backup_manager = anchored_backup_manager()
         backup_manager.register_file_for_session(str(f))
         editor = _open_tab(tabs, qtbot, f, "original")
         doc_io = DocumentIOController(backup_manager, TextSanitizer(), tabs, None)
@@ -193,7 +194,7 @@ class TestDiscardUnsavedChanges:
         tabs = QTabWidget()
         qtbot.addWidget(tabs)
         f = tmp_path / "a.tex"
-        backup_manager = SessionBackupManager()
+        backup_manager = anchored_backup_manager()
         editor = _open_tab(tabs, qtbot, f, "original")
         doc_io = DocumentIOController(backup_manager, TextSanitizer(), tabs, None)
         doc_io.save_tex_file_to_disk(editor, str(f))
@@ -332,7 +333,7 @@ class TestRewriteMacroSpanOnDisk:
     def test_registers_a_session_backup(self, tmp_path):
         f = tmp_path / "a.tex"
         f.write_text(r"\index{Main}", encoding="utf-8")
-        backup_manager = SessionBackupManager()
+        backup_manager = anchored_backup_manager()
         doc_io = DocumentIOController(backup_manager, TextSanitizer(), None, None)
 
         doc_io.rewrite_macro_span(str(f), 0, 12, r"\index{Renamed}")

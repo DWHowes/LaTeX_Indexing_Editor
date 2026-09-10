@@ -28,6 +28,7 @@ from controllers.index_edit_controller import IndexEditController
 from models.entry_modifier_model import EntryModifierModel
 from models.latex_index_parser import LatexIndexParser
 from views.index_tree_view import IndexTreeView
+from conftest import anchored_backup_manager
 
 
 class _FakeEngine:
@@ -48,7 +49,7 @@ def _stack(tmp_path, qtbot, tex):
     entry_model = EntryModifierModel(persistence=None, staging_model=staging)
     tabs = QTabWidget()
     qtbot.addWidget(tabs)
-    doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), tabs, None)
+    doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), tabs, None)
     index_edit = IndexEditController(
         tree_view=tree, doc_io=doc_io,
         entry_modifier_model=entry_model, staging_model=staging)

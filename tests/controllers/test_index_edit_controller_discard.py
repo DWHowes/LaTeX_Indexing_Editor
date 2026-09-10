@@ -37,6 +37,7 @@ from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from controllers.index_edit_controller import IndexEditController
 from views.index_tree_view import IndexTreeView
+from conftest import anchored_backup_manager
 
 
 class _FakeEngine:
@@ -116,7 +117,7 @@ class TestDiscardUncommittedEntry:
 
         tabs = QTabWidget()
         qtbot.addWidget(tabs)
-        doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), tabs, None)
+        doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), tabs, None)
         controller = IndexEditController(
             tree_view=tree, doc_io=doc_io, entry_modifier_model=entry_model, staging_model=staging_model,
         )
@@ -218,7 +219,7 @@ class TestDiscardDirtyEdits:
 
         tabs = QTabWidget()
         qtbot.addWidget(tabs)
-        doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), tabs, None)
+        doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), tabs, None)
         controller = IndexEditController(
             tree_view=tree, doc_io=doc_io, entry_modifier_model=entry_model, staging_model=staging_model,
         )

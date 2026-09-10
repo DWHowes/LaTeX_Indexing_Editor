@@ -21,6 +21,7 @@ from views.cross_reference_list import CrossReferenceList
 from bookindexcore.util.text import TextSanitizer
 from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
+from conftest import anchored_backup_manager
 
 
 class _FakeIndexModelEngine:
@@ -64,7 +65,7 @@ def _set_up_base_document(fresh_persistence, tmp_path, name="main.tex") -> str:
 def _controller(fresh_persistence, tmp_path, qtbot, window=None):
     view = CrossReferenceList()
     qtbot.addWidget(view)
-    doc_io = DocumentIOController(SessionBackupManager(), TextSanitizer(), QTabWidget(), None)
+    doc_io = DocumentIOController(anchored_backup_manager(), TextSanitizer(), QTabWidget(), None)
     index_edit_ctrl = _FakeIndexEditController()
 
     controller = CrossReferenceController(

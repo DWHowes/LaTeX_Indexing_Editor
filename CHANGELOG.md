@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+### Where this application's generated files go
+
+Scope: `bookindexcore/documentation/generated_file_locations_scope.md`. Flagged
+31 July 2026, and it had grown since: both offending call sites had moved into
+the shared package with Phase 6a, so this is a core change with three
+applications adapted to it.
+
+**Session logs no longer land in whatever directory the application was
+launched from.** `SessionLogger` fell back to `os.getcwd()/session_logs`, and
+a folder of this editor's logs from 5 September 2026 is sitting in an
+unrelated directory to prove it. The core refuses to guess now, and
+`models/session_log.py` is this application's answer: one module holding one
+decision, mirroring the Word editor's, which had solved the same problem at
+step 11e.
+
+- **Before a project opens and after one closes**, the log is in this
+  application's own folder under `%LOCALAPPDATA%\DH Indexing`, beside the
+  shared store rather than in it. Local rather than Roaming, because a log
+  file has no business being copied between machines at logout.
+- **While a project is open the log is in the project**, which is the rule the
+  indexer set, and *it comes back out again on close*, which is the caller
+  that had never existed. Until now a session that closed a project went on
+  writing into a folder the indexer had finished with.
+- `LATEXINDEX_LOG_DIR` overrides the lot.
+
+**A read-only data directory no longer kills startup.** The logger was
+constructed one line above `main.py`'s `try:` and called `os.makedirs`
+unguarded. An elevated install puts `{autopf}` at `C:\Program Files`, so this
+was one installer edit from real. The session now starts unlogged, says so on
+the console, and starts a log later if a project it can write to is opened.
+
+**`workspace_index_data.db` is gone from the user's home directory.** Every
+launch created and migrated a full schema into `~/workspace_index_data.db`,
+purely so `FileTreePersistence` had a path to exist against before a project
+did: `configure_project_database_path` repoints the same instance the moment
+one opens, and nothing ever read the placeholder. `IndexRepository` already
+treated an empty path as the unanchored state, so the honest spelling was
+available the whole time. `get_system_home_directory` and
+`resolve_workspace_database_path` are removed. **The file each launch left
+behind is still there and is yours to delete.**
+
+**The suite had the same defect.** Twenty-six tests built a
+`SessionBackupManager` with no project anchored and relied on the
+`os.getcwd()` fallback, which is how a `.session_backups` folder came to sit
+in the repository root on every run. They anchor it now, through an
+`anchored_backup_manager` helper in `tests/conftest.py`.
+
+Suite: **1777 passing**, up from 1761. The new `tests/unit/test_session_log.py`
+carries the positive control the defect would have failed on 5 September:
+launch from an unrelated directory, and assert nothing is written there.
+
 ### The Preferences window fits a laptop screen
 
 It could not be opened fully on a 1366x768 screen: its minimum height was

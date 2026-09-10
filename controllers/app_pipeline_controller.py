@@ -69,6 +69,7 @@ from bookindexcore.authorities import house_style_for, system_for
 from bookindexcore.ui.dialogs.heading_language_dialog import (
     HeadingLanguageDialog)
 from bookindexcore.ui.dialogs.toa_review import ToaReviewDialog
+from models.session_log import app_data_root
 from bookindexcore.ui.progress_dialog import ProgressDialog
 from bookindexcore.ui.style import AppStyleConfiguration
 from bookindexcore.ui.window import WindowLayoutState
@@ -1464,9 +1465,14 @@ class AppPipelineController(QObject):
             self.entry_modifier_model.fetch_entry_modifier_records()
         )
         
-        # Realign session logging paths natively
+        # The log follows the project. It comes back out again when the
+        # project closes -- see close_active_project -- which is the caller
+        # this had none of until 10 September 2026: the log went in on open
+        # and stayed there, so a session that closed one project went on
+        # writing into a folder the indexer had finished with.
         project_root_dir = os.path.dirname(os.path.normpath(db_path))
-        self.session_logger.realign_log_to_project_root(project_root_dir)
+        if self.session_logger is not None:
+            self.session_logger.realign_log_to_project_root(project_root_dir)
 
         # Synchronize presentation title text and status bars
         project_name = os.path.basename(project_root_dir)
@@ -2667,6 +2673,13 @@ class AppPipelineController(QObject):
         self.presentation_prefs.close_project()
         self.toa_prefs.close_project()
         self._refresh_index_command_options()
+
+        # **The log comes back out of the project.** The other half of the
+        # realign on open: this session goes on running, and everything it
+        # prints from here belongs to the application rather than to a
+        # project the indexer has finished with.
+        if self.session_logger is not None:
+            self.session_logger.relocate_to(str(app_data_root()))
 
         self._tree_modified = False
         self.window.synchronize_window_title(None)

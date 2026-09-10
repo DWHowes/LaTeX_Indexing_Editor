@@ -42,6 +42,26 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 SAMPLE_PROJECT_SRC = FIXTURES_DIR / "sample_project"
 
 
+def anchored_backup_manager(project_root=None) -> SessionBackupManager:
+    """
+    A `SessionBackupManager` with somewhere to put its pristine copies.
+
+    ***Every one of these used to be constructed unanchored***, relying on the
+    `os.getcwd()` fallback inside `ensure_backup_infrastructure_exists`, which
+    is how a `.session_backups` folder came to sit in the repository root: the
+    suite was writing one there on every run. The core refuses to guess a root
+    now, so the tests say where, exactly as the application does when it opens
+    a project.
+
+    A throwaway directory when the caller has no particular one in mind. What
+    matters to these tests is that a backup is taken and can be restored, not
+    where it lands; what matters to the defect this closes is that it is never
+    the working directory.
+    """
+    return SessionBackupManager(
+        project_root=str(project_root or tempfile.mkdtemp(prefix="backup_root_")))
+
+
 @pytest.fixture(autouse=True)
 def _reset_theme_broker_connections():
     """
@@ -188,7 +208,7 @@ def booted_app(tmp_path_factory, qapp):
     AppStyleConfiguration.configure_application_theme(bool(preferences_payload.get("dark_mode")))
 
     text_sanitizer = TextSanitizer()
-    backup_manager = SessionBackupManager()
+    backup_manager = anchored_backup_manager(tmp_dir / "project")
     # An explicit path rather than `NameInverter.shared()`, which is what the
     # real main.py calls: the shared one is the developer's own name database,
     # per user and shared by every editor, and a test suite has no business
