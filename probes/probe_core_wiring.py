@@ -82,6 +82,9 @@ DELIBERATE = {
     "testing.dialect_conformance": "test-only",
     "testing.provider_conformance": "test-only",
     "testing.stub_proposer": "test-only",
+    "util.text_layer": "cleans a PDF's text layer; ToA_Builder and the "
+                       "extraction probe call it, and this application "
+                       "never reads a PDF",
     "model.statistics": "this application's index lives in a project "
                         "database, so `IndexRepository.fetch_index_"
                         "statistics` answers it in SQL; the record-counting "
