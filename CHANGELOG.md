@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### The Table of Authorities reads a McGill article's issue and full journal name
+
+Nothing changed here; the change is to the shared parser's article pattern in
+`bookindexcore.authorities.forms`, which this application's table parses with.
+A McGill book gains the articles cited with an issue (`19:1`) or a journal in
+full, and 23 articles that printed a wrong page are corrected. Scope:
+`bookindexcore/documentation/mcgill_article_address_scope.md`.
+
 ### Where this application's generated files go
 
 Scope: `bookindexcore/documentation/generated_file_locations_scope.md`. Flagged
