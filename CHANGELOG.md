@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The Table of Authorities reads ECtHR judgments in OSCOLA's forms
+
+Nothing changed here; the change is to the shared parser this application's
+table parses with. Under OSCOLA a manuscript's Strasbourg judgments cited by
+application number, in the Court's own style, or to the official Reports now
+reach the table. Scope: `bookindexcore/documentation/echr_citations_scope.md`.
+
 ### The Table of Authorities reads a McGill article's issue and full journal name
 
 Nothing changed here; the change is to the shared parser's article pattern in
