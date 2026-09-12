@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### The Table of Authorities ignores a manuscript's own table of cases
+
+Nothing changed here; the change is in the shared table builder this
+application's table is built with. An author's own table of cases was read as
+text citing authorities, so its pages became locators and cases listed but
+never discussed became rows. A book's bibliography is unaffected. Scope:
+`bookindexcore/documentation/authors_tables_excluded_scope.md`.
+
 ### The Table of Authorities keeps the entry above in a manuscript's table of cases
 
 Nothing changed here; the change is to the party-name walk in the shared parser
