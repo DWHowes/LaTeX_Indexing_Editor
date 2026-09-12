@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Footnote back-references are placed only on the evidence
+
+Nothing changed here; the change is in the shared resolver this application's
+table is built with. Where a manuscript's note numbering restarts per chapter
+and only one chapter's apparatus could be read, *supra note 21* was answered
+from another chapter's note. A reference outside the read part of the book now
+has to name the work it means, and a note citing two works is read as citing
+two. Execution record: the closing section of
+`bookindexcore/documentation/single_name_cjeu_cases_scope.md`.
+
 ### The Table of Authorities reads a case cited by a single name
 
 Nothing changed here; the change is in the shared parser this application's
