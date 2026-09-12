@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### The Table of Authorities reads a case cited by a single name
+
+Nothing changed here; the change is in the shared parser this application's
+table is built with. A Court of Justice case cited by one party, *Case C-9/11 Alpha [1996] ECR
+I-100*, was read as a repeat reference and reached no
+table at all, and a numbered case filed under C because the number stood in
+front of the party. Both are fixed. Scope:
+`bookindexcore/documentation/single_name_cjeu_cases_scope.md`.
+
 ### The Table of Authorities ignores a manuscript's own table of cases
 
 Nothing changed here; the change is in the shared table builder this
