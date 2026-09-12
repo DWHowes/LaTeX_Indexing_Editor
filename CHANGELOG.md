@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### A case cited by its name and the year alone is read
+
+Nothing changed here; the change is in the shared parser this application's
+table is built with. `Demir and Baykara v. Turkey (2008)` carries no report, no
+neutral citation and no docket number, and was not read at all. Measured over
+the nine corpora: a Cambridge comparative book goes from 14 citations to 73, a
+Canadian constitutional book from 128 rows to 166, and six of the nine books
+are unchanged, because every shape of this kind in them carries a report and
+the new form refuses to read a citation short. Execution record: the closing
+section of `bookindexcore/documentation/name_year_and_code_locators_scope.md`.
+
 ### Footnote back-references are placed only on the evidence
 
 Nothing changed here; the change is in the shared resolver this application's
