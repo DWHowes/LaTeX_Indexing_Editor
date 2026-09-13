@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### The author's own list of cases at the back of a book is not read
+
+Nothing changed here; the change is in the shared table builder. A manuscript's
+own table of cases was already left out when it came at the front of a book;
+now it is also left out when it comes at the back, as it usually does in a
+University of Toronto Press book. A heading with nothing under it, the
+placeholder a page proof usually carries, leaves the table unchanged. Measured:
+one book's table went from 166 rows to 38, all 128 of them rows that existed
+only because the author listed them.
+
 ### A box heading no longer joins the case below it
 
 Nothing changed here; the change is in the shared parser this application's
