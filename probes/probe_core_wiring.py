@@ -89,6 +89,10 @@ DELIBERATE = {
                         "database, so `IndexRepository.fetch_index_"
                         "statistics` answers it in SQL; the record-counting "
                         "version was written for a host that has no database",
+    "style.provenance": "where each shipped table came from, read by its "
+                        "guard test and by the name-inversion article's "
+                        "Appendix B generator (`appendix_sources.py`, beside "
+                        "the article); no application shows a table's source",
 }
 
 

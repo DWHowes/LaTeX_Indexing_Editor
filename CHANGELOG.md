@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### The wiring probe declares `style.provenance`
+
+`probes/probe_core_wiring.py` reported it as the one core module that reaches
+nothing here and is not declared. That is right: it records where each shipped
+table came from, and its readers are its guard test and the name-inversion
+article's Appendix B generator. No application shows a table's source, so it is
+declared rather than wired. The probe is clean.
+
+### Prefix lists read a Turkish heading's own case
+
+Nothing changed here; the change is in the shared key builder. A heading tagged
+Turkish or Azerbaijani now meets the indexer's prefix lists in the language's
+own casing, so `İbn Haldun` drops `ibn`. Untagged headings are unaffected.
+
 ### The application starts again, and a failed start says why
 
 **Every launch since 10 September 2026 died before the window was usable**,
