@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Two German alphabets
+
+Nothing changed here; the shared Sorting preferences page lists every alphabet
+the shared package ships, and it now ships *German (telephone directory, CLDR)*,
+which files `ä` as `ae`, and *German, Austria (CLDR)*, which files `ä` after
+every `a` word. Chosen per language like the others.
+
 ### The Table of Authorities runs the whole of the shared pipeline
 
 `models/toa_emission.py` parsed, merged and assembled by itself, skipping
