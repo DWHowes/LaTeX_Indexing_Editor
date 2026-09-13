@@ -232,7 +232,12 @@ def booted_app(tmp_path_factory, qapp):
         doc_io=doc_controller,
     )
 
-    file_persistence = FileTreePersistence(db_path=str(tmp_dir / "workspace_index_data.db"))
+    # Unanchored, exactly as main.py builds it. This was still the old
+    # placeholder file after main.py stopped creating one on 10 September
+    # 2026, so the fixture that exists to mirror startup constructed a
+    # database the real startup never has, and the application died on every
+    # launch for three days behind a green suite.
+    file_persistence = FileTreePersistence(db_path="")
     scope_controller = ProjectScopeController(file_persistence)
     editor_window.set_file_persistence(file_persistence)
 

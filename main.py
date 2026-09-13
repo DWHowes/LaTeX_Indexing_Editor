@@ -159,11 +159,33 @@ if __name__ == "__main__":
         sys.exit(exit_code)
         
     except Exception as e:
-        print(f"CRITICAL SYSTEM FAILURE: {str(e)}")
+        # ***A startup failure has to reach the indexer, not only the log.***
+        # This used to print one line while the logger still held stdout, so
+        # the message went into a log file in the user-data folder and
+        # nowhere else: no traceback, nothing on the console, no window. On
+        # 13 September 2026 that made a crash on every start look like an
+        # application dying without a word. The traceback goes to the log,
+        # then the console is given back before anything is said on it, and
+        # a message box says it for the packaged build, which has no console.
+        import traceback
+        traceback.print_exc()
         try:
             name_inverter.close()
         except Exception:
-            pass        
+            pass
+        log_path = logger.log_file_path if logger is not None else ""
         if logger is not None:
             logger.stop_intercept()
+
+        report = f"CRITICAL SYSTEM FAILURE: {e}"
+        if log_path:
+            report += f"\n\nThe session log is at:\n{log_path}"
+        traceback.print_exc()
+        print(report, file=sys.stderr)
+        try:
+            from PySide6.QtWidgets import QMessageBox
+            if QApplication.instance() is not None:
+                QMessageBox.critical(None, APP_NAME, report)
+        except Exception:
+            pass
         sys.exit(1)

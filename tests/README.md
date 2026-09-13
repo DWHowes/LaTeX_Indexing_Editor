@@ -593,6 +593,17 @@ prefix it replaced, since it is computed by `grammar.is_xref_encap`; an
 unterminated `see{Target` is no longer a cross-reference, which is the point —
 the database now holds the same opinion as the rest of the application.
 
+`test_schema_and_setup.py` also covers **the state before a project opens**,
+which is the state `main.py` starts in. `test_with_no_project_open_nothing_connects`
+patches `sqlite3.connect` to fail, and
+`test_every_method_that_connects_checks_the_path_first` is the source-level
+sweep over this class's own methods, matching the core's over
+`IndexRepository`. Neither existed when a missing guard in the core killed
+every start from 10 September 2026, and the `booted_app` fixture could not
+catch it either, because it still built a placeholder database that `main.py`
+no longer creates. **Keep `booted_app` constructing exactly what `main.py`
+constructs**: a fixture that mirrors startup is only evidence while it does.
+
 It also covers the **schema version stamp**. That field existed from the
 beginning and was inert: seeded once with `INSERT OR IGNORE` and read by
 nothing, so it said `1.0.0` through five schema changes. It is written by the

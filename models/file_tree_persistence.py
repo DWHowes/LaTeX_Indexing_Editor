@@ -188,6 +188,8 @@ class FileTreePersistence(IndexRepository):
         Retrieves every registered file to populate the UI configuration tree,
         showing both active and pruned files.
         """
+        if not self.db_path:
+            return []
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "SELECT file_name, absolute_path, is_active FROM project_files"
@@ -199,6 +201,8 @@ class FileTreePersistence(IndexRepository):
         Toggles the project inclusion state.
         Set to False to prune from indexing, True to re-include.
         """
+        if not self.db_path:
+            return
         with self._get_connection() as conn:
             conn.execute(
                 "UPDATE project_files SET is_active = ? WHERE absolute_path = ?",
@@ -211,6 +215,8 @@ class FileTreePersistence(IndexRepository):
         Extracts only paths marked active.
         Directly consumed by downstream Search Engines and Parse Generators.
         """
+        if not self.db_path:
+            return []
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "SELECT absolute_path FROM project_files WHERE is_active = 1"
@@ -255,6 +261,8 @@ class FileTreePersistence(IndexRepository):
         Retrieves every pruned (is_active = 0) file record, for the "Manage
         Pruned Files..." dialog's checklist.
         """
+        if not self.db_path:
+            return []
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "SELECT file_name, absolute_path FROM project_files WHERE is_active = 0 ORDER BY file_name COLLATE NOCASE"

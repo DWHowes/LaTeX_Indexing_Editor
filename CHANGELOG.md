@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### The application starts again, and a failed start says why
+
+**Every launch since 10 September 2026 died before the window was usable**,
+with nothing on the console and a one-line session log. That change stopped
+`main.py` creating a placeholder project database in the home directory, and
+the pipeline controller's constructor still asked the database for its highest
+reference id. With no project open, `sqlite3.connect("")` does not refuse; it
+opens an empty private database, and the query raised `no such table:
+project_references`. Fixed in the shared repository, which now answers 0 with
+no project open, and four methods of `FileTreePersistence` that had the same
+missing check now return an empty answer too.
+
+A failed start was silent because the message was printed while the session
+logger still held stdout, so it went to the log file only, without a
+traceback. Now the traceback is logged, the console is restored before the
+message is printed, the message names the log file, and a message box shows
+it, since the packaged build has no console.
+
+The suite stayed green throughout because `booted_app`, the fixture that
+mirrors `main.py`, still built the placeholder database. It is unanchored now,
+as startup is, and reproduces the crash without the fix.
+
 ### A case cited by its name and the year alone is read
 
 Nothing changed here; the change is in the shared parser this application's

@@ -51,6 +51,52 @@ def test_init_with_empty_db_path_creates_no_file(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_with_no_project_open_nothing_connects(monkeypatch):
+    """
+    The state main.py starts in. `sqlite3.connect("")` opens an empty private
+    database rather than refusing, so an unguarded query raised `no such
+    table`; one in the core killed every start from 10 September 2026, and
+    four here would have raised the same way the moment anything reached them
+    before a project opened.
+    """
+    def refuse(*args, **kwargs):
+        raise AssertionError("connected to SQLite with no project open")
+
+    import bookindexcore.persistence.index_repository as core
+    monkeypatch.setattr(core.sqlite3, "connect", refuse)
+    fp = FileTreePersistence(db_path="")
+
+    assert fp.fetch_all_project_files() == []
+    assert fp.fetch_active_unpruned_paths() == []
+    assert fp.fetch_pruned_files() == []
+    fp.update_file_active_state("C:/nowhere/chapter.tex", False)
+    assert fp.get_max_unique_id() == 0
+
+
+def test_every_method_that_connects_checks_the_path_first():
+    """
+    The sweep over this application's own methods; the core has the same one
+    over `IndexRepository`. Source-level because the methods take too many
+    different arguments to call blind.
+    """
+    import inspect
+
+    unguarded = []
+    for name, member in vars(FileTreePersistence).items():
+        if not inspect.isfunction(member):
+            continue
+        source = inspect.getsource(member)
+        opens = min((i for i in (source.find("self._get_connection()"),
+                                 source.find("self.transaction()"))
+                     if i >= 0), default=-1)
+        if opens < 0:
+            continue
+        guard = source.find("if not self.db_path")
+        if guard < 0 or guard > opens:
+            unguarded.append(name)
+    assert unguarded == []
+
+
 def test_default_metadata_seeded(fresh_persistence):
     row_keys = set(fresh_persistence.get_all_project_metadata().keys())
     assert DEFAULT_METADATA_KEYS <= row_keys
