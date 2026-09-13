@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### The Table of Authorities runs the whole of the shared pipeline
+
+`models/toa_emission.py` parsed, merged and assembled by itself, skipping
+everything the shared `build_table` does between: short forms were unresolved,
+a bibliography claimed a macro for every work it listed, and an author's own
+table of cases was read as citing the cases in it. It now hands the project to
+`build_table` through a source over the projected text, as the Word editor has
+since 30 August 2026, and writes no macro inside the bibliography.
+
+Measured over nine legal books written out as LaTeX: six tables identical to
+the standalone tool's, one textbook from 166 rows to 38, and short forms now
+reaching their authorities (one book from 139 macros to 347). The differences
+left are all an ampersand inside an abbreviation, `P\&D`, which the projection
+reads with a space in front of the `&`; that is named, not fixed.
+
 ### Cases named only by a short title print that name
 
 Nothing changed here; the change is in the shared parser and table builder. A

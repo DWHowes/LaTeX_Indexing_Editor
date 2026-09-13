@@ -1229,8 +1229,10 @@ worth knowing when reading them:
 
 - `test_the_party_walk_does_not_reach_the_chapter_title`. Blanking markup
   leaves whitespace, and the walk looks back 260 characters, so the first
-  citation in a chapter absorbed the chapter title. Citations are parsed a
-  paragraph at a time now.
+  citation in a chapter absorbed the chapter title. Citations were parsed a
+  paragraph at a time to stop it; since 13 September 2026 whole files go to
+  the core, whose own walk will not cross a blank line, and this test is now
+  the evidence that the core still holds it for this host.
 - `test_an_escaped_literal_keeps_its_character` and
   `test_an_escaped_percent_does_not_open_a_comment` are a pair that pull
   against each other. `\&` prints an ampersand a reader sees, so it must
@@ -1244,6 +1246,17 @@ worth knowing when reading them:
 grammar and not makeindex's. A bare one fails the build with *Misplaced
 alignment tab character*, so the two escapings compose and neither covers the
 other.
+
+`TestThePlanRunsTheWholePipeline` came with the move onto the core's
+`build_table` on 13 September 2026, and each of its tests is a stage the old
+shortcut skipped: a short form reaching its authority, no macro inside a
+bibliography, an author's own list of cases not read, and the struck rows
+carried on the plan. All four fail on the old `build_plan`. The measurement
+behind the move, the nine legal books written out as LaTeX and compared row for
+row with ToA_Builder, is in `bookindexcore/documentation/latex_toa_through_build_table.md`.
+**Its two LaTeX strings are raw strings for a reason**: written through a shell
+heredoc, `\\chapter` arrived as `\chapter`, an invalid escape Python kept as
+written, so the tests passed with a warning that was the only sign.
 
 ### The shared preferences pages
 

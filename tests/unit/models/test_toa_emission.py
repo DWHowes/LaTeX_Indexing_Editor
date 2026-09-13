@@ -23,6 +23,7 @@ from bookindexcore.authorities import (
     BLUEBOOK,
     CATEGORY_CASE,
     CATEGORY_STATUTE,
+    MCGILL,
     OSCOLA,
     CitationParser,
     check,
@@ -264,8 +265,10 @@ class TestParagraphScoping:
         characters -- so the first citation of a chapter absorbed the chapter
         title and filed as `Testamentary Capacity Banks v Goodfellow`.
 
-        Citations are parsed a paragraph at a time. A party name never spans a
-        blank line.
+        A party name never spans a blank line. This module used to parse a
+        paragraph at a time to hold that; since 13 September 2026 the whole
+        file goes to the core, whose own walk has refused to cross a blank line
+        since 11 September, and this test is what says the core still holds it.
         """
         plan = plan_for({"ch.tex": MARKED_UP})
         displays = " ".join(e.display for e in plan.entries)
@@ -408,3 +411,60 @@ class TestSeveralContainers:
 
         assert plan.is_empty
         assert plan.preamble == ()
+
+
+class TestThePlanRunsTheWholePipeline:
+    r"""
+    Since 13 September 2026 this host calls the core's `build_table`, as the
+    Word editor has since 30 August. The shortcut it replaced parsed, merged and
+    assembled by itself and skipped everything the core does between: short
+    forms went unresolved, a bibliography claimed a macro for every work it
+    listed, and an author's own list of cases was read as citing the cases in
+    it. Measured over the nine legal books written out as LaTeX, the table now
+    matches ToA_Builder's row for row in six of them; every difference left is
+    an `\&` inside an abbreviation, which the projection reads as `&` with a
+    space in front of it.
+    """
+
+    FILLER = "Nothing is cited in this paragraph at all.\n\n" * 40
+
+    def test_a_short_form_reaches_the_authority_it_names(self):
+        plan = plan_for({"ch.tex": r"See \textit{R v Oakes}, [1986] 1 SCR 103."
+                                   "\n\nAnd again, ibid at 140."},
+                        system=MCGILL)
+
+        assert len(plan.entries) == 2
+        assert len({e.macro for e in plan.entries}) == 1
+
+    def test_no_macro_is_written_inside_the_bibliography(self):
+        body = r"See \textit{R v Oakes}, [1986] 1 SCR 103." + "\n\n"
+        text = (body + self.FILLER + r"\chapter*{Bibliography}" "\n"
+                r"\textit{R v Oakes}, [1986] 1 SCR 103." "\n"
+                r"\textit{Hunter v Southam Inc}, [1984] 2 SCR 145." "\n")
+        plan = plan_for({"ch.tex": text}, system=MCGILL)
+        bibliography = text.index("Bibliography")
+
+        assert plan.entries
+        assert all(e.offset < bibliography for e in plan.entries)
+        assert any("Hunter" in entry.display for section in plan.table.sections
+                   for entry in section.entries)
+
+    def test_the_authors_own_list_of_cases_is_not_read(self):
+        body = r"See \textit{R v Oakes}, [1986] 1 SCR 103." + "\n\n"
+        listing = (r"\chapter*{Cases and Statutes}" "\n"
+                   r"\textit{R v Oakes}, [1986] 1 SCR 103." "\n"
+                   r"\textit{Hunter v Southam Inc}, [1984] 2 SCR 145." "\n"
+                   r"\textit{R v Big M Drug Mart Ltd}, [1985] 1 SCR 295." "\n"
+                   r"\textit{Irwin Toy Ltd v Quebec}, [1989] 1 SCR 927." "\n")
+        plan = plan_for({"ch.tex": body + self.FILLER + listing}, system=MCGILL)
+        displays = {entry.display for section in plan.table.sections
+                    for entry in section.entries}
+
+        assert any("Oakes" in d for d in displays)
+        assert not any("Hunter" in d for d in displays)
+        assert len(plan.entries) == 1
+
+    def test_the_plan_carries_what_was_struck(self):
+        plan = plan_for({"ch.tex": "Nothing cited here at all."})
+
+        assert plan.struck == ()

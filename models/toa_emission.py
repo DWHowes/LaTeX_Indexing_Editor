@@ -22,12 +22,14 @@ we produced, it is a macro inserted into the middle of somebody's sentence.
 in a marked-up fixture parsed as a *short form* with a mangled party until the
 markup was blanked out.
 
-**The paragraph.** Citations are parsed one paragraph at a time. A party name
-never spans a blank line, and the leftward party walk looks back 260
-characters, so without this it walks out of the paragraph and into whatever
-precedes -- which for the first citation in a chapter is the chapter title. It
-produced `Testamentary Capacity Banks v Goodfellow` in the fixture, and it is a
-fault this module introduced by blanking rather than one it inherited.
+**The paragraph.** A party name never spans a blank line, and the leftward
+party walk looks back 260 characters, so without a boundary it walks out of the
+paragraph and into whatever precedes -- which for the first citation in a
+chapter is the chapter title. It produced `Testamentary Capacity Banks v
+Goodfellow` in the fixture. This module used to parse a paragraph at a time to
+stop it; ***the core's own walk has refused to cross a blank line since 11
+September 2026***, so whole files go to the core now and the fixture still
+files `Banks v Goodfellow`.
 
 **The sort key.** ``2 U.S.C.`` must file before ``42 U.S.C.``, and ``makeindex``
 files alphabetically on the string it is given. T2's filing key is what makes
@@ -51,7 +53,6 @@ split is what lets the whole of this be tested without a project open.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
@@ -63,11 +64,8 @@ from bookindexcore.authorities import (
     CATEGORY_RULE,
     CATEGORY_SECONDARY,
     CATEGORY_STATUTE,
-    CitationParser,
-    assemble,
-    merge_citations,
+    build_table,
 )
-from bookindexcore.authorities.house_profiles import arrangement_for
 from bookindexcore.sorting import SortRules
 
 from .index_tag_grammar import escape_for_makeindex
@@ -93,11 +91,6 @@ INDEX_NAMES = {
     CATEGORY_CONSTITUTIONAL: "toaconstitutional",
     CATEGORY_SECONDARY: "toasecondary",
 }
-
-#: A blank line, which is a paragraph break in LaTeX and a boundary no citation
-#: crosses. See the module docstring.
-_PARAGRAPH = re.compile(r"\n[ \t]*\n")
-
 
 def index_name_for(category: str) -> Optional[str]:
     return INDEX_NAMES.get(category)
@@ -135,6 +128,9 @@ class ToaPlan:
     #: Short forms and unrecognised abbreviations, carried for the surface.
     unresolved: tuple = ()
     unknown: tuple = ()
+    #: Rows the core removed as the back matter's own inventions, by display.
+    #: See :attr:`~bookindexcore.authorities.paginated.PlacedTable.struck`.
+    struck: tuple = ()
 
     @property
     def is_empty(self) -> bool:
@@ -163,33 +159,6 @@ def preamble_for(table, *, in_toc: bool = True) -> tuple[str, ...]:
         declarations.append(f"\\makeindex[{options}]")
         prints.append(f"\\printindex[{name}]")
     return tuple(declarations), tuple(prints)
-
-
-def _paragraphs(text: str):
-    """``(base_offset, paragraph_text)`` for each paragraph."""
-    start = 0
-    for match in _PARAGRAPH.finditer(text):
-        yield start, text[start:match.start()]
-        start = match.end()
-    yield start, text[start:]
-
-
-def _citations_in(container: str, text: str, parser):
-    """
-    Every citation in one container, at that container's own offsets.
-
-    Parsed a paragraph at a time -- see the module docstring for the chapter
-    title this stops the party walk reaching into.
-    """
-    found = []
-    projected = project(text)
-    for base, paragraph in _paragraphs(projected):
-        if not paragraph.strip():
-            continue
-        for citation in parser.parse(paragraph):
-            found.append((container, base + citation.start,
-                          base + citation.end, citation))
-    return found
 
 
 def _join(parts) -> str:
@@ -294,8 +263,60 @@ def _macro(name: str, path: Sequence[tuple]) -> str:
     return f"\\index[{name}]{{{levels}}}"
 
 
+class _ProjectedSource:
+    r"""
+    A LaTeX project as the core's :class:`PaginatedSource`: the prose of each
+    file, at the file's own offsets, and no pages.
+
+    **The projection's length contract is what makes this a source at all.**
+    ``len(project(text)) == len(text)``, so an offset the core hands back is an
+    offset in the ``.tex`` file, and the macro lands where the citation ends.
+    There are no page numbers until the engine runs, so :meth:`page_for` is
+    None everywhere, exactly as the Word editor's source answers.
+    """
+
+    def __init__(self, backend, *, on_progress=None, should_cancel=None):
+        """
+        Every file is projected here, once, **counted in containers**: the one
+        unit the plan knows before it has read anything, and the unit its
+        progress has always been reported in. The core reads a container more
+        than once (to parse it, to find the back matter, to resolve short
+        forms), so projecting on each read would repeat the markup pass.
+
+        :attr:`cancelled` is True where ``should_cancel`` answered True before
+        every file was read.
+        """
+        self._names = list(backend.containers())
+        self._text = {}
+        self.cancelled = False
+        for index, name in enumerate(self._names):
+            if should_cancel is not None and should_cancel():
+                self.cancelled = True
+                return
+            self._text[name] = project(backend.read_text(name))
+            if on_progress is not None:
+                on_progress(index + 1, len(self._names))
+
+    def containers(self):
+        return self._names
+
+    def read_text(self, container: str) -> str:
+        return self._text[container]
+
+    def page_for(self, container: str, offset: int):
+        return None
+
+
+def _entries_with_authorities(table):
+    """Every row that stands for an authority, nested provisions included."""
+    for section in table.sections:
+        for entry in section.entries:
+            yield entry
+            yield from entry.subentries
+
+
 def build_plan(backend, system, rules: SortRules, *,
-               in_toc: bool = True, house=None,
+               in_toc: bool = True, house=None, proposer=None,
                on_progress=None, should_cancel=None) -> ToaPlan:
     """
     Read a manuscript, find its authorities, and describe the entries to write.
@@ -305,69 +326,63 @@ def build_plan(backend, system, rules: SortRules, *,
     used, which is the same subset §8.17 identified when it argued that a
     paginated source is not a backend.
 
+    ***The whole of the core's pipeline, as the Word editor has called it since
+    30 August 2026.*** This used to parse, merge and assemble by itself, and
+    skipped everything the core does in between: short forms went unresolved,
+    a book's bibliography claimed a page for every work it listed and kept its
+    authors surname-first, and an author's own table of cases was read as text
+    citing the cases in it. The indexer's decision for the Word editor was that
+    a host calls `build_table` like the standalone tool, and the reason is the
+    same here. Measured on 13 September 2026 over the nine legal books written
+    out as LaTeX: see the LaTeX CHANGELOG.
+
+    **No macro inside the back matter.** A work listed there is in the table
+    and its listing is not a citation; see
+    :meth:`~bookindexcore.authorities.paginated.PlacedTable.places`.
+
     ``house`` is the publisher's specification, and **it decides the
-    arrangement and never what was found**:
-    :func:`~bookindexcore.authorities.house_profiles.arrangement_for` turns it
-    into the four arguments `assemble` takes, and nothing earlier in this
-    function can see it. So a publisher's choice cannot cost an indexer a
-    citation. None is the standard's own conventions, which is what a project
-    that has not answered the question gets.
+    arrangement and never what was found**. ``proposer`` is M0's seam for the
+    short forms nothing else resolves; None is the ordinary case.
 
     ``on_progress`` is ``(done, total) -> None`` and ``should_cancel`` is
     ``() -> bool``, both optional and both counted **in containers**, which is
-    the only unit this function knows before it has read anything. The pass is
-    slow enough to need them: the same work over a Word manuscript read a
-    million characters and took 224 seconds, and *a pass with no progress is
-    indistinguishable from a hang.*
-
-    A cancelled run returns an **empty plan** rather than a partial one. A
-    table of authorities is judged on completeness, so half a table is not a
-    smaller table -- it is a wrong one, and the difference is invisible once
-    it is on the page.
+    the only unit this function knows before it has read anything. A cancelled
+    run returns an **empty plan** rather than a
+    partial one. A table of authorities is judged on completeness, so half a
+    table is not a smaller table -- it is a wrong one, and the difference is
+    invisible once it is on the page.
     """
-    parser = CitationParser(system)
-    found = []
-    containers = list(backend.containers())
-    for index, container in enumerate(containers):
-        if should_cancel is not None and should_cancel():
-            return ToaPlan(entries=(), preamble=(), table=None)
-        found.extend(_citations_in(container, backend.read_text(container),
-                                   parser))
-        if on_progress is not None:
-            on_progress(index + 1, len(containers))
+    source = _ProjectedSource(backend, on_progress=on_progress,
+                              should_cancel=should_cancel)
+    if source.cancelled:
+        return ToaPlan(entries=(), preamble=(), table=None)
+    placed = build_table(source, system, rules,
+                         house=house, proposer=proposer,
+                         should_cancel=should_cancel)
+    if (should_cancel is not None and should_cancel()) or getattr(
+            placed.resolution, "cancelled", False):
+        return ToaPlan(entries=(), preamble=(), table=None)
 
-    # Merging has to cross containers -- an authority cited in chapter 2 and
-    # chapter 9 is one entry -- while a Citation carries an offset and no
-    # container. Each container gets a base in one global space, exactly as
-    # `authorities.paginated.build_table` does, and the map back is kept here.
-    import dataclasses
-
-    shifted = []
-    origin = {}
-    base = 0
-    for container, start, end, citation in found:
-        moved = dataclasses.replace(citation, start=base, end=base + (end - start))
-        origin[base] = (container, end)
-        shifted.append(moved)
-        base += (end - start) + 1
-
-    merged = merge_citations(shifted, system=system)
-    table = assemble(shifted, system, rules, merged=merged,
-                     **arrangement_for(house, system))
+    table = placed.table
     paths = _leaf_paths(table)
 
     entries = []
-    for authority in merged.authorities:
-        placed = paths.get(id(authority))
-        if placed is None:
+    for entry in _entries_with_authorities(table):
+        found = paths.get(id(entry.authority)) if entry.authority else None
+        if found is None:
             continue
-        category, path = placed
+        category, path = found
         name = index_name_for(category)
         if name is None:
             continue
         macro = _macro(name, path)
-        for occurrence in authority.occurrences:
-            container, at = origin[occurrence.start]
+        for occurrence in entry.occurrences:
+            if not placed.places(occurrence):
+                continue
+            where = placed.container_for(occurrence.end)
+            if where is None:
+                continue
+            container, at = where
             entries.append(ToaEntry(
                 container=container, offset=at, macro=macro,
                 display=path[-1][1], category=category))
@@ -376,10 +391,12 @@ def build_plan(backend, system, rules: SortRules, *,
     entries.sort(key=lambda e: (e.container, -e.offset))
 
     declarations, prints = preamble_for(table, in_toc=in_toc)
+    report = placed.resolution
     return ToaPlan(
         entries=tuple(entries),
         preamble=declarations + prints,
         table=table,
-        unresolved=merged.unresolved,
-        unknown=merged.unknown,
+        unresolved=getattr(report, "unresolved", ()) or (),
+        unknown=table.unknown,
+        struck=placed.struck,
     )
