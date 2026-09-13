@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### A box heading no longer joins the case below it
+
+Nothing changed here; the change is in the shared parser this application's
+table is built with. A heading set in capitals over the case it introduces was
+read as the start of the party's name, so four rows of one Canadian textbook
+filed under the last words of their boxes' headings. A whole line in capitals
+above a word in ordinary case now ends the name. Parties that begin with
+capitals, such as a union's initials, are unaffected; eight of the nine
+measured books produce identical tables.
+
 ### The wiring probe declares `style.provenance`
 
 `probes/probe_core_wiring.py` reported it as the one core module that reaches
