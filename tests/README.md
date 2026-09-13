@@ -1258,6 +1258,18 @@ row with ToA_Builder, is in `bookindexcore/documentation/latex_toa_through_build
 heredoc, `\\chapter` arrived as `\chapter`, an invalid escape Python kept as
 written, so the tests passed with a warning that was the only sign.
 
+`test_toa_compact_projection.py` is the one place the projection's length
+contract gives way, and it tests the way back more than the way in.
+`test_every_offset_maps_back_to_the_same_character` walks every character of
+the compact text to the blanked projection through `source_offset`, including a
+comment holding a literal, which must not be closed up; and the table-level
+tests assert **macro positions against the source**, because a wrong offset
+here is a macro inside a word. The three table tests fail on the old projection:
+`LR 1 P\&D 130` read as `LR 1`, and the macro landed a character early. The
+file is written with raw strings throughout and the suite was run with
+`-W error::SyntaxWarning`, after one of this phase's own docstrings turned
+`\textsection` into a tab.
+
 ### The shared preferences pages
 
 `test_prefs_dialog_shared_pages.py` tests the *wiring*, not the pages — those

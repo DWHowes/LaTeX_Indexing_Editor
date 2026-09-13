@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### An ampersand inside an abbreviation is read
+
+The Table of Authorities read `P\&D` as `P &D`, because the projection kept
+every character's position and put the ampersand where the `&` was, with a
+space where the backslash was; the report `LR 1 P\&D 130` came out as `LR 1`
+and `LG\&E Energy Corp.` lost its first word. The plan now reads a compact
+projection with those slots closed up and maps every offset back to the source
+before a macro is placed. Measured over nine legal books written out as LaTeX:
+every table now matches the standalone tool's row for row, and every macro
+position was checked against the source.
+
 ### Two German alphabets
 
 Nothing changed here; the shared Sorting preferences page lists every alphabet

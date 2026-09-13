@@ -56,7 +56,8 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-__all__ = ["ESCAPED_LITERALS", "OPAQUE_MACROS", "project", "projected_lines"]
+__all__ = ["CompactProjection", "ESCAPED_LITERALS", "OPAQUE_MACROS", "project",
+           "project_compact", "projected_lines"]
 
 #: Control sequences that are **not markup at all**: they print one ordinary
 #: character, and a reader sees it.
@@ -146,8 +147,19 @@ def project(text: str) -> str:
     caller depends on. See the module docstring for why it is blanking rather
     than stripping.
     """
+    return "".join(_projected(text)[0])
+
+
+def _projected(text: str):
+    r"""
+    ``(chars, fillers)``: the blanked projection as a list, and the source
+    positions that are blank **only because an escaped literal's control
+    characters stood there** -- the backslash of ``\&``, the name of
+    ``\textsection``. See :func:`project_compact` for why those are dropped.
+    """
     chars = list(text)
     pending: dict[int, str] = {}
+    spans: dict[int, int] = {}
 
     # 1. Control sequences, and the groups of the opaque ones. Done first so
     #    that `\%` is gone before comments are looked for.
@@ -163,6 +175,7 @@ def project(text: str) -> str:
             # real comment opener in the next pass, and `a \% b` lost its `b`
             # when this was done in place.
             pending[match.end() - 1] = literal
+            spans[match.end() - 1] = match.start()
             continue
 
         if name in OPAQUE_MACROS:
@@ -191,10 +204,12 @@ def project(text: str) -> str:
 
     # 2a. Now the escaped literals can go back, except any that were inside a
     #     comment -- those are not prose either.
+    fillers = []
     for position, char in pending.items():
         if any(start <= position < end for start, end in commented):
             continue
         chars[position] = char
+        fillers.extend(range(spans[position], position))
 
     # 3. Braces. Whatever is left of them is grouping around prose, and the
     #    grammar must not see it: `\textit{Key v Key}` has to read as
@@ -203,7 +218,53 @@ def project(text: str) -> str:
         if char in "{}":
             chars[i] = " "
 
-    return "".join(chars)
+    return chars, sorted(fillers)
+
+
+class CompactProjection:
+    r"""
+    The prose with the slots of escaped literals closed up, and the way back.
+
+    ***The one place the length contract gives way, and why it has to.*** A
+    literal is placed at the end of the span it replaces, so `P\&D` projects to
+    `P &D` and `H\&N` to `H &N`: an abbreviation with a space inside it. The
+    parser then reads the report `1 P&D 130` as `1 P`, and `LG&E Energy Corp.`
+    as `Energy Corp.`. Measured 13 September 2026 over nine legal books written
+    out as LaTeX: **every difference left between this editor's Table of
+    Authorities and the standalone tool's was one of these**, five rows in three
+    books. Under a one-for-one contract no filler can close the gap, because
+    anything standing where the backslash was is a character inside the word.
+
+    So the slots are dropped, and :meth:`source_offset` puts them back. **The
+    map is built, used and discarded inside one plan**: the caller turns every
+    offset back into a source offset before anything is written, so there is no
+    second structure to survive a later edit, which is what the module docstring
+    refuses. Only the control characters of a literal that was *restored* are
+    dropped; a literal inside a comment stays blank, and every other blank keeps
+    its place.
+    """
+
+    __slots__ = ("text", "_removed")
+
+    def __init__(self, text: str, removed):
+        self.text = text
+        #: For each dropped source position, the compact offset of the first
+        #: character after it, in order.
+        self._removed = [position - index for index, position in enumerate(removed)]
+
+    def source_offset(self, offset: int) -> int:
+        """The source offset of a compact one, a character or the end."""
+        from bisect import bisect_right
+
+        return offset + bisect_right(self._removed, offset)
+
+
+def project_compact(text: str) -> CompactProjection:
+    """The projection with escaped literals closed up. See :class:`CompactProjection`."""
+    chars, fillers = _projected(text)
+    dropped = set(fillers)
+    compact = "".join(char for i, char in enumerate(chars) if i not in dropped)
+    return CompactProjection(compact, fillers)
 
 
 def projected_lines(text: str) -> Iterable[str]:

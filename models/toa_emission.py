@@ -69,7 +69,7 @@ from bookindexcore.authorities import (
 from bookindexcore.sorting import SortRules
 
 from .index_tag_grammar import escape_for_makeindex
-from .latex_text_projection import project
+from .latex_text_projection import project_compact
 
 __all__ = [
     "INDEX_NAMES",
@@ -266,13 +266,16 @@ def _macro(name: str, path: Sequence[tuple]) -> str:
 class _ProjectedSource:
     r"""
     A LaTeX project as the core's :class:`PaginatedSource`: the prose of each
-    file, at the file's own offsets, and no pages.
+    file, and no pages.
 
-    **The projection's length contract is what makes this a source at all.**
-    ``len(project(text)) == len(text)``, so an offset the core hands back is an
-    offset in the ``.tex`` file, and the macro lands where the citation ends.
-    There are no page numbers until the engine runs, so :meth:`page_for` is
-    None everywhere, exactly as the Word editor's source answers.
+    **The prose is the compact projection**, with the slots of escaped literals
+    closed up, so `P\&D` reads as `P&D` and not `P &D`; see
+    :class:`~models.latex_text_projection.CompactProjection`. Every offset the
+    core hands back is turned into a source offset by :meth:`source_offset`
+    before it becomes a macro position, so the macro still lands where the
+    citation ends. There are no page numbers until the engine runs, so
+    :meth:`page_for` is None everywhere, exactly as the Word editor's source
+    answers.
     """
 
     def __init__(self, backend, *, on_progress=None, should_cancel=None):
@@ -293,7 +296,7 @@ class _ProjectedSource:
             if should_cancel is not None and should_cancel():
                 self.cancelled = True
                 return
-            self._text[name] = project(backend.read_text(name))
+            self._text[name] = project_compact(backend.read_text(name))
             if on_progress is not None:
                 on_progress(index + 1, len(self._names))
 
@@ -301,7 +304,11 @@ class _ProjectedSource:
         return self._names
 
     def read_text(self, container: str) -> str:
-        return self._text[container]
+        return self._text[container].text
+
+    def source_offset(self, container: str, offset: int) -> int:
+        """Where an offset in this container's prose falls in its source."""
+        return self._text[container].source_offset(offset)
 
     def page_for(self, container: str, offset: int):
         return None
@@ -384,7 +391,8 @@ def build_plan(backend, system, rules: SortRules, *,
                 continue
             container, at = where
             entries.append(ToaEntry(
-                container=container, offset=at, macro=macro,
+                container=container, offset=source.source_offset(container, at),
+                macro=macro,
                 display=path[-1][1], category=category))
 
     # Descending within each container: see `ToaPlan.entries`.
