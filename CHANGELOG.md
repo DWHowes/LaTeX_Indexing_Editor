@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Cases named only by a short title print that name
+
+Nothing changed here; the change is in the shared parser and table builder. A
+footnote that gives a report followed by a short title in square brackets,
+the usual McGill and OSCOLA way of naming a case already introduced in the
+text, produced a table row with the report and no name. The row now carries
+the short title. Measured: 17 rows in one book gained a name. A party written
+after a country code and a full stop (`the UK. Alpha v. ...`) no longer takes
+the code with it.
+
 ### The author's own list of cases at the back of a book is not read
 
 Nothing changed here; the change is in the shared table builder. A manuscript's
