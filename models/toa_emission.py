@@ -131,6 +131,10 @@ class ToaPlan:
     #: Rows the core removed as the back matter's own inventions, by display.
     #: See :attr:`~bookindexcore.authorities.paginated.PlacedTable.struck`.
     struck: tuple = ()
+    #: Rows filed by title because their bibliography dash could not be given
+    #: the author above, by display. See
+    #: :attr:`~bookindexcore.authorities.paginated.PlacedTable.unfilled`.
+    unfilled: tuple = ()
 
     @property
     def is_empty(self) -> bool:
@@ -407,4 +411,5 @@ def build_plan(backend, system, rules: SortRules, *,
         unresolved=getattr(report, "unresolved", ()) or (),
         unknown=table.unknown,
         struck=placed.struck,
+        unfilled=placed.unfilled,
     )

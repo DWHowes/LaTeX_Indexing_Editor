@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### A bibliography's "same author" dash is read
+
+The shared table builder now files a bibliography entry that prints a dash for
+"same author as above" under that author, reads an author list ending in
+`et al`, stops a book's title at a closing square bracket, and keeps a running
+head out of a bibliography author. `ToaPlan.unfilled` carries the rows whose
+dash could not be given an author, filed by title, beside `ToaPlan.struck`, and
+the shared review dialog counts them before a macro is written.
+
 ### An ampersand inside an abbreviation is read
 
 The Table of Authorities read `P\&D` as `P &D`, because the projection kept

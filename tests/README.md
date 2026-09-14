@@ -2081,3 +2081,11 @@ resolution order.
 `models/sort_prefs.py` is where the alphabets are folded in, and its docstring
 carries the division the phase settled: **the store is the template and the
 project is the correction.**
+
+## A dash the core could not fill is carried
+
+`tests/unit/models/test_toa_emission.py::TestThePlanRunsTheWholePipeline::test_the_plan_carries_a_dash_it_could_not_fill`,
+14 September 2026. A bibliography's dash for "same author" with no entry above
+it is filed by title by the core and named in `PlacedTable.unfilled`; the plan
+carries it to the shared review dialog beside `struck`. Under `MCGILL`, because
+the dash is read by McGill's secondary forms only.
