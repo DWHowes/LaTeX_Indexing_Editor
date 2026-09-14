@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Nothing changed here
+
+The shared parser now reads a name with a particle whole, keeps a subtitle or an
+editor's initials inside a book's title, and joins a bibliography entry's second
+author to the first. The test that a plan carries an unreadable bibliography
+entry now uses a shape the parser still cannot read, since a subtitle now reads.
+
 ### Bibliography entries the core could not read are carried
 
 The shared table builder now leaves out a bibliography citation that started

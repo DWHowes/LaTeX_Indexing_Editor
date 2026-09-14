@@ -491,10 +491,12 @@ class TestThePlanRunsTheWholePipeline:
         carries the naming beside `struck` and `unfilled`.
         """
         listing = (r"\chapter*{Bibliography}" "\n"
-                   "Roe, Ann, A Constructed Study. Lectures on Law "
+                   "Roe, Ann, A Constructed Commentary on the Law of Things, "
+                   "Foreign and Domestic, in Regard to Contracts, Rights, and "
+                   "Remedies, and in Regard to Marriages and Successions "
                    "(Toronto: Example Press, 2004).\n")
         plan = plan_for({"ch.tex": "Nothing cited here.\n\n" + self.FILLER
                          + listing}, system=MCGILL)
 
         assert len(plan.unread) == 1
-        assert plan.unread[0].startswith("A Constructed Study. Lectures")
+        assert plan.unread[0].startswith("Law of Things, Foreign")
