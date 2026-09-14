@@ -135,6 +135,10 @@ class ToaPlan:
     #: the author above, by display. See
     #: :attr:`~bookindexcore.authorities.paginated.PlacedTable.unfilled`.
     unfilled: tuple = ()
+    #: Bibliography entries the core left out because they could not be read,
+    #: by their text. See
+    #: :attr:`~bookindexcore.authorities.paginated.PlacedTable.unread`.
+    unread: tuple = ()
 
     @property
     def is_empty(self) -> bool:
@@ -412,4 +416,5 @@ def build_plan(backend, system, rules: SortRules, *,
         unknown=table.unknown,
         struck=placed.struck,
         unfilled=placed.unfilled,
+        unread=placed.unread,
     )

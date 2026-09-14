@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Bibliography entries the core could not read are carried
+
+The shared table builder now leaves out a bibliography citation that started
+partway along its line and names it in `PlacedTable.unread`, and files
+`– and Jane Doe` under the author above and that name. `ToaPlan.unread` carries
+the list and the shared review dialog counts it. The PDF text-layer repairs in
+the same change do not reach this application, which reads `.tex`.
+
 ### A bibliography's "same author" dash is read
 
 The shared table builder now files a bibliography entry that prints a dash for

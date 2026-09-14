@@ -469,6 +469,7 @@ class TestThePlanRunsTheWholePipeline:
 
         assert plan.struck == ()
         assert plan.unfilled == ()
+        assert plan.unread == ()
 
     def test_the_plan_carries_a_dash_it_could_not_fill(self):
         """
@@ -482,3 +483,18 @@ class TestThePlanRunsTheWholePipeline:
 
         assert len(plan.unfilled) == 1
         assert "A Constructed Article" in plan.unfilled[0]
+
+    def test_the_plan_carries_an_entry_the_core_could_not_read(self):
+        """
+        A bibliography citation starting partway along its line took its author
+        from inside the entry; the core leaves it out and names it, and the plan
+        carries the naming beside `struck` and `unfilled`.
+        """
+        listing = (r"\chapter*{Bibliography}" "\n"
+                   "Roe, Ann, A Constructed Study. Lectures on Law "
+                   "(Toronto: Example Press, 2004).\n")
+        plan = plan_for({"ch.tex": "Nothing cited here.\n\n" + self.FILLER
+                         + listing}, system=MCGILL)
+
+        assert len(plan.unread) == 1
+        assert plan.unread[0].startswith("A Constructed Study. Lectures")

@@ -2089,3 +2089,11 @@ project is the correction.**
 it is filed by title by the core and named in `PlacedTable.unfilled`; the plan
 carries it to the shared review dialog beside `struck`. Under `MCGILL`, because
 the dash is read by McGill's secondary forms only.
+
+## An entry the core could not read is carried
+
+`tests/unit/models/test_toa_emission.py::TestThePlanRunsTheWholePipeline::test_the_plan_carries_an_entry_the_core_could_not_read`,
+14 September 2026. A bibliography line whose citation starts partway (a subtitle
+after a full stop read as the author) is left out by the core and named in
+`PlacedTable.unread`; the plan carries it, through this host's projection of the
+`.tex` text, to the shared review dialog.
