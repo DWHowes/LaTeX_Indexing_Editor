@@ -165,7 +165,7 @@ class EntryModifierController(QObject):
         # appended a bogus "|standard" to its heading on every commit.
         # encap_from_stored is that guard, expressed once in the grammar
         # module instead of re-tested here.
-        encap = grammar.encap_from_stored(fields.get("encap", ""))
+        encap = grammar.encap_from_stored(fields.get("page_style", ""))
         return grammar.IndexTag(tuple(levels), encap).to_body()
 
     # ------------------------------------------------------------------
@@ -267,7 +267,7 @@ class EntryModifierController(QObject):
             # (see IndexEntryModel.metadata()/the DB column default) -- it is
             # not a real LaTeX suffix and must not be appended, unlike an
             # actual directive (textbf/textit/see/seealso/range marker).
-            encap = grammar.encap_from_stored(fields.get("encap", ""))
+            encap = grammar.encap_from_stored(fields.get("page_style", ""))
             new_canonical = grammar.IndexTag(tuple(levels), encap).to_body()
 
             attempted += 1

@@ -42,7 +42,7 @@ def _choose(delegate, model, index, parent, label: str) -> str:
     """Opens the editor on the cell, picks *label*, returns the stored encap."""
     editor = delegate.createEditor(parent, None, index)
     delegate.setEditorData(editor, index)
-    editor.setCurrentIndex([lbl for lbl, _v in eml._PAGE_STYLE_OPTIONS].index(label))
+    editor.setCurrentIndex([lbl for lbl, _v in eml._page_style_options()].index(label))
     delegate.setModelData(editor, model, index)
     return str(index.data(Qt.ItemDataRole.EditRole) or "")
 

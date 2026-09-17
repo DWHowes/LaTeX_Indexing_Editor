@@ -1,39 +1,30 @@
 """
 Bulk manifest read/write: serialize_scraped_index_manifest (full
 wipe-and-replace of project_headings + project_references) and
-fetch_index_manifest (the read-back side, including graceful handling of
-missing tables and malformed JSON).
+fetch_index_manifest (the read-back side), as this application uses them.
+
+**Rewritten in phase FN.** The repository stores records since core schema
+2.4.0, so the JSON-column coercions these tests used to pin (a non-list
+``see_references`` stored as NULL, a malformed JSON column read back per field)
+no longer exist to test: list columns travel in the record's ``extra`` and are
+never hand-encoded. What is pinned here is that a scan's rows survive a
+save and a reopen as the same rows.
 """
 import pytest
+
+from tests.persistence.latex_rows import base_row, fetch, manifest, serialize
 
 
 def _heading(id_, text, depth, parent_id=None):
     return {"id": id_, "parent_id": parent_id, "heading_text": text, "name": text, "depth": depth}
 
 
-def _reference(unique_id, heading_id, heading_text, **overrides):
-    base = {
-        "heading_id": heading_id,
-        "heading_raw_text": heading_text,
-        "uid": f"file.tex:1:0:{unique_id}",
-        "unique_id_number": unique_id,
-        "file_path": "file.tex",
-        "line_number": 1,
-        "column_offset": 0,
-        "absolute_position": 10,
-        "absolute_end": 20,
-        "encap": "standard",
-    }
-    base.update(overrides)
-    return base
-
-
 def test_serialize_then_fetch_round_trip(fresh_persistence):
     headings = [_heading(1, "Main", 0), _heading(2, "Sub", 1, parent_id=1)]
-    references = [_reference(100, 2, "Main!Sub")]
+    references = [base_row(100, heading_id=2, heading_raw_text="Main!Sub")]
 
-    fresh_persistence.serialize_scraped_index_manifest(headings, references)
-    fetched_headings, fetched_references = fresh_persistence.fetch_index_manifest()
+    serialize(fresh_persistence, headings, references)
+    fetched_headings, fetched_references = manifest(fresh_persistence)
 
     assert len(fetched_headings) == 2
     assert len(fetched_references) == 1
@@ -42,26 +33,20 @@ def test_serialize_then_fetch_round_trip(fresh_persistence):
 
 
 def test_serialize_is_a_full_wipe_and_replace(fresh_persistence):
-    fresh_persistence.serialize_scraped_index_manifest(
-        [_heading(1, "First", 0)], [_reference(1, 1, "First")]
-    )
-    fresh_persistence.serialize_scraped_index_manifest(
-        [_heading(2, "Second", 0)], [_reference(2, 2, "Second")]
-    )
+    serialize(fresh_persistence, [_heading(1, "First", 0)], [base_row(1, heading_id=1)])
+    serialize(fresh_persistence, [_heading(2, "Second", 0)], [base_row(2, heading_id=2)])
 
-    headings, references = fresh_persistence.fetch_index_manifest()
+    headings, references = manifest(fresh_persistence)
     assert [h["heading_text"] for h in headings] == ["Second"]
     assert [r["unique_id_number"] for r in references] == [2]
 
 
 def test_serialize_with_empty_lists_wipes_tables(fresh_persistence):
-    fresh_persistence.serialize_scraped_index_manifest(
-        [_heading(1, "First", 0)], [_reference(1, 1, "First")]
-    )
+    serialize(fresh_persistence, [_heading(1, "First", 0)], [base_row(1, heading_id=1)])
 
-    fresh_persistence.serialize_scraped_index_manifest([], [])
+    serialize(fresh_persistence, [], [])
 
-    headings, references = fresh_persistence.fetch_index_manifest()
+    headings, references = manifest(fresh_persistence)
     assert headings == []
     assert references == []
 
@@ -77,47 +62,30 @@ def test_serialize_heading_missing_id_raises_type_error(fresh_persistence):
         fresh_persistence.serialize_scraped_index_manifest([{"heading_text": "x", "name": "x", "depth": 0}], [])
 
 
-def test_serialize_reference_defaults(fresh_persistence):
-    """
-    line_number defaults to 1 (not 0) when absent, has_references/
-    is_range_closer coerce truthiness to 1/0, macro_command falls back to
-    "index" even for an explicit falsy value, and non-list see_references
-    is silently discarded (stored NULL) rather than stored as-is.
-    """
-    minimal_ref = {
-        "heading_id": 1,
-        "heading_raw_text": "Main",
-        "uid": "u1",
-        "unique_id_number": 1,
-        "file_path": "a.tex",
-        "column_offset": 0,
-        "encap": "standard",
-        "macro_command": "",
-        "see_references": "not-a-list",
-    }
-    fresh_persistence.serialize_scraped_index_manifest([_heading(1, "Main", 0)], [minimal_ref])
+def test_a_scanned_range_closer_comes_back_a_closer(fresh_persistence):
+    serialize(fresh_persistence, [_heading(1, "Main", 0)],
+              [base_row(1, heading_id=1, encap="(textbf"), base_row(2, heading_id=1, encap=")")])
 
-    row = fresh_persistence.fetch_reference_row(1)
-    assert row["line_number"] == 1
-    assert row["macro_command"] == "index"
-    assert row["see_references"] is None
+    assert fetch(fresh_persistence, 1)["encap"] == "(textbf"
+    assert fetch(fresh_persistence, 2)["is_range_closer"] == 1
 
 
-def test_serialize_reference_has_references_and_range_closer_coercion(fresh_persistence):
-    ref = _reference(1, 1, "Main", has_references=1, is_range_closer=1)
-    fresh_persistence.serialize_scraped_index_manifest([_heading(1, "Main", 0)], [ref])
+def test_see_reference_lists_survive_as_lists(fresh_persistence):
+    serialize(fresh_persistence, [_heading(1, "Main", 0)],
+              [base_row(1, heading_id=1, see_references=["Other", "Another"])])
 
-    row = fresh_persistence.fetch_reference_row(1)
-    assert row["has_references"] is True
-    assert row["is_range_closer"] is True
+    assert fetch(fresh_persistence, 1)["see_references"] == ["Other", "Another"]
 
 
-def test_serialize_reference_see_references_list_is_json_round_tripped(fresh_persistence):
-    ref = _reference(1, 1, "Main", see_references=["Other", "Another"])
-    fresh_persistence.serialize_scraped_index_manifest([_heading(1, "Main", 0)], [ref])
+def test_a_missing_macro_reads_as_the_plain_command(fresh_persistence):
+    """``command_of`` supplies ``index`` where a row never carried a macro name."""
+    from models.latex_record_mapping import command_of
 
-    row = fresh_persistence.fetch_reference_row(1)
-    assert row["see_references"] == ["Other", "Another"]
+    row = base_row(1, heading_id=1)
+    del row["macro_command"]
+    serialize(fresh_persistence, [_heading(1, "Main", 0)], [row])
+
+    assert command_of(fresh_persistence.fetch_reference(1)) == "index"
 
 
 def test_fetch_index_manifest_missing_tables_returns_empty_lists(tmp_path):
@@ -130,7 +98,7 @@ def test_fetch_index_manifest_missing_tables_returns_empty_lists(tmp_path):
     from models.file_tree_persistence import FileTreePersistence
 
     bare_db = str(tmp_path / "bare.db")
-    sqlite3.connect(bare_db).close()  # creates an empty file with no tables at all
+    sqlite3.connect(bare_db).close()
 
     fp = FileTreePersistence.__new__(FileTreePersistence)
     fp.db_path = bare_db
@@ -140,31 +108,11 @@ def test_fetch_index_manifest_missing_tables_returns_empty_lists(tmp_path):
     assert references == []
 
 
-def test_fetch_reference_row_deserializes_malformed_json_per_field_independently(fresh_persistence):
-    import sqlite3
-
-    fresh_persistence.serialize_scraped_index_manifest(
-        [_heading(1, "Main", 0)],
-        [_reference(1, 1, "Main", see_references=["OK"], seealso_references=["OK"])],
-    )
-    # Directly corrupt just seealso_references to invalid JSON.
-    with sqlite3.connect(fresh_persistence.db_path) as conn:
-        conn.execute(
-            "UPDATE project_references SET seealso_references = ? WHERE unique_id_number = 1",
-            ("{not valid json",),
-        )
-        conn.commit()
-
-    row = fresh_persistence.fetch_reference_row(1)
-    assert row["see_references"] == ["OK"]
-    assert row["seealso_references"] is None
+def test_fetch_reference_not_found_returns_none(fresh_persistence):
+    assert fetch(fresh_persistence, 999) is None
 
 
-def test_fetch_reference_row_not_found_returns_none(fresh_persistence):
-    assert fresh_persistence.fetch_reference_row(999) is None
-
-
-def test_fetch_reference_row_with_no_db_path_returns_none(tmp_path):
+def test_fetch_reference_with_no_db_path_returns_none(tmp_path):
     from models.file_tree_persistence import FileTreePersistence
     fp = FileTreePersistence(db_path="")
-    assert fp.fetch_reference_row(1) is None
+    assert fp.fetch_reference(1) is None

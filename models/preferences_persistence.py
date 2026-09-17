@@ -12,7 +12,14 @@ from models.index_tag_grammar import (
 _GENERAL_INT_KEYS = frozenset({"undo_stack_size", "autosave_interval_minutes",
                                "recent_projects_max"})
 _GENERAL_BOOL_KEYS = frozenset({"autosave_enabled", "recent_projects_enabled"})
-_GENERAL_LIST_KEYS = ("encap_bold_values", "encap_italic_values")
+_GENERAL_LIST_KEYS = ("page_style_bold_values", "page_style_italic_values")
+
+#: The names the two page-style lists were stored under before phase FN3,
+#: when the shared General tab used LaTeX's word for them.
+LEGACY_PAGE_STYLE_KEYS = {
+    "encap_bold_values": "page_style_bold_values",
+    "encap_italic_values": "page_style_italic_values",
+}
 
 # Recent projects. The user-visible count is capped at RECENT_PROJECTS_MAX_SHOWN,
 # but the stored list runs to RECENT_PROJECTS_HARD_CAP: lowering the preference
@@ -94,6 +101,7 @@ class PreferencesPersistence(QObject):
         self.settings = QSettings()
         self._migrate_legacy_settings_location()
         self._migrate_legacy_index_prefs_keys()
+        self._migrate_legacy_page_style_keys()
 
     def global_store(self, group: str) -> "QSettingsGlobalStore":
         """
@@ -137,6 +145,24 @@ class PreferencesPersistence(QObject):
         if migrated:
             print(f"[PreferencesPersistence] Migrated {migrated} legacy setting(s) "
                   f"from 'DH Indexing/LatexEditor' into the unified settings location.")
+
+    def _migrate_legacy_page_style_keys(self) -> None:
+        """
+        Moves the two page-style lists to their phase FN3 names, keeping a
+        value already stored under the new name, and removes the old names so
+        a list does not linger under both.
+        """
+        renamed = 0
+        for old_key, new_key in LEGACY_PAGE_STYLE_KEYS.items():
+            if self.settings.contains(old_key):
+                if not self.settings.contains(new_key):
+                    self.settings.setValue(new_key, self.settings.value(old_key))
+                    renamed += 1
+                self.settings.remove(old_key)
+        if renamed:
+            self.settings.sync()
+            print(f"[PreferencesPersistence] Renamed {renamed} page-style list key(s) "
+                  f"from 'encap_*' to 'page_style_*' naming.")
 
     def _migrate_legacy_index_prefs_keys(self) -> None:
         """
@@ -190,8 +216,8 @@ class PreferencesPersistence(QObject):
             "autosave_enabled": True,
             "autosave_interval_minutes": 5,
             "log_directory_name": "session_logs",
-            "encap_bold_values": list(DEFAULT_BOLD_ENCAP_VALUES),
-            "encap_italic_values": list(DEFAULT_ITALIC_ENCAP_VALUES),
+            "page_style_bold_values": list(DEFAULT_BOLD_ENCAP_VALUES),
+            "page_style_italic_values": list(DEFAULT_ITALIC_ENCAP_VALUES),
             "recent_projects_enabled": True,
             "recent_projects_max": RECENT_PROJECTS_DEFAULT_SHOWN,
         }

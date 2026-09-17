@@ -164,7 +164,7 @@ class TestTheLayoutDrivesTheFieldShape:
 
         assert len(parsed["levels"]) == layout.level_count
         assert parsed["levels"] == [("", "Main"), ("", "Sub1"), ("", "Sub2")]
-        assert parsed["encap"] == "textbf"
+        assert parsed["page_style"] == "textbf"
 
     def test_a_shallow_heading_is_padded_to_the_table_width(self):
         from views.entry_modifier_list import _parse_heading_raw_text

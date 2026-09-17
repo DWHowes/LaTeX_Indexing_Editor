@@ -53,7 +53,7 @@ def _find_tree_item(pipeline_ctrl, heading_text: str):
 def _read_heading_raw_text(db_path: str, uid: int) -> str:
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
-            "SELECT heading_raw_text FROM project_references WHERE unique_id_number = ?", (uid,)
+            "SELECT heading_raw FROM project_references WHERE entry_id = ?", (uid,)
         ).fetchone()
     return row[0] if row else None
 

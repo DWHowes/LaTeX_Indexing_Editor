@@ -276,3 +276,31 @@ class TestTheRuleSelection:
 
     def test_the_defaults_seed_the_latex_exception_list(self):
         assert "LaTeX" in CHECK_INDEX_DEFAULTS["mixed_case_exceptions"]
+
+
+class TestTheEngineLimitIsTheProjects:
+    """
+    Phase FN5. The length check was this application's, as
+    ``index_syntax_check.check_entry_length``, and nothing called it. It is the
+    core's ``headings.too_long_for_engine`` now, and this application's Check
+    Index runs it with the project, so the limit is the chosen engine's.
+    """
+
+    class _Project:
+        def __init__(self, engine):
+            self._engine = engine
+
+        def get_metadata_value(self, key):
+            return self._engine if key == "pref_index_engine" else None
+
+    def test_an_entry_too_long_for_xindy_is_reported_in_a_xindy_project(self, tmp_path, qtbot):
+        from models.latex_dialect import XINDY_MAX_ENTRY
+
+        heading = "L" * (XINDY_MAX_ENTRY + 1)
+        controller, *_ = _stack(tmp_path, qtbot, "a \\index{" + heading + "} b\n")
+
+        controller._prefs_config = self._Project("xindy")
+        assert rules(controller.findings()) == {"headings.too_long_for_engine"}
+
+        controller._prefs_config = self._Project("makeindex")
+        assert controller.findings() == []

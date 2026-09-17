@@ -26,6 +26,7 @@ import pytest
 
 from models.latex_record_mapping import end_of, position_of
 from PySide6.QtGui import QTextCursor
+from models.latex_record_mapping import position_of
 
 
 @pytest.fixture(autouse=True)
@@ -126,8 +127,7 @@ class TestCoordinateShiftOnLiveInsertion:
         pipeline_ctrl.execute_project_save_workflow()
 
         persistence = pipeline_ctrl.scope_ctrl.get_persistence_model()
-        db_row = persistence.fetch_reference_row(intro_uid)
-        assert db_row["absolute_position"] == expected_pos
+        assert position_of(persistence.fetch_reference(intro_uid)) == expected_pos
 
 
 class TestFreshInsertionDatabasePersistence:
@@ -167,7 +167,7 @@ class TestFreshInsertionDatabasePersistence:
         pipeline_ctrl.execute_project_save_workflow()
 
         persistence = pipeline_ctrl.scope_ctrl.get_persistence_model()
-        assert persistence.fetch_reference_row(new_uid) is not None
+        assert persistence.fetch_reference(new_uid) is not None
 
     def test_a_fresh_insertion_marks_the_project_as_having_unsaved_tree_changes(self, opened_project):
         pipeline_ctrl, project_dir = opened_project
@@ -204,15 +204,15 @@ class TestDiscardingAFreshInsertion:
         # Never reached the database in the first place: the insert is
         # pending, so discarding it cancels the pair outright rather than
         # having to delete a committed row back out.
-        assert persistence.fetch_reference_row(new_uid) is None
+        assert persistence.fetch_reference(new_uid) is None
 
         norm_path = str(intro_path)
         import os
         pipeline_ctrl._discard_pending_insertions(os.path.normpath(norm_path))
 
-        assert persistence.fetch_reference_row(new_uid) is None
+        assert persistence.fetch_reference(new_uid) is None
         assert new_uid not in pipeline_ctrl.entry_modifier_ctrl.model._records
 
         # ...and a later save must not resurrect it.
         pipeline_ctrl.execute_project_save_workflow()
-        assert persistence.fetch_reference_row(new_uid) is None
+        assert persistence.fetch_reference(new_uid) is None

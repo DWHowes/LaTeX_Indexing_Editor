@@ -1112,7 +1112,7 @@ class AppPipelineController(QObject):
         """
         norm_path = os.path.normpath(file_path) if file_path else ""
         pending_ids = (
-            self.entry_modifier_model.pending_insert_ids_for_file(norm_path)
+            self.entry_modifier_model.pending_insert_ids_for_container(norm_path)
             if self.entry_modifier_model else []
         )
         for entry_id in pending_ids:
@@ -1128,7 +1128,7 @@ class AppPipelineController(QObject):
         # though the DB rollback went away: it is about the recorded
         # positions, not about what was written.
         if norm_path:
-            self._index_commands.drop_commands_for_file(norm_path)
+            self._index_commands.drop_commands_for_container(norm_path)
             self._refresh_undo_actions()
 
         # _tree_modified is a broader, sticky "something in the tree changed
@@ -1147,7 +1147,7 @@ class AppPipelineController(QObject):
         two separate places and had to be unioned here; the journal now
         holds both, so one set of file paths covers everything.
         """
-        all_files = self.entry_modifier_model.get_dirty_file_paths() if self.entry_modifier_model else set()
+        all_files = self.entry_modifier_model.get_dirty_containers() if self.entry_modifier_model else set()
         for file_path in all_files:
             self._discard_pending_insertions(file_path)
 
@@ -1877,8 +1877,8 @@ class AppPipelineController(QObject):
             pass
 
         set_encap_style_values(
-            prefs.get("encap_bold_values"),
-            prefs.get("encap_italic_values"),
+            prefs.get("page_style_bold_values"),
+            prefs.get("page_style_italic_values"),
         )
 
         if self.session_logger is not None:
@@ -2606,7 +2606,7 @@ class AppPipelineController(QObject):
         # tab the user saved had its file flushed above and is no longer
         # dirty, so it is never touched here.
         dirty_files = (
-            set(self.entry_modifier_model.get_dirty_file_paths())
+            set(self.entry_modifier_model.get_dirty_containers())
             if self.entry_modifier_model else set()
         )
         self._discard_all_pending_insertions()
@@ -2741,6 +2741,11 @@ class AppPipelineController(QObject):
         if wrote_something:
             self._tree_modified = False
             self.backup_manager.clear_session_backups()
+            # The backend decides whether a committed write stays undoable.
+            # LaTeX's does (it owns the files it writes), so this clears
+            # nothing today; it is asked rather than assumed (phase FN5).
+            if self._index_commands.committed(self.text_backend):
+                self._refresh_undo_actions()
             # Don't stomp the dirty-flush warning set above -- it would
             # otherwise be overwritten in the same call stack before the
             # user ever sees it, silently hiding a real save failure.

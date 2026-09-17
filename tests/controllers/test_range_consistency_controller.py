@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from controllers.range_consistency_controller import RangeConsistencyController
 from models.entry_modifier_model import EntryModifierModel
+from tests.persistence.latex_rows import store
 
 
 class _FakeIndexEditController:
@@ -64,7 +65,7 @@ class TestRunCheck:
         controller, entry_model, _idx = _controller(qtbot)
         controller.set_active_project(fresh_persistence)
 
-        fresh_persistence.insert_reference(_ref(1, encap="(", heading_id=1, see_references=None, seealso_references=None, uid="u1"))
+        store(fresh_persistence, _ref(1, encap="(", heading_id=1, see_references=None, seealso_references=None, uid="u1"))
         entry_model.load_records([_ref(1, encap="(", heading_id=1)])
 
         controller.run_check()

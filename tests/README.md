@@ -2097,3 +2097,33 @@ the dash is read by McGill's secondary forms only.
 after a full stop read as the author) is left out by the core and named in
 `PlacedTable.unread`; the plan carries it, through this host's projection of the
 `.tex` text, to the shared review dialog.
+
+## Phase FN: this application adapted to a format-neutral core (15 to 17 September 2026)
+
+The core's own tests of neutrality live in `bookindexcore`; these are the ones
+only this application can hold.
+
+- `persistence/latex_rows.py` is the helper the persistence tests use now that
+  the repository takes records: `base_row`, `store`, `rewrite`, `fetch`,
+  `serialize`. `test_reference_crud.py`, `test_index_manifest.py` and
+  `test_statistics_and_queries.py` were rewritten over it.
+- `persistence/test_schema_and_setup.py`: a project as released builds wrote it
+  converts to records with everything it held, does not convert twice, and is
+  backed up before migrating.
+- `unit/models/test_tree_xref_spellings.py`: the four historical
+  cross-reference spellings read as before, **and near misses stay headings**
+  (*Seeking asylum*, *Seeds*), the defect the move exposed.
+- `unit/models/test_tree_reference_ids.py`: the tree reads `unique_id_number`,
+  not a row's `id`, which here can be a database row number.
+- `unit/models/test_encap_style_values.py::TestTheEditorWritesARealMacro`: the
+  shared editor writes `textbf`, not the undefined `bold` the default list
+  opens with.
+- `controllers/test_preferences_persistence.py::TestLegacyPageStyleKeyMigration`.
+- `controllers/test_check_index_controller.py::TestTheEngineLimitIsTheProjects`:
+  the core's length rule, run by this application's Check Index with the
+  project's engine. `unit/models/test_entry_length_check.py` keeps only the
+  limit's declaration; its ten tests of a check nothing called were deleted
+  with the check.
+- `gui_smoke/test_undo_redo_pipeline.py::TestASaveAsksTheBackend`: a save keeps
+  history this backend can reverse, and empties it when the declaration is
+  flipped. It fails with the save's call removed.

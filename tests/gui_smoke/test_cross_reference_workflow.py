@@ -7,6 +7,7 @@ Cross-References File..." splices \\input{cross_refs.tex} into the base
 document.
 """
 import os
+from models.latex_record_mapping import payload_from_reference
 
 
 def test_adding_a_cross_reference_writes_cross_refs_tex(opened_project):
@@ -129,7 +130,7 @@ def test_migrating_a_legacy_cross_reference_does_not_make_it_vanish(opened_proje
 
     pipeline_ctrl, _project_dir = opened_project
     persistence = pipeline_ctrl.scope_ctrl.get_persistence_model()
-    candidates = persistence.fetch_legacy_cross_reference_candidates()
+    candidates = [payload_from_reference(r) for r in persistence.fetch_references_carrying_xrefs()]
     assert candidates, "sample project is expected to have a legacy cross-reference"
 
     from models import index_tag_grammar as grammar

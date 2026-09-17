@@ -13,6 +13,7 @@ import pytest
 
 from bookindexcore.dialect import (
     ClassEmulation,
+    effective_levels,
     STANDARD_PAGE_STYLE,
     TextRun,
     XRefSpec,
@@ -96,7 +97,7 @@ class TestDeclarations:
     def test_it_carries_index_classes_natively(self):
         """imakeidx has ``[name]``; nothing is emulated and no level is spent."""
         assert LATEX_DIALECT.class_emulation is ClassEmulation.NATIVE
-        assert LATEX_DIALECT.effective_max_levels(None) == LATEX_DIALECT.max_levels == 3
+        assert effective_levels(LATEX_DIALECT, None) == LATEX_DIALECT.max_levels == 3
 
     def test_ranges_are_paired(self):
         """

@@ -24,6 +24,7 @@ They migrate on their own ordered list under their own version key, so this
 application can add a table without touching the core's numbering.
 """
 
+import json
 import os
 import sqlite3
 
@@ -72,11 +73,133 @@ def _host_baseline(conn: sqlite3.Connection) -> None:
     """)
 
 
+#: The JSON-encoded list columns of the pre-2.4.0 reference table.
+_LEGACY_JSON_COLUMNS = ("see_references", "seealso_references")
+
+
+def _references_from_the_core_table(conn: sqlite3.Connection) -> None:
+    r"""
+    Converts the references the core's schema 2.4.0 set aside, with this
+    application's own dialect.
+
+    Until phase FN the core's reference table was this application's: one row
+    per ``\index`` macro with its file, line, column, offsets, macro name and
+    encapsulation as named columns. Core 2.4.0 replaced it with a table that
+    stores the shared record, and copied across only the columns that always
+    meant a record field. **Everything it could not read without knowing LaTeX**
+    (whether ``(textbf`` opens a bold range, which columns are a position) it
+    kept verbatim in each record's ``extra``, for this migration.
+
+    So this is where ``(textbf`` becomes ``page_style="textbf"`` with
+    ``range_role="open"``, ``see{X}`` becomes a cross-reference, and the four
+    position columns become the locator's hint: through
+    ``reference_from_row``, the same reading a freshly scanned project gets.
+    Idempotent: a record with nothing set aside is left alone.
+    """
+    from bookindexcore.persistence import (
+        LEGACY_COLUMNS_KEY, iter_references, write_reference,
+    )
+    from models.latex_record_mapping import reference_from_row
+
+    for record in list(iter_references(conn)):
+        legacy = dict(record.extra.get(LEGACY_COLUMNS_KEY) or {})
+        if not legacy:
+            continue
+        for column in _LEGACY_JSON_COLUMNS:
+            value = legacy.get(column)
+            if isinstance(value, str) and value:
+                try:
+                    legacy[column] = json.loads(value)
+                except ValueError:
+                    legacy[column] = None
+        row = {
+            **legacy,
+            "unique_id_number": record.entry_id,
+            "file_path": record.container,
+            "uid": record.anchor,
+            "heading_raw_text": record.heading_raw,
+            "heading_id": record.heading_id,
+            "range_partner_id": record.range_partner_id,
+            "index_class": record.index_class,
+        }
+        converted = reference_from_row(row)
+        converted.extra.pop(LEGACY_COLUMNS_KEY, None)
+        write_reference(conn, converted)
+
+
+#: This application's per-index package preferences before index definitions
+#: existed, and the definition field each becomes. ``title`` is a field in its
+#: own right; the rest are engine options the definition carries opaquely.
+#: Deliberately not every ``pref_imakeidx_*`` key: ``noautomatic`` and
+#: ``nonewpage`` are package options, set once for the document.
+LEGACY_INDEX_OPTION_KEYS = {
+    "pref_imakeidx_title": "title",
+    "pref_imakeidx_columns": "columns",
+    "pref_imakeidx_intoc": "intoc",
+}
+
+
+def _index_definition_from_legacy_preferences(conn: sqlite3.Connection) -> None:
+    """
+    Folds this application's single set of per-index preferences into the
+    default index definition.
+
+    **Moved here from the core's migration 2.2.0 in phase FN**, where it put
+    this application's settings vocabulary into the migration every host runs.
+    The core now seeds a blank default definition and this fills it, so a
+    project arrives at the definition it always did.
+
+    Idempotent and never destructive: it folds only into a default definition
+    that is still blank, and only keys that exist. A title or options someone
+    has since set are left alone.
+    """
+    from bookindexcore.persistence import (
+        INDEX_DEFINITIONS_KEY, decode_definitions, encode_definitions,
+    )
+
+    prefs = dict(conn.execute(
+        "SELECT key, value FROM project_metadata WHERE key IN "
+        f"({','.join('?' * len(LEGACY_INDEX_OPTION_KEYS))})",
+        tuple(LEGACY_INDEX_OPTION_KEYS),
+    ).fetchall())
+    if not prefs:
+        return
+
+    row = conn.execute(
+        "SELECT value FROM project_metadata WHERE key = ?", (INDEX_DEFINITIONS_KEY,)
+    ).fetchone()
+    definitions = decode_definitions(row[0] if row else None)
+    default = definitions[0]
+    if default.title or default.options:
+        return
+
+    definitions[0] = type(default)(
+        name=default.name,
+        title=str(prefs.get("pref_imakeidx_title", "")),
+        kind=default.kind,
+        options={field: prefs[key] for key, field in LEGACY_INDEX_OPTION_KEYS.items()
+                 if field != "title" and key in prefs},
+    )
+    conn.execute(
+        "INSERT INTO project_metadata (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (INDEX_DEFINITIONS_KEY, encode_definitions(definitions)),
+    )
+
+
+def _migration_after_core_neutrality(conn: sqlite3.Connection) -> None:
+    """Both of phase FN's host conversions, in one step."""
+    _references_from_the_core_table(conn)
+    _index_definition_from_legacy_preferences(conn)
+
+
 #: This application's schema history. Numbered independently of the core's --
 #: see bookindexcore.persistence.migrations for why the core starts at 2.0.0
 #: and why a host list needs its own key rather than sharing that one.
 LATEX_MIGRATIONS: tuple[Migration, ...] = (
     Migration("1.0.0", "project file, sync-state and custom-command tables", _host_baseline),
+    Migration("1.1.0", "references and index definitions converted from what core 2.4.0 set aside",
+              _migration_after_core_neutrality),
 )
 
 

@@ -1,11 +1,12 @@
 r"""
-How this application's ``project_references`` columns become an
-``IndexReference``, and back.
+How this application's row payloads become an ``IndexReference``, and back.
 
-The shared record (``bookindexcore.model.records``) is deliberately free of
-column names, because the shared schema does not exist yet — phase 5 builds
-it. Until then this module is the one place the two meet, and everything it
-knows is knowledge phase 5 will delete rather than move.
+A row here is the shape ``LatexIndexParser`` emits for every macro it scans,
+and the shape the tree, the entry table and the tools were written against.
+**It is no longer the database's shape**: since core schema 2.4.0 the project
+database stores the shared record itself, and this application converts rows
+to records only where its own pipeline meets the core's. The column names
+below are this application's words for LaTeX's things, and they stay here.
 
 **What goes where, and why:**
 
@@ -248,9 +249,24 @@ def reference_from_row(row: dict) -> IndexReference:
     return from_row(row, LATEX_ROW_MAPPING, dialect=LATEX_DIALECT)
 
 
+def payload_from_reference(record: IndexReference) -> dict:
+    """
+    A record as this application's row payload, list columns left as lists.
+
+    What the scanner emits and what the loader, the cross-reference migration
+    tool and the range-consistency analyser read. The database stores records
+    now, so a record read back from it comes through here to reach them.
+    """
+    row = to_row(record, LATEX_ROW_MAPPING, dialect=LATEX_DIALECT)
+    row["is_range_closer"] = 1 if record.is_range_closer else 0
+    row["is_cross_reference"] = 1 if record.is_cross_reference else 0
+    return row
+
+
 def row_from_reference(record: IndexReference) -> dict:
     """
-    A record as a row ready for ``sqlite3``.
+    A record as a row with its list columns JSON-encoded, as the tree's node
+    payloads have always stored them.
 
     The two derived columns are computed here, and the JSON list columns are
     encoded here. Both used to be done -- inconsistently -- by whichever
@@ -259,9 +275,7 @@ def row_from_reference(record: IndexReference) -> dict:
     raw-list case failed the sqlite bind and was swallowed as a flush
     failure.
     """
-    row = to_row(record, LATEX_ROW_MAPPING, dialect=LATEX_DIALECT)
-    row["is_range_closer"] = 1 if record.is_range_closer else 0
-    row["is_cross_reference"] = 1 if record.is_cross_reference else 0
+    row = payload_from_reference(record)
 
     for column in _JSON_COLUMNS:
         value = row.get(column)

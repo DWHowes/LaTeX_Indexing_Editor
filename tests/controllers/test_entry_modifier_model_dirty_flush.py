@@ -27,8 +27,14 @@ see_references/seealso_references straight from an already-loaded
 original record (a real list), so duplicating any reference loaded from
 a freshly-scraped project crashed the DB insert. Fixed the same way, in
 register_new_entry.
+
+Since core schema 2.4.0 (phase FN) the store hands the repository records and
+the record's list fields travel as JSON the repository encodes itself, so
+neither half of that bug can recur by the same route. These stay as the
+regression tests they were: a list goes in, the same list comes back.
 """
 from models.entry_modifier_model import EntryModifierModel
+from tests.persistence.latex_rows import fetch, store
 
 
 def _record(uid=1, heading="Main", see=None, seealso=None):
@@ -56,7 +62,7 @@ def test_flush_serializes_empty_list_see_references_before_writing(fresh_persist
     The common real-world case: every freshly-parsed entry has
     see_references == [] (not None), even one with no cross-references.
     """
-    fresh_persistence.insert_reference(_record(see=None, seealso=None))
+    store(fresh_persistence, _record(see=None, seealso=None))
     model = EntryModifierModel(persistence=fresh_persistence)
     model.load_records([_record(see=[], seealso=[])])
     model.mark_dirty(1)
@@ -64,11 +70,11 @@ def test_flush_serializes_empty_list_see_references_before_writing(fresh_persist
     success, failure = model.flush_dirty_to_db()
 
     assert (success, failure) == (1, 0)
-    assert fresh_persistence.fetch_reference_row(1)["see_references"] == []
+    assert fetch(fresh_persistence, 1)["see_references"] == []
 
 
 def test_flush_serializes_nonempty_list_see_references(fresh_persistence, qtbot):
-    fresh_persistence.insert_reference(_record())
+    store(fresh_persistence, _record())
     model = EntryModifierModel(persistence=fresh_persistence)
     model.load_records([_record(see=["Alpha", "Beta"])])
     model.mark_dirty(1)
@@ -76,11 +82,11 @@ def test_flush_serializes_nonempty_list_see_references(fresh_persistence, qtbot)
     success, failure = model.flush_dirty_to_db()
 
     assert (success, failure) == (1, 0)
-    assert fresh_persistence.fetch_reference_row(1)["see_references"] == ["Alpha", "Beta"]
+    assert fetch(fresh_persistence, 1)["see_references"] == ["Alpha", "Beta"]
 
 
 def test_flush_leaves_none_valued_see_references_untouched(fresh_persistence, qtbot):
-    fresh_persistence.insert_reference(_record())
+    store(fresh_persistence, _record())
     model = EntryModifierModel(persistence=fresh_persistence)
     model.load_records([_record(see=None, seealso=None)])
     model.mark_dirty(1)
@@ -88,19 +94,19 @@ def test_flush_leaves_none_valued_see_references_untouched(fresh_persistence, qt
     success, failure = model.flush_dirty_to_db()
 
     assert (success, failure) == (1, 0)
-    assert fresh_persistence.fetch_reference_row(1)["see_references"] is None
+    assert fetch(fresh_persistence, 1)["see_references"] is None
 
 
 def test_flush_still_updates_heading_raw_text_alongside_see_references(fresh_persistence, qtbot):
     """Sanity check that serializing see_references didn't disturb the rest of the write."""
-    fresh_persistence.insert_reference(_record(heading="Main"))
+    store(fresh_persistence, _record(heading="Main"))
     model = EntryModifierModel(persistence=fresh_persistence)
     model.load_records([_record(heading="Renamed", see=[])])
     model.mark_dirty(1)
 
     model.flush_dirty_to_db()
 
-    assert fresh_persistence.fetch_reference_row(1)["heading_raw_text"] == "Renamed"
+    assert fetch(fresh_persistence, 1)["heading_raw_text"] == "Renamed"
 
 
 def test_register_new_entry_serializes_list_valued_see_references(fresh_persistence, qtbot):
@@ -117,7 +123,7 @@ def test_register_new_entry_serializes_list_valued_see_references(fresh_persiste
     # registration -- but it must still be serialized on the way out.
     model.flush_dirty_to_db()
 
-    row = fresh_persistence.fetch_reference_row(1)
+    row = fetch(fresh_persistence, 1)
     assert row["see_references"] == []
     assert row["seealso_references"] == ["Other"]
 
@@ -129,7 +135,7 @@ def test_register_new_entry_leaves_none_valued_see_references_untouched(fresh_pe
     model.register_new_entry(_record(uid=1, see=None, seealso=None))
     model.flush_dirty_to_db()
 
-    row = fresh_persistence.fetch_reference_row(1)
+    row = fetch(fresh_persistence, 1)
     assert row["see_references"] is None
     assert row["seealso_references"] is None
 

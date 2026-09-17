@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal, Slot
+from bookindexcore.model.records import IndexReference
 
 
 def _flatten_tex_file_nodes(file_tree_payload: list[dict]) -> list[dict]:
@@ -189,9 +190,19 @@ class ProjectScopeController(QObject):
         """Public boundary contract to extract the calculated project database path."""
         return self.model.get_active_database_path()
 
-    def save_scraped_index_data(self, headings: list[dict], references: list[dict]) -> None:
-        """Routes out-of-band data arrays safely down into the persistence model layer."""
-        self.model.serialize_scraped_index_manifest(headings, references)
+    def save_scraped_index_data(self, headings: list[dict], references: list) -> None:
+        """
+        Writes a fresh scan to the project database.
+
+        The scanner's payloads are rows in this application's own vocabulary;
+        the repository stores records, so they are read into records here, the
+        one way a row becomes a record in this application.
+        """
+        from models.latex_record_mapping import reference_from_row
+
+        records = [ref if isinstance(ref, IndexReference) else reference_from_row(ref)
+                   for ref in references]
+        self.model.serialize_scraped_index_manifest(headings, records)
         self.scope_mutated.emit()
 
     def persist_project_file_records(self, file_tree_payload: list[dict]) -> None:
@@ -246,7 +257,8 @@ class ProjectScopeController(QObject):
         return self.model   
 
     def get_max_unique_id(self) -> int:
-        return self.model.get_max_unique_id()
+        """The highest integer entry id stored; this application's ids are integers."""
+        return self.model.max_integer_entry_id()
 
     def close_active_project(self) -> None:
         """

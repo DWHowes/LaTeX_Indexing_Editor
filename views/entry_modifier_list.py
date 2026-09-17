@@ -53,7 +53,7 @@ def _split_heading(heading_raw_text: str) -> dict:
             if idx < len(tag.levels) else ("", "")
             for idx in _shared._LAYOUT.levels
         ],
-        "encap": tag.encap,
+        "page_style": tag.encap,
     }
 
 
@@ -80,18 +80,21 @@ from bookindexcore.ui.entry_table.entry_table import (   # noqa: E402
     PageStyleDelegate,
     _advise_cell,
     _advise_row,
-    _apply_encap_font,
     _fields_from_row_items,
-    _is_bold_encap,
-    _is_italic_encap,
-    _is_range_encap,
     _level_cells,
-    _make_encap_item,
     _page_command,
     _page_style_for,
-    _PAGE_STYLE_OPTIONS,
-    set_encap_style_values,
+    _page_style_options,
 )
+
+# The shared table's page-style helpers, under the names this application's
+# code and tests have always used. "Encap" is LaTeX's own word for the thing,
+# so it is right here and was wrong in the shared table (phase FN3).
+_apply_encap_font = _shared._apply_page_style_font
+_is_bold_encap = _shared._is_bold_page_style
+_is_italic_encap = _shared._is_italic_page_style
+_is_range_encap = _shared._is_range_page_style
+_make_encap_item = _shared._make_page_style_item
 
 _LAYOUT = _shared._LAYOUT
 
@@ -113,3 +116,39 @@ def _parse_heading_raw_text(heading_raw_text: str) -> dict:
 
 
 _validate_hierarchy = EntryModifierList._validate_hierarchy
+
+
+def set_encap_style_values(bold_values=None, italic_values=None) -> None:
+    """
+    Replaces the bold and/or italic encap name sets, from Preferences.
+
+    Lived in the shared entry table until phase FN3, where it called
+    ``set_emphasis_values``, a method no dialect protocol declares and only
+    this application's dialect has. Extending LaTeX's open vocabulary from a
+    preference is this application's business; the shared table reads
+    whatever vocabulary the dialect then has.
+
+    A None or empty argument leaves that list at its current value rather
+    than blanking it -- an empty list would silently turn off bold/italic
+    rendering altogether, which is never what an empty preferences field
+    means.
+
+    Values are normalised the way the table compares them (stripped and
+    lowercased), so "TextBF " entered in the dialog matches a "textbf"
+    encap in the source.
+    """
+    def _normalise(raw):
+        if isinstance(raw, str):
+            raw = raw.split(",")
+        return tuple(dict.fromkeys(
+            str(item).strip().lower() for item in (raw or []) if str(item).strip()
+        ))
+
+    vocabulary = LATEX_DIALECT.page_style_vocabulary
+    current_bold = tuple(s.value.lower() for s in vocabulary if s.bold)
+    current_italic = tuple(s.value.lower() for s in vocabulary if s.italic)
+
+    LATEX_DIALECT.set_emphasis_values(
+        _normalise(bold_values) or current_bold,
+        _normalise(italic_values) or current_italic,
+    )

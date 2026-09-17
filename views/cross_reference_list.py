@@ -21,7 +21,7 @@ COL_TARGET = 2
 _HEADERS = ["Source", "Type", "Cross-ref"]
 
 # (combo label, canonical value stored in the model/DB) -- same idiom as
-# entry_modifier_list.py's _PAGE_STYLE_OPTIONS.
+# the shared entry table's _page_style_options().
 _XREF_TYPE_OPTIONS: list[tuple[str, str]] = [
     ("see", "see"),
     ("see also", "seealso"),

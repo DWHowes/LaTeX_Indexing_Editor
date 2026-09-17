@@ -97,18 +97,18 @@ class TestCache:
         """
         delegate = IndexTextFormatterDelegate()
 
-        stripped = delegate._parse_latex_formatting_segments("See a@b")
-        kept = delegate._parse_latex_formatting_segments("See a@b", strip_sort_key=False)
+        stripped = delegate._parse_formatting_segments("See a@b")
+        kept = delegate._parse_formatting_segments("See a@b", strip_sort_key=False)
 
         assert stripped == [("b", False, False)]
         assert kept == [("See a@b", False, False)]
 
     def test_clearing_the_cache_leaves_it_usable(self, qtbot):
         delegate = IndexTextFormatterDelegate()
-        delegate._parse_latex_formatting_segments("Widgets")
+        delegate._parse_formatting_segments("Widgets")
 
         delegate.clear_cache()
 
-        assert delegate._parse_latex_formatting_segments("Widgets") == [
+        assert delegate._parse_formatting_segments("Widgets") == [
             ("Widgets", False, False)
         ]

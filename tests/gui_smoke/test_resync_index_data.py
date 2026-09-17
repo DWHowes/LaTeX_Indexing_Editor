@@ -95,7 +95,7 @@ class TestUnsavedChangesGuard:
         with sqlite3.connect(db_path) as conn:
             return {
                 row[0] for row in conn.execute(
-                    "SELECT DISTINCT heading_raw_text FROM project_references"
+                    "SELECT DISTINCT heading_raw FROM project_references"
                 )
             }
 

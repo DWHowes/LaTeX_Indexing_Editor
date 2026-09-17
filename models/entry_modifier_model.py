@@ -89,7 +89,10 @@ class EntryModifierModel(QtEntryStore):
 
     def __init__(self, persistence=None, staging_model=None):
         super().__init__(
-            persistence, staging_model, codec=_LatexCodec(), dialect=LATEX_DIALECT
+            persistence, staging_model, codec=_LatexCodec(), dialect=LATEX_DIALECT,
+            # A container here is a .tex path, and a path can be spelled two
+            # ways; the shared store compares containers verbatim unless told.
+            container_key=os.path.normpath,
         )
 
     # ------------------------------------------------------------------

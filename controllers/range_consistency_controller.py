@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QMessageBox
 from models.range_consistency_model import find_range_consistency_issues
 from views.range_consistency_dialog import RangeConsistencyDialog
 from bookindexcore.ui.style import AppStyleConfiguration
+from models.latex_record_mapping import payload_from_reference
 
 
 class RangeConsistencyController(QObject):
@@ -95,7 +96,15 @@ class RangeConsistencyController(QObject):
         self.dialog.activateWindow()
 
     def _refresh_dialog_contents(self) -> None:
-        candidates = self._persistence.fetch_range_consistency_candidates() if self._persistence else []
+        # Records from the repository, in no positional order: position is this
+        # application's, so the rows are ordered here the way the analyser has
+        # always read them, by file, then heading, then place in the file.
+        records = self._persistence.fetch_range_consistency_candidates() if self._persistence else []
+        candidates = sorted(
+            (payload_from_reference(record) for record in records),
+            key=lambda row: (row.get("file_path") or "", row.get("heading_id") or 0,
+                             row.get("absolute_position") or 0),
+        )
         issues = find_range_consistency_issues(candidates)
         rows_by_category = self._build_rows_by_category(issues)
         self.dialog.populate_issues(self._CATEGORY_ORDER, rows_by_category)

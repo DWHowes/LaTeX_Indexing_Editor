@@ -22,6 +22,7 @@ from bookindexcore.util.text import TextSanitizer
 from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController
 from conftest import anchored_backup_manager
+from tests.persistence.latex_rows import store
 
 
 class _FakeIndexModelEngine:
@@ -238,7 +239,7 @@ class TestMigrationOfferOnProjectOpen:
     @staticmethod
     def _add_legacy_xref(fresh_persistence, tmp_path):
         """A project_references row whose encap is a see/seealso pointer."""
-        fresh_persistence.insert_reference({
+        store(fresh_persistence, {
             "unique_id_number": 1,
             "heading_raw_text": "Gadgets",
             "file_path": str(tmp_path / "ch.tex"),
@@ -371,7 +372,7 @@ class TestMigrationRefusals:
         controller.set_active_project(fresh_persistence, str(tmp_path))
         controller.run_migration_scan()  # lazily constructs controller.migration_dialog
 
-        fresh_persistence.insert_reference({
+        store(fresh_persistence, {
             "unique_id_number": 5,
             "heading_raw_text": "Gadgets",
             "uid": "u5",

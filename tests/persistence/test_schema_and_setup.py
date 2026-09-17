@@ -4,6 +4,7 @@ FileTreePersistence: __init__, initialize_database_schema, _ensure_column,
 configure_project_database_path, update_active_database_connection,
 reset_to_default_state.
 """
+import json
 import sqlite3
 from pathlib import Path
 
@@ -70,7 +71,7 @@ def test_with_no_project_open_nothing_connects(monkeypatch):
     assert fp.fetch_active_unpruned_paths() == []
     assert fp.fetch_pruned_files() == []
     fp.update_file_active_state("C:/nowhere/chapter.tex", False)
-    assert fp.get_max_unique_id() == 0
+    assert fp.max_integer_entry_id() == 0
 
 
 def test_every_method_that_connects_checks_the_path_first():
@@ -235,192 +236,157 @@ def test_ensure_column_is_idempotent(tmp_path):
         assert list(columns).count("status") == 1
 
 
-def test_initialize_schema_migrates_legacy_project_references_table(tmp_path):
+
+_LEGACY_REFERENCES = """
+    CREATE TABLE project_references (
+        id INTEGER PRIMARY KEY,
+        heading_id INTEGER,
+        heading_raw_text TEXT NOT NULL,
+        uid TEXT UNIQUE NOT NULL,
+        unique_id_number INTEGER NOT NULL,
+        file_path TEXT NOT NULL,
+        line_number INTEGER NOT NULL,
+        column_offset INTEGER NOT NULL,
+        absolute_position INTEGER,
+        absolute_end INTEGER,
+        encap TEXT DEFAULT 'standard',
+        see_references TEXT,
+        seealso_references TEXT,
+        has_references INTEGER DEFAULT 0,
+        range_partner_id INTEGER DEFAULT NULL,
+        is_range_closer INTEGER DEFAULT 0
+    )
+"""
+
+
+def _legacy_project(db_path, rows):
     """
-    A pre-existing project_references table created without macro_command
-    (simulating a DB from before that column existed) should get it added,
-    defaulted to 'index', the next time initialize_database_schema runs --
-    this is the exact migration path _ensure_column exists for.
+    A project database as a released build wrote it: the core's reference
+    table before 2.4.0, which was this application's, with no stamps at all.
+    ``rows`` are (entry id, encap, extra columns).
     """
-    db_path = str(tmp_path / "legacy.db")
     with sqlite3.connect(db_path) as conn:
-        conn.execute("""
-            CREATE TABLE project_references (
-                id INTEGER PRIMARY KEY,
-                heading_id INTEGER,
-                heading_raw_text TEXT NOT NULL,
-                uid TEXT UNIQUE NOT NULL,
-                unique_id_number INTEGER NOT NULL,
-                file_path TEXT NOT NULL,
-                line_number INTEGER NOT NULL,
-                column_offset INTEGER NOT NULL,
-                absolute_position INTEGER,
-                absolute_end INTEGER,
-                encap TEXT DEFAULT 'standard',
-                see_references TEXT,
-                seealso_references TEXT,
-                has_references INTEGER DEFAULT 0,
-                range_partner_id INTEGER DEFAULT NULL,
-                is_range_closer INTEGER DEFAULT 0
+        conn.execute(_LEGACY_REFERENCES)
+        for entry_id, encap, extra in rows:
+            columns = {"id": entry_id, "heading_raw_text": f"Term{entry_id}",
+                       "uid": f"a.tex:{entry_id}:0", "unique_id_number": entry_id,
+                       "file_path": "a.tex", "line_number": entry_id, "column_offset": 0,
+                       "absolute_position": 10 * entry_id, "absolute_end": 10 * entry_id + 5,
+                       "encap": encap, **extra}
+            conn.execute(
+                f"INSERT INTO project_references ({', '.join(columns)}) "
+                f"VALUES ({', '.join('?' for _ in columns)})",
+                tuple(columns.values()),
             )
-        """)
-        conn.execute(
-            "INSERT INTO project_references (id, heading_raw_text, uid, unique_id_number, file_path, line_number, column_offset) "
-            "VALUES (1, 'Term', 'u1', 1, 'a.tex', 1, 0)"
-        )
         conn.commit()
+
+
+def test_a_released_project_converts_to_records_with_everything_it_held(tmp_path):
+    """
+    The whole migration path for a project this application wrote before
+    phase FN: core 2.4.0 replaces the table and keeps what it cannot read,
+    and this application's host migration 1.1.0 reads it with the LaTeX
+    dialect. Positions, macro name, ranges and cross-references all arrive.
+
+    This test used to assert that a ``macro_command`` column was added to an
+    old table. The column no longer exists anywhere: a row that never had one
+    reads as the plain ``index`` command.
+    """
+    from models.latex_record_mapping import command_of, line_of, position_of
+
+    db_path = str(tmp_path / "legacy.db")
+    _legacy_project(db_path, [
+        (1, "(textbf", {"range_partner_id": 2}),
+        (2, ")", {"is_range_closer": 1, "range_partner_id": 1}),
+        (3, "see{Duty of care}", {"see_references": json.dumps(["Duty of care"])}),
+    ])
 
     fp = FileTreePersistence(db_path=db_path)
 
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT macro_command FROM project_references WHERE id = 1").fetchone()
-    assert row["macro_command"] == "index"
+    opener, closer, xref = (fp.fetch_reference(i) for i in (1, 2, 3))
+    assert (opener.range_role, opener.page_style, opener.range_partner_id) == ("open", "textbf", 2)
+    assert closer.range_role == "close"
+    assert xref.xref is not None and xref.xref.target == "Duty of care"
+    assert xref.extra["see_references"] == ["Duty of care"]
+    assert (position_of(opener), line_of(opener), command_of(opener)) == (10, 1, "index")
+    assert "legacy_columns" not in opener.extra
 
 
-class TestCrossReferenceFlag:
+def test_the_conversion_does_not_run_twice(tmp_path):
+    """A converted reference edited since is left alone on the next open."""
+    from models.latex_record_mapping import reference_from_row
+    from tests.persistence.latex_rows import base_row
+
+    db_path = str(tmp_path / "legacy.db")
+    _legacy_project(db_path, [(1, "textbf", {})])
+    fp = FileTreePersistence(db_path=db_path)
+    fp.update_reference(reference_from_row(base_row(1, heading_raw_text="Edited", encap="textit")))
+
+    FileTreePersistence(db_path=db_path)
+
+    assert fp.fetch_reference(1).heading_raw == "Edited"
+    assert fp.fetch_reference(1).page_style == "textit"
+
+
+def test_the_database_is_kept_as_it_was_before_the_migration(tmp_path):
+    db_path = str(tmp_path / "legacy.db")
+    _legacy_project(db_path, [(1, "textbf", {})])
+
+    FileTreePersistence(db_path=db_path)
+
+    kept = list(tmp_path.glob("legacy.db.before-*"))
+    assert len(kept) == 1
+    with sqlite3.connect(kept[0]) as conn:
+        assert conn.execute("SELECT encap FROM project_references").fetchone()[0] == "textbf"
+
+
+class TestCrossReferencesFromEncaps:
     """
-    is_cross_reference -- a stored boolean written from the encap at parse
-    time, so the queries that count or exclude cross-references never have
-    to spell out what one looks like in LaTeX.
+    A cross-reference is a field of the record since core schema 2.4.0, and
+    this application's ``see{...}`` becomes that field where a row becomes a
+    record, through the LaTeX dialect.
 
-    Three queries used to interpolate an
-    ``(encap LIKE 'see{%' OR encap LIKE 'seealso{%')`` fragment instead.
-    That put markup inside SQL, which the other two index formats cannot
-    reuse -- Word and InDesign both carry cross-reference-ness in a field --
-    and it gave the database a second, looser opinion on xref-ness than
-    index_tag_grammar's own.
+    This class used to test a stored ``is_cross_reference`` flag the core
+    derived from the encap, which itself replaced an
+    ``(encap LIKE 'see{%' OR encap LIKE 'seealso{%')`` fragment in three
+    queries. Neither survives: the flag was a copy of a derived value, and the
+    record now holds the value.
     """
 
-    def _rows(self, fp):
-        with sqlite3.connect(fp.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            return {
-                r["unique_id_number"]: r["is_cross_reference"]
-                for r in conn.execute(
-                    "SELECT unique_id_number, is_cross_reference FROM project_references"
-                )
-            }
+    def _xrefs(self, fp):
+        _, records = fp.fetch_index_manifest()
+        return {r.entry_id: r.is_cross_reference for r in records}
 
-    def _reference(self, uid_number, encap):
-        # see_references/seealso_references are bound directly by
-        # insert_reference with no fallback default, so real callers always
-        # supply them -- see _full_entry_dict in test_reference_crud.py.
-        return {
-            "unique_id_number": uid_number,
-            "heading_raw_text": f"Term{uid_number}",
-            "uid": f"u{uid_number}",
-            "file_path": "a.tex",
-            "line_number": 1,
-            "column_offset": 0,
-            "absolute_position": 0,
-            "absolute_end": 10,
-            "encap": encap,
-            "see_references": None,
-            "seealso_references": None,
-        }
+    def test_a_scan_records_cross_references_and_leaves_others_alone(self, fresh_persistence):
+        from tests.persistence.latex_rows import base_row, serialize
 
-    def test_bulk_insert_flags_cross_references_and_leaves_others_alone(self, fresh_persistence):
-        fresh_persistence.serialize_scraped_index_manifest([], [
-            self._reference(1, "see{Duty of care}"),
-            self._reference(2, "seealso{Negligence}"),
-            self._reference(3, "textbf"),
-            self._reference(4, "standard"),
+        serialize(fresh_persistence, [], [
+            base_row(1, encap="see{Duty of care}"),
+            base_row(2, encap="seealso{Negligence}"),
+            base_row(3, encap="textbf"),
+            base_row(4, encap="standard"),
         ])
 
-        assert self._rows(fresh_persistence) == {1: 1, 2: 1, 3: 0, 4: 0}
+        assert self._xrefs(fresh_persistence) == {1: True, 2: True, 3: False, 4: False}
 
-    def test_single_insert_flags_from_the_encap(self, fresh_persistence):
-        fresh_persistence.insert_reference(self._reference(7, "see{Elsewhere}"))
-        fresh_persistence.insert_reference(self._reference(8, "textit"))
+    def test_editing_an_encap_into_a_cross_reference_records_it(self, fresh_persistence):
+        from tests.persistence.latex_rows import base_row, rewrite, store
 
-        assert self._rows(fresh_persistence) == {7: 1, 8: 0}
+        store(fresh_persistence, base_row(9, encap="textbf"))
+        rewrite(fresh_persistence, base_row(9, encap="seealso{Target}"))
+        assert self._xrefs(fresh_persistence) == {9: True}
 
-    def test_editing_an_encap_into_a_cross_reference_sets_the_flag(self, fresh_persistence):
-        """
-        The flag is derived, so it has to ride along with every encap
-        write. A stale flag is invisible in the entry table and wrong in
-        every cross-reference query.
-        """
-        fresh_persistence.insert_reference(self._reference(9, "textbf"))
+        rewrite(fresh_persistence, base_row(9, encap="textbf"))
+        assert self._xrefs(fresh_persistence) == {9: False}
 
-        fresh_persistence.update_reference_field(9, {"encap": "seealso{Target}"})
-
-        assert self._rows(fresh_persistence) == {9: 1}
-
-    def test_editing_a_cross_reference_back_to_a_page_style_clears_the_flag(self, fresh_persistence):
-        fresh_persistence.insert_reference(self._reference(10, "see{Target}"))
-
-        fresh_persistence.update_reference_field(10, {"encap": "textbf"})
-
-        assert self._rows(fresh_persistence) == {10: 0}
-
-    def test_an_update_that_does_not_touch_the_encap_leaves_the_flag_alone(self, fresh_persistence):
-        fresh_persistence.insert_reference(self._reference(11, "see{Target}"))
-
-        fresh_persistence.update_reference_field(11, {"line_number": 42})
-
-        assert self._rows(fresh_persistence) == {11: 1}
-
-    def test_a_legacy_database_is_backfilled_from_its_encaps(self, tmp_path):
-        """
-        The migration path: an older project database has the encaps but
-        not the column, and the backfill is computed rather than a constant
-        DEFAULT.
-        """
+    def test_a_legacy_project_converts_its_cross_references(self, tmp_path):
         db_path = str(tmp_path / "legacy_xref.db")
-        with sqlite3.connect(db_path) as conn:
-            conn.execute("""
-                CREATE TABLE project_references (
-                    id INTEGER PRIMARY KEY,
-                    heading_id INTEGER,
-                    heading_raw_text TEXT NOT NULL,
-                    uid TEXT UNIQUE NOT NULL,
-                    unique_id_number INTEGER NOT NULL,
-                    file_path TEXT NOT NULL,
-                    line_number INTEGER NOT NULL,
-                    column_offset INTEGER NOT NULL,
-                    absolute_position INTEGER,
-                    absolute_end INTEGER,
-                    encap TEXT DEFAULT 'standard',
-                    see_references TEXT,
-                    seealso_references TEXT,
-                    has_references INTEGER DEFAULT 0,
-                    range_partner_id INTEGER DEFAULT NULL,
-                    is_range_closer INTEGER DEFAULT 0
-                )
-            """)
-            for uid_number, encap in ((1, "see{A}"), (2, "seealso{B}"), (3, "textbf"), (4, "standard")):
-                conn.execute(
-                    "INSERT INTO project_references "
-                    "(id, heading_raw_text, uid, unique_id_number, file_path, line_number, column_offset, encap) "
-                    "VALUES (?, ?, ?, ?, 'a.tex', 1, 0, ?)",
-                    (uid_number, f"Term{uid_number}", f"u{uid_number}", uid_number, encap),
-                )
-            conn.commit()
+        _legacy_project(db_path, [(1, "see{A}", {}), (2, "seealso{B}", {}),
+                                  (3, "textbf", {}), (4, "standard", {})])
 
         fp = FileTreePersistence(db_path=db_path)
 
-        assert self._rows(fp) == {1: 1, 2: 1, 3: 0, 4: 0}
-
-    def test_the_backfill_does_not_re_run_on_a_second_open(self, tmp_path):
-        """
-        Reopening must not overwrite a flag. If it did, a row whose encap
-        and flag legitimately disagree -- there is no such case today, but
-        the backfill is a migration, not a repair pass -- would be silently
-        rewritten on every project open.
-        """
-        db_path = str(tmp_path / "reopen.db")
-        fp = FileTreePersistence(db_path=db_path)
-        fp.insert_reference(self._reference(1, "textbf"))
-
-        with sqlite3.connect(db_path) as conn:
-            conn.execute("UPDATE project_references SET is_cross_reference = 1")
-            conn.commit()
-
-        FileTreePersistence(db_path=db_path)
-
-        assert self._rows(fp) == {1: 1}
+        assert self._xrefs(fp) == {1: True, 2: True, 3: False, 4: False}
 
     def test_the_grammar_no_longer_carries_a_sql_predicate(self):
         """

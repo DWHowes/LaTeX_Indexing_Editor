@@ -1,164 +1,82 @@
 """
-Single-row CRUD on project_references (used by EntryModifierModel/
-IndexEditController) and project_headings: update_reference_field,
-delete_reference, insert_reference, resolve_or_insert_heading,
-save_batch_index_manifest, get_max_unique_id, update_heading_text,
-delete_heading_if_orphaned.
-"""
-import uuid
+Single-reference writes, as this application makes them, and the heading rows
+beside them.
 
+**Rewritten in phase FN (15 September 2026).** These tests used to exercise the
+core repository's own rules with this application's rows: which columns an
+update was allowed to touch, a UUID it minted when a row had no ``uid``, a
+binding error for an unencoded list. Core schema 2.4.0 removed every one of
+those rules, because the table now stores the shared record whole, and the
+repository's behaviour is tested in the core. What stays here is this
+application's half: **a LaTeX row written through the repository comes back
+as the same LaTeX row**, positions, macro and all.
+"""
 import pytest
 
+from tests.persistence.latex_rows import base_row, fetch, rewrite, store
 
-def _full_entry_dict(unique_id_number=1, **overrides):
-    # insert_reference's SQL binds :see_references/:seealso_references
-    # directly and neither gets a fallback default in the merge dict
-    # (unlike uid/heading_id/has_references/range_partner_id/
-    # is_range_closer/macro_command) -- omitting them raises a sqlite3
-    # "did not supply a value for binding parameter" error, not a graceful
-    # default, so real callers always provide them (typically None).
-    base = {
-        "unique_id_number": unique_id_number,
-        "heading_raw_text": "Main",
-        "file_path": "a.tex",
-        "line_number": 1,
-        "column_offset": 0,
-        "absolute_position": 10,
-        "absolute_end": 20,
-        "encap": "standard",
-        "see_references": None,
-        "seealso_references": None,
-    }
-    base.update(overrides)
-    return base
-
-
-# ---------------------------------------------------------------------
-# insert_reference
-# ---------------------------------------------------------------------
 
 class TestInsertReference:
-    def test_insert_full_dict_succeeds(self, fresh_persistence):
-        assert fresh_persistence.insert_reference(_full_entry_dict()) is True
-        row = fresh_persistence.fetch_reference_row(1)
-        assert row is not None
-        assert row["file_path"] == "a.tex"
+    def test_a_row_comes_back_with_its_file_and_positions(self, fresh_persistence):
+        assert store(fresh_persistence, base_row(1)) is True
+        row = fetch(fresh_persistence, 1)
+        assert (row["file_path"], row["line_number"], row["column_offset"],
+                row["absolute_position"], row["absolute_end"]) == ("a.tex", 1, 0, 10, 20)
 
-    def test_insert_missing_required_field_fails_gracefully(self, fresh_persistence):
-        entry = _full_entry_dict()
-        del entry["file_path"]
-        assert fresh_persistence.insert_reference(entry) is False
+    def test_the_supplied_uid_is_the_anchor(self, fresh_persistence):
+        store(fresh_persistence, base_row(1, uid="my-custom-uid"))
+        assert fetch(fresh_persistence, 1)["uid"] == "my-custom-uid"
 
-    def test_insert_defaults_uid_to_a_uuid_when_absent(self, fresh_persistence):
-        fresh_persistence.insert_reference(_full_entry_dict())
-        row = fresh_persistence.fetch_reference_row(1)
-        # Must not raise -- confirms it's a real UUID-shaped string.
-        uuid.UUID(row["uid"])
-
-    def test_insert_preserves_supplied_uid(self, fresh_persistence):
-        fresh_persistence.insert_reference(_full_entry_dict(uid="my-custom-uid"))
-        row = fresh_persistence.fetch_reference_row(1)
-        assert row["uid"] == "my-custom-uid"
-
-    def test_insert_has_references_defaults_to_true_unlike_schema_default(self, fresh_persistence):
+    def test_a_row_with_no_uid_gets_this_applications_anchor_rule(self, fresh_persistence):
         """
-        The schema column itself defaults to 0, but insert_reference's own
-        application-level default (when the key is simply absent from the
-        dict) is True/1 -- a real, non-obvious divergence worth pinning.
+        ``path:line:column``, minted where a row becomes a record
+        (``anchor_for``). The repository used to mint a UUID of its own, a
+        second rule nothing else followed.
         """
-        fresh_persistence.insert_reference(_full_entry_dict())
-        row = fresh_persistence.fetch_reference_row(1)
-        assert row["has_references"] is True
+        row = base_row(1, line_number=4, column_offset=7)
+        del row["uid"]
+        store(fresh_persistence, row)
+        assert fetch(fresh_persistence, 1)["uid"] == "a.tex:4:7"
 
-    def test_insert_is_range_closer_defaults_to_false(self, fresh_persistence):
-        fresh_persistence.insert_reference(_full_entry_dict())
-        row = fresh_persistence.fetch_reference_row(1)
-        assert row["is_range_closer"] is False
+    def test_the_macro_name_survives(self, fresh_persistence):
+        store(fresh_persistence, base_row(1, macro_command="isidx"))
+        assert fetch(fresh_persistence, 1)["macro_command"] == "isidx"
 
-    def test_insert_macro_command_defaults_to_index(self, fresh_persistence):
-        fresh_persistence.insert_reference(_full_entry_dict())
-        row = fresh_persistence.fetch_reference_row(1)
-        assert row["macro_command"] == "index"
+    def test_list_columns_survive_as_lists(self, fresh_persistence):
+        store(fresh_persistence, base_row(1, see_references=["a", "b"]))
+        assert fetch(fresh_persistence, 1)["see_references"] == ["a", "b"]
 
-    def test_insert_duplicate_unique_id_number_fails(self, fresh_persistence):
-        fresh_persistence.insert_reference(_full_entry_dict(unique_id_number=1, uid="u1"))
-        # uid collision (schema has UNIQUE on uid) -- different unique_id_number, same uid.
-        result = fresh_persistence.insert_reference(_full_entry_dict(unique_id_number=2, uid="u1"))
-        assert result is False
+    def test_a_styled_range_opener_survives(self, fresh_persistence):
+        store(fresh_persistence, base_row(1, encap="(textbf"))
+        row = fetch(fresh_persistence, 1)
+        assert row["encap"] == "(textbf" and row["is_range_closer"] == 0
 
-
-# ---------------------------------------------------------------------
-# update_reference_field
-# ---------------------------------------------------------------------
-
-class TestUpdateReferenceField:
-    def test_updates_a_mutable_column(self, fresh_persistence):
-        fresh_persistence.insert_reference(_full_entry_dict())
-
-        result = fresh_persistence.update_reference_field(1, {"heading_raw_text": "Renamed"})
-
-        assert result is True
-        assert fresh_persistence.fetch_reference_row(1)["heading_raw_text"] == "Renamed"
-
-    def test_ignores_non_mutable_columns_silently(self, fresh_persistence):
-        fresh_persistence.insert_reference(_full_entry_dict(uid="original-uid"))
-
-        result = fresh_persistence.update_reference_field(1, {"uid": "hacked-uid", "is_range_closer": 1})
-
-        assert result is False  # zero overlapping mutable keys -- no DB touch at all
-        row = fresh_persistence.fetch_reference_row(1)
-        assert row["uid"] == "original-uid"
-        assert row["is_range_closer"] is False
-
-    def test_partial_overlap_updates_only_mutable_keys(self, fresh_persistence):
-        fresh_persistence.insert_reference(_full_entry_dict(uid="original-uid"))
-
-        result = fresh_persistence.update_reference_field(1, {"uid": "hacked-uid", "line_number": 42})
-
-        assert result is True
-        row = fresh_persistence.fetch_reference_row(1)
-        assert row["uid"] == "original-uid"
-        assert row["line_number"] == 42
-
-    def test_empty_record_returns_false(self, fresh_persistence):
-        fresh_persistence.insert_reference(_full_entry_dict())
-        assert fresh_persistence.update_reference_field(1, {}) is False
-
-    def test_nonexistent_entry_id_returns_false(self, fresh_persistence):
-        assert fresh_persistence.update_reference_field(999, {"line_number": 1}) is False
-
-    def test_passing_a_raw_list_for_see_references_fails_gracefully(self, fresh_persistence):
-        """
-        Unlike serialize_scraped_index_manifest, this method does NOT
-        JSON-encode see_references/seealso_references -- passing a Python
-        list directly causes a binding error, caught and turned into False
-        rather than raised.
-        """
-        fresh_persistence.insert_reference(_full_entry_dict())
-
-        result = fresh_persistence.update_reference_field(1, {"see_references": ["a", "b"]})
-
-        assert result is False
-
-    def test_passing_pre_serialized_json_string_succeeds(self, fresh_persistence):
-        import json
-        fresh_persistence.insert_reference(_full_entry_dict())
-
-        result = fresh_persistence.update_reference_field(1, {"see_references": json.dumps(["a", "b"])})
-
-        assert result is True
-        assert fresh_persistence.fetch_reference_row(1)["see_references"] == ["a", "b"]
+    def test_a_second_row_with_the_same_entry_id_is_refused(self, fresh_persistence):
+        store(fresh_persistence, base_row(1, uid="u1"))
+        assert store(fresh_persistence, base_row(1, uid="u2")) is False
 
 
-# ---------------------------------------------------------------------
-# delete_reference
-# ---------------------------------------------------------------------
+class TestRewriteReference:
+    def test_a_renamed_heading_is_written(self, fresh_persistence):
+        store(fresh_persistence, base_row(1))
+        assert rewrite(fresh_persistence, base_row(1, heading_raw_text="Renamed")) is True
+        assert fetch(fresh_persistence, 1)["heading_raw_text"] == "Renamed"
+
+    def test_moved_positions_are_written(self, fresh_persistence):
+        store(fresh_persistence, base_row(1))
+        rewrite(fresh_persistence, base_row(1, line_number=42, absolute_position=300, absolute_end=310))
+        row = fetch(fresh_persistence, 1)
+        assert (row["line_number"], row["absolute_position"], row["absolute_end"]) == (42, 300, 310)
+
+    def test_a_reference_that_is_not_stored_is_refused(self, fresh_persistence):
+        assert rewrite(fresh_persistence, base_row(999)) is False
+
 
 class TestDeleteReference:
     def test_deletes_existing_row(self, fresh_persistence):
-        fresh_persistence.insert_reference(_full_entry_dict())
+        store(fresh_persistence, base_row(1))
         assert fresh_persistence.delete_reference(1) is True
-        assert fresh_persistence.fetch_reference_row(1) is None
+        assert fetch(fresh_persistence, 1) is None
 
     def test_deleting_nonexistent_row_returns_false(self, fresh_persistence):
         assert fresh_persistence.delete_reference(999) is False
@@ -212,62 +130,62 @@ class TestSaveBatchIndexManifest:
         assert fresh_persistence.save_batch_index_manifest([]) is False
 
     def test_all_valid_entries_returns_true_and_applies_updates(self, fresh_persistence):
-        fresh_persistence.insert_reference(_full_entry_dict(unique_id_number=1, uid="u1"))
-        fresh_persistence.insert_reference(_full_entry_dict(unique_id_number=2, uid="u2"))
+        from models.latex_record_mapping import reference_from_row
+
+        store(fresh_persistence, base_row(1))
+        store(fresh_persistence, base_row(2))
 
         result = fresh_persistence.save_batch_index_manifest([
-            {"unique_id_number": 1, "line_number": 10},
-            {"unique_id_number": 2, "line_number": 20},
+            reference_from_row(base_row(1, line_number=10)),
+            reference_from_row(base_row(2, line_number=20)),
         ])
 
         assert result is True
-        assert fresh_persistence.fetch_reference_row(1)["line_number"] == 10
-        assert fresh_persistence.fetch_reference_row(2)["line_number"] == 20
+        assert fetch(fresh_persistence, 1)["line_number"] == 10
+        assert fetch(fresh_persistence, 2)["line_number"] == 20
 
     def test_mixed_batch_applies_valid_entries_but_returns_false_overall(self, fresh_persistence):
-        fresh_persistence.insert_reference(_full_entry_dict(unique_id_number=1, uid="u1"))
+        from models.latex_record_mapping import reference_from_row
+
+        store(fresh_persistence, base_row(1))
 
         result = fresh_persistence.save_batch_index_manifest([
-            {"unique_id_number": 1, "line_number": 99},   # valid
-            {"unique_id_number": 999, "line_number": 1},  # nonexistent -- update_reference_field returns False
-            {"line_number": 1},                           # missing unique_id_number entirely
+            reference_from_row(base_row(1, line_number=99)),
+            reference_from_row(base_row(999, line_number=1)),
         ])
 
         assert result is False
-        assert fresh_persistence.fetch_reference_row(1)["line_number"] == 99
+        assert fetch(fresh_persistence, 1)["line_number"] == 99
 
 
 # ---------------------------------------------------------------------
-# get_max_unique_id
+# max_integer_entry_id
 # ---------------------------------------------------------------------
 
-class TestGetMaxUniqueId:
+class TestMaxIntegerEntryId:
     def test_returns_zero_on_empty_table(self, fresh_persistence):
-        assert fresh_persistence.get_max_unique_id() == 0
+        assert fresh_persistence.max_integer_entry_id() == 0
 
     def test_returns_the_max_value(self, fresh_persistence):
-        fresh_persistence.insert_reference(_full_entry_dict(unique_id_number=5, uid="u5"))
-        fresh_persistence.insert_reference(_full_entry_dict(unique_id_number=12, uid="u12"))
-        fresh_persistence.insert_reference(_full_entry_dict(unique_id_number=3, uid="u3"))
+        for entry_id in (5, 12, 3):
+            store(fresh_persistence, base_row(entry_id))
 
-        assert fresh_persistence.get_max_unique_id() == 12
+        assert fresh_persistence.max_integer_entry_id() == 12
 
-    def test_raises_when_db_path_is_invalid(self, tmp_path):
+    def test_raises_when_the_database_has_no_tables(self, tmp_path):
         """
-        Unlike virtually every other read method, get_max_unique_id has no
-        db_path guard and no exception handling at all -- confirm it
-        raises rather than silently defaulting.
+        A database with no tables is a broken project, not an empty one, and
+        says so rather than answering 0.
         """
         import sqlite3
         from models.file_tree_persistence import FileTreePersistence
 
         fp = FileTreePersistence.__new__(FileTreePersistence)
         fp.db_path = str(tmp_path / "does_not_exist_schema.db")
-        import sqlite3 as sq
-        sq.connect(fp.db_path).close()  # empty file, no tables at all
+        sqlite3.connect(fp.db_path).close()
 
         with pytest.raises(sqlite3.OperationalError):
-            fp.get_max_unique_id()
+            fp.max_integer_entry_id()
 
 
 # ---------------------------------------------------------------------
@@ -323,7 +241,7 @@ class TestUpdateHeadingText:
 class TestDeleteHeadingIfOrphaned:
     def test_heading_with_references_is_not_deleted(self, fresh_persistence):
         heading_id = fresh_persistence.resolve_or_insert_heading("Main", "Main", depth=0)
-        fresh_persistence.insert_reference(_full_entry_dict(unique_id_number=1, uid="u1", heading_id=heading_id))
+        store(fresh_persistence, base_row(1, heading_id=heading_id))
 
         result = fresh_persistence.delete_heading_if_orphaned(heading_id)
 
@@ -352,14 +270,12 @@ class TestDeleteHeadingIfOrphaned:
         SQLite FK enforcement (PRAGMA foreign_keys) is never turned on by
         this codebase's connections, so ON DELETE SET NULL never actually
         fires -- delete_heading_if_orphaned is the manual substitute.
-        Exercise the whole insert -> delete reference -> delete heading
-        lifecycle to prove it holds together without FK enforcement.
         """
         heading_id = fresh_persistence.resolve_or_insert_heading("Main", "Main", depth=0)
-        fresh_persistence.insert_reference(_full_entry_dict(unique_id_number=1, uid="u1", heading_id=heading_id))
+        store(fresh_persistence, base_row(1, heading_id=heading_id))
 
-        assert fresh_persistence.delete_heading_if_orphaned(heading_id) is False  # still referenced
+        assert fresh_persistence.delete_heading_if_orphaned(heading_id) is False
 
         fresh_persistence.delete_reference(1)
 
-        assert fresh_persistence.delete_heading_if_orphaned(heading_id) is True  # now orphaned
+        assert fresh_persistence.delete_heading_if_orphaned(heading_id) is True

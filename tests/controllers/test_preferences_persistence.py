@@ -66,6 +66,38 @@ class TestLegacySettingsLocationMigration:
         assert prefs.settings.value("font_family", "Arial") == "Arial"
 
 
+class TestLegacyPageStyleKeyMigration:
+    """
+    Phase FN3. The shared General tab named its two page-style lists
+    ``encap_bold_values`` and ``encap_italic_values``, LaTeX's word, and this
+    application stored them under those names. They are
+    ``page_style_bold_values`` and ``page_style_italic_values`` now, and an
+    indexer's saved lists must arrive under the new names rather than be
+    replaced by the defaults.
+    """
+
+    def test_a_saved_list_arrives_under_the_new_name(self, qtbot):
+        settings = QSettings()
+        settings.setValue("encap_bold_values", "strong, textbf")
+        settings.sync()
+
+        prefs = PreferencesPersistence()
+
+        assert prefs.load_application_preferences()["page_style_bold_values"] == ["strong", "textbf"]
+        assert not prefs.settings.contains("encap_bold_values")
+
+    def test_a_value_already_under_the_new_name_is_kept(self, qtbot):
+        settings = QSettings()
+        settings.setValue("encap_italic_values", "LEGACY")
+        settings.setValue("page_style_italic_values", "emph")
+        settings.sync()
+
+        prefs = PreferencesPersistence()
+
+        assert prefs.load_application_preferences()["page_style_italic_values"] == ["emph"]
+        assert not prefs.settings.contains("encap_italic_values")
+
+
 class TestLegacyIndexPrefsKeyMigration:
     def test_renames_a_legacy_ist_key_to_fmt(self, qtbot):
         settings = QSettings()
@@ -264,8 +296,8 @@ class TestGeneralPreferences:
         assert data["autosave_enabled"] is True
         assert data["autosave_interval_minutes"] == 5
         assert data["log_directory_name"] == "session_logs"
-        assert data["encap_bold_values"] == ["bold", "textbf", "bf"]
-        assert data["encap_italic_values"] == ["textit", "it", "italic"]
+        assert data["page_style_bold_values"] == ["bold", "textbf", "bf"]
+        assert data["page_style_italic_values"] == ["textit", "it", "italic"]
 
     def test_log_folder_default_is_visible_not_hidden(self, qtbot):
         """
@@ -286,8 +318,8 @@ class TestGeneralPreferences:
             "autosave_enabled": False,
             "autosave_interval_minutes": 15,
             "log_directory_name": "logs",
-            "encap_bold_values": ["strong", "textbf"],
-            "encap_italic_values": ["emph"],
+            "page_style_bold_values": ["strong", "textbf"],
+            "page_style_italic_values": ["emph"],
         })
 
         data = prefs.load_application_preferences()
@@ -295,8 +327,8 @@ class TestGeneralPreferences:
         assert data["autosave_enabled"] is False
         assert data["autosave_interval_minutes"] == 15
         assert data["log_directory_name"] == "logs"
-        assert data["encap_bold_values"] == ["strong", "textbf"]
-        assert data["encap_italic_values"] == ["emph"]
+        assert data["page_style_bold_values"] == ["strong", "textbf"]
+        assert data["page_style_italic_values"] == ["emph"]
 
     def test_a_single_item_list_survives_the_round_trip(self, qtbot):
         """
@@ -306,9 +338,9 @@ class TestGeneralPreferences:
         """
         prefs = PreferencesPersistence()
 
-        prefs.update_general_preferences({"encap_italic_values": ["emph"]})
+        prefs.update_general_preferences({"page_style_italic_values": ["emph"]})
 
-        assert prefs.load_application_preferences()["encap_italic_values"] == ["emph"]
+        assert prefs.load_application_preferences()["page_style_italic_values"] == ["emph"]
 
     def test_string_valued_int_is_coerced(self, qtbot):
         prefs = PreferencesPersistence()

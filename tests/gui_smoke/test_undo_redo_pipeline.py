@@ -83,7 +83,7 @@ def _db_row_exists(pipeline_ctrl, entry_id: int) -> bool:
     persistence = pipeline_ctrl.scope_ctrl.get_persistence_model()
     with persistence._get_connection() as conn:
         row = conn.execute(
-            "SELECT 1 FROM project_references WHERE unique_id_number = ?", (entry_id,)
+            "SELECT 1 FROM project_references WHERE entry_id = ?", (entry_id,)
         ).fetchone()
     return row is not None
 
@@ -442,4 +442,35 @@ class TestUndoGuard:
 
         pipeline_ctrl._resync_index_data_from_disk()
 
+        assert pipeline_ctrl._index_commands.can_undo is False
+
+
+
+# ---------------------------------------------------------------------------
+# Phase FN5: the save asks the backend whether history survives it
+# ---------------------------------------------------------------------------
+
+class TestASaveAsksTheBackend:
+    """
+    ``DocumentBackend.clears_on_commit`` had no reader. The save workflow reads
+    it through ``IndexCommandStack.committed``. This application's backend owns
+    the files it writes and answers False, so a save keeps the history; the
+    flipped declaration is what shows the answer is read rather than assumed.
+    """
+
+    def test_a_save_keeps_the_history_this_backend_can_reverse(self, opened_project):
+        pipeline_ctrl, project_dir = opened_project
+        _open_tab_at_start(pipeline_ctrl, project_dir / "01.Intro" / "intro.tex")
+        _insert(pipeline_ctrl, "KeptAfterSave")
+
+        assert pipeline_ctrl.execute_project_save_workflow()
+        assert pipeline_ctrl._index_commands.can_undo is True
+
+    def test_a_backend_that_clears_on_commit_empties_the_stack(self, opened_project, monkeypatch):
+        pipeline_ctrl, project_dir = opened_project
+        monkeypatch.setattr(pipeline_ctrl.text_backend, "clears_on_commit", True)
+        _open_tab_at_start(pipeline_ctrl, project_dir / "01.Intro" / "intro.tex")
+        _insert(pipeline_ctrl, "ClearedBySave")
+
+        assert pipeline_ctrl.execute_project_save_workflow()
         assert pipeline_ctrl._index_commands.can_undo is False

@@ -38,6 +38,7 @@ from controllers.document_io_controller import DocumentIOController
 from controllers.index_edit_controller import IndexEditController
 from views.index_tree_view import IndexTreeView
 from conftest import anchored_backup_manager
+from tests.persistence.latex_rows import store
 
 
 class _FakeEngine:
@@ -187,7 +188,7 @@ class TestDiscardDirtyEdits:
 
         persistence = FileTreePersistence(db_path=str(tmp_path / "db.sqlite"))
         main_heading_id = persistence.resolve_or_insert_heading("Main", "Main", depth=0)
-        persistence.insert_reference({
+        store(persistence, {
             "unique_id_number": uid, "heading_raw_text": "Main", "file_path": file_path,
             "line_number": ref["line_number"], "column_offset": ref["column_offset"],
             "absolute_position": ref["absolute_position"], "absolute_end": ref["absolute_end"],

@@ -199,12 +199,22 @@ class LatexDialect:
         The labels are the macro names themselves. These are values an
         indexer chose and typed, so showing them back is more useful than a
         prettified rendering that hides which macro is which.
+
+        LaTeX's own ``textbf`` and ``textit`` come first in their lists
+        whenever the project knows them. The shared page-style editor writes
+        the first value with each reading, and the default bold list opens
+        with ``bold``, which LaTeX does not define: in the order the
+        preference keeps, choosing Bold would write ``\\index{x|bold}``.
         """
+        def _canonical_first(values, canonical):
+            return sorted(values, key=lambda v: v.strip().lower() != canonical)
+
         styles = [PageStyle(STANDARD_PAGE_STYLE, "Standard")]
-        styles += [PageStyle(v, v, bold=True) for v in self._bold_values]
+        styles += [PageStyle(v, v, bold=True)
+                   for v in _canonical_first(self._bold_values, "textbf")]
         styles += [
             PageStyle(v, v, italic=True)
-            for v in self._italic_values
+            for v in _canonical_first(self._italic_values, "textit")
             if v not in self._bold_values
         ]
         return tuple(styles)
@@ -279,36 +289,6 @@ class LatexDialect:
         removing it there would change what the entry says.
         """
         return self._STRING_PREFIX.sub("", text)
-
-    def implicit_range_threshold(self, project: object = None) -> Optional[int]:
-        r"""
-        Three. ``makeindex`` collapses three or more consecutive pages into
-        ``100--102`` on its own, measured in E7.
-
-        This is the half of the elision question that turned out to be a real
-        cross-host divergence: Word forms no implicit ranges at all, so the
-        same entries print ``100--104`` here and ``100, 101, 102, 103, 104``
-        there. Neither host lets it be changed, which is why it is declared
-        rather than offered as a setting.
-
-        **The xindy answer is [UNVERIFIED]** and takes makeindex's number
-        rather than None. xindy does form ranges, and its threshold is set by
-        the index style's ``markup-crossref-list`` machinery, so the honest
-        options were this number or a measurement nobody has taken. None would
-        have been the one clearly wrong answer — it claims the engine never
-        forms a range, which would have the locator advice recommending ranges
-        that xindy is about to form anyway.
-        """
-        return 3
-
-    def effective_max_levels(self, project: object = None) -> int:
-        """
-        Always :attr:`max_levels`. LaTeX carries index classes natively, so
-        unlike InDesign it never spends a level on one -- but callers still
-        ask through here, so that a project opened in another application
-        gets the right answer from the same call.
-        """
-        return self.max_levels
 
     # -- index classes ------------------------------------------------------
     #
@@ -467,18 +447,6 @@ class LatexDialect:
 
     def check(self, text: str, *, role: str = syntax.ROLE_DISPLAY) -> list[Finding]:
         return syntax.check(text, role=role)
-
-    def check_entry(self, body: str, project: object = None) -> list[Finding]:
-        r"""
-        Findings about a whole tag body, as opposed to one field of it.
-
-        Currently the engine's length limit and nothing else. Kept separate
-        from :meth:`check` because the two answer different questions and take
-        different text: ``check`` is given one heading level as the indexer
-        types it, this is given the whole ``\index{...}`` argument.
-        """
-        return syntax.check_entry_length(body, self.max_entry_length(project))
-
 
 #: The one instance. Held rather than constructed per call because the
 #: page-style vocabulary is project state -- see the module docstring.

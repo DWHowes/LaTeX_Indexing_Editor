@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QMessageBox
 from models.cross_reference_model import parse_encap_xref, render_cross_refs_file
 from views.legacy_xref_migration_dialog import LegacyXrefMigrationDialog
 from bookindexcore.ui.style import AppStyleConfiguration
+from models.latex_record_mapping import payload_from_reference
 
 
 class CrossReferenceController(QObject):
@@ -148,7 +149,8 @@ class CrossReferenceController(QObject):
         if self._persistence is None:
             return []
 
-        candidates = self._persistence.fetch_legacy_cross_reference_candidates()
+        candidates = [payload_from_reference(record) for record in
+                      self._persistence.fetch_references_carrying_xrefs()]
 
         entry_model = getattr(self._index_edit_ctrl, "_entry_model", None)
         if entry_model is None:

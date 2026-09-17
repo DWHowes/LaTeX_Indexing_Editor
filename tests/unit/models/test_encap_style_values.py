@@ -157,3 +157,31 @@ class TestTheDialectSeesTheSamePreference:
         for value in ("strong", "heavy"):
             assert weights[value].bold is eml._is_bold_encap(value) is True
         assert weights["slanted"].italic is eml._is_italic_encap("slanted") is True
+
+
+class TestTheEditorWritesARealMacro:
+    """
+    Phase FN3. The shared page-style editor offers one option per reading and
+    writes the first value the vocabulary lists with it. The default bold list
+    opens with ``bold``, which LaTeX does not define, so the dialect lists
+    ``textbf`` and ``textit`` first whenever the project knows them.
+    """
+
+    def _written(self, label):
+        return dict(eml._page_style_options())[label]
+
+    def test_the_defaults_write_textbf_and_textit(self):
+        assert (self._written("Bold"), self._written("Italic")) == ("textbf", "textit")
+
+    def test_the_order_the_preference_keeps_does_not_decide(self):
+        eml.set_encap_style_values("bf, bold, textbf", "it, textit")
+
+        assert (self._written("Bold"), self._written("Italic")) == ("textbf", "textit")
+
+    def test_a_project_without_textbf_writes_its_own_first_macro(self):
+        eml.set_encap_style_values("strong, heavy", None)
+
+        assert self._written("Bold") == "strong"
+
+    def test_latex_offers_no_bold_italic(self):
+        assert [label for label, _ in eml._page_style_options()] == ["Standard", "Bold", "Italic"]

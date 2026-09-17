@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+### Adapted to the core's phase FN
+
+The shared core was made format-neutral (`bookindexcore`
+`documentation/format_neutrality_scope.md`), and this application adapted in
+the same change.
+
+- **Projects migrate, with a backup.** Core schema 2.4.0 stores references as
+  records; host migration 1.1.0 reads the columns the core kept with the LaTeX
+  dialect, and folds the old imakeidx preferences into the index definition.
+  The database is copied beside itself before migrating. Checked on copies of
+  two real projects: nothing lost. Two range closers with a stale stored flag
+  now read as closers, which the application already derived from their encap.
+- **Records rather than rows** through the repository, the project loader, the
+  cross-reference and range-consistency controllers
+  (`latex_record_mapping.payload_from_reference`). `EntryModifierModel` passes
+  `container_key=os.path.normpath`.
+- **The emphasis preference is this application's.** `set_encap_style_values`
+  lives in `views/entry_modifier_list.py`; the preference keys are
+  `page_style_bold_values` and `page_style_italic_values`, and saved lists move
+  from the old `encap_*` names on first launch. The dialect lists `textbf` and
+  `textit` first, because the shared editor writes the first spelling of each
+  style and the default bold list opens with `bold`, which LaTeX does not
+  define.
+- **The tree reads this application's cross-references itself.**
+  `models/index_tree_model_engine.read_lenient_xref` accepts `see{X}`,
+  `\see{X}`, `|see{X}` and `see:X` and passes them to the shared engine. **A
+  defect fixed on the way**: the old patterns made the brace optional, so a
+  heading such as *Seeking asylum* showed in the tree as *See king asylum*.
+  The tree view reads `unique_id_number` for an entry's id.
+- **Check Index reports an entry too long for the project's engine**, through
+  the core's new `headings.too_long_for_engine`. The check this application had
+  for it, `index_syntax_check.check_entry_length` and
+  `LatexDialect.check_entry`, was never called and is deleted.
+- **A save asks the backend whether undo history survives it**
+  (`IndexCommandStack.committed`); this backend keeps it.
+- `LatexDialect` no longer declares `implicit_range_threshold` or
+  `effective_max_levels`, and the backend no longer declares
+  `reachable_states`; the core removed all three.
+
 ### Nothing changed here
 
 The shared parser no longer reads a sentence naming a book, or a quotation in a

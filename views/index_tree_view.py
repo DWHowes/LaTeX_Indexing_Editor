@@ -89,15 +89,23 @@ class IndexTreeView(_SharedTreeView):
         is the entry's own id, which is what this application has always drawn
         in the References column and what makes a token clickable through to a
         known row.
+
+        The entry id is this application's ``unique_id_number``, read here:
+        the shared default reads ``id`` alone since phase FN3, and in this
+        application's rows ``id`` can be a database row number instead.
         """
         record = super().tree_reference_from_row(row)
         if record is None:
             return None
+        entry_id = row.get("unique_id_number")
+        if entry_id is None:
+            entry_id = record.entry_id
         file_path = str(row.get("file_path") or "")
         raw_col = row.get("column_offset")
         return replace(
             record,
-            label=str(record.entry_id),
+            entry_id=entry_id,
+            label=str(entry_id),
             location=SourceCoordinate(
                 file_path=file_path,
                 line_number=int(row.get("line_number") or 1),

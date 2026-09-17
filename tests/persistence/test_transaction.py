@@ -20,6 +20,7 @@ import sqlite3
 import pytest
 
 from models.file_tree_persistence import FileTreePersistence
+from tests.persistence.latex_rows import base_row, store
 
 
 def _heading(heading_id, text="Main", depth=0):
@@ -104,14 +105,7 @@ class TestProxyBehaviour:
         with pytest.raises(RuntimeError):
             with fresh_persistence.transaction():
                 fresh_persistence.insert_heading_with_id(_heading(2, "Second"))
-                fresh_persistence.insert_reference({
-                    "unique_id_number": 10, "heading_raw_text": "Second",
-                    "file_path": "a.tex", "line_number": 1, "column_offset": 1,
-                    "absolute_position": 0, "absolute_end": 10, "encap": "standard",
-                    "uid": "u10", "see_references": None, "seealso_references": None,
-                    "has_references": 1, "heading_id": 2, "range_partner_id": None,
-                    "is_range_closer": 0, "macro_command": "index",
-                })
+                store(fresh_persistence, base_row(10, heading_raw_text="Second", heading_id=2))
                 fresh_persistence.delete_heading_if_orphaned(1)
                 raise RuntimeError("interrupted save")
 

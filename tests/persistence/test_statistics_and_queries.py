@@ -1,30 +1,22 @@
 """
-fetch_index_statistics, fetch_range_consistency_candidates,
-fetch_legacy_cross_reference_candidates -- all three key off the same
-encap-column-prefix convention ('see{...}' / 'seealso{...}' vs. everything
-else) to distinguish ordinary references from cross-reference-flavored
-ones, so they're tested together against a shared row matrix.
+fetch_index_statistics, fetch_range_consistency_candidates and
+fetch_references_carrying_xrefs, over this application's rows.
+
+**Rewritten in phase FN.** These used to pin a stored cross-reference flag the
+repository derived from the encap. Since core schema 2.4.0 the record carries
+its cross-reference itself, so what matters here is that LaTeX's own spellings
+(``see{X}``, ``seealso{X}``, ``(`` and ``)``) become the right record fields on
+the way in, which is ``reference_from_row``'s job, and the queries then count
+and select them.
 """
 
+from tests.persistence.latex_rows import base_row, store
 
-def _ref(fp, unique_id, heading_id, encap="standard", is_range_closer=0, **overrides):
-    entry = {
-        "unique_id_number": unique_id,
-        "heading_raw_text": "Main",
-        "uid": f"u{unique_id}",
-        "file_path": "a.tex",
-        "line_number": 1,
-        "column_offset": 0,
-        "absolute_position": unique_id,
-        "absolute_end": unique_id + 5,
-        "encap": encap,
-        "heading_id": heading_id,
-        "see_references": None,
-        "seealso_references": None,
-        "is_range_closer": is_range_closer,
-    }
-    entry.update(overrides)
-    fp.insert_reference(entry)
+
+def _ref(fp, unique_id, heading_id, encap="standard", **overrides):
+    store(fp, base_row(unique_id, heading_id=heading_id, encap=encap,
+                       absolute_position=unique_id, absolute_end=unique_id + 5,
+                       **overrides))
 
 
 class TestFetchIndexStatistics:
@@ -62,8 +54,8 @@ class TestFetchIndexStatistics:
     def test_total_references_excludes_range_closers_and_cross_references(self, fresh_persistence):
         heading_id = fresh_persistence.resolve_or_insert_heading("Main", "Main", depth=0)
         _ref(fresh_persistence, 1, heading_id, encap="standard")
-        _ref(fresh_persistence, 2, heading_id, encap="(", is_range_closer=0)
-        _ref(fresh_persistence, 3, heading_id, encap=")", is_range_closer=1)
+        _ref(fresh_persistence, 2, heading_id, encap="(")
+        _ref(fresh_persistence, 3, heading_id, encap=")")
         _ref(fresh_persistence, 4, heading_id, encap="see{Other}")
 
         stats = fresh_persistence.fetch_index_statistics()
@@ -79,15 +71,14 @@ class TestFetchRangeConsistencyCandidates:
         _ref(fresh_persistence, 3, heading_id, encap="seealso{Other}")
 
         candidates = fresh_persistence.fetch_range_consistency_candidates()
-        ids = {c["unique_id_number"] for c in candidates}
-        assert ids == {1}
+        assert {c.entry_id for c in candidates} == {1}
 
     def test_includes_range_closers_unlike_index_statistics(self, fresh_persistence):
         heading_id = fresh_persistence.resolve_or_insert_heading("Main", "Main", depth=0)
-        _ref(fresh_persistence, 1, heading_id, encap=")", is_range_closer=1)
+        _ref(fresh_persistence, 1, heading_id, encap=")")
 
         candidates = fresh_persistence.fetch_range_consistency_candidates()
-        assert {c["unique_id_number"] for c in candidates} == {1}
+        assert {c.entry_id for c in candidates} == {1}
 
     def test_with_no_db_path_returns_empty_list(self, tmp_path):
         from models.file_tree_persistence import FileTreePersistence
@@ -95,26 +86,25 @@ class TestFetchRangeConsistencyCandidates:
         assert fp.fetch_range_consistency_candidates() == []
 
 
-class TestFetchLegacyCrossReferenceCandidates:
-    def test_returns_only_see_and_seealso_encap_rows(self, fresh_persistence):
+class TestFetchReferencesCarryingXrefs:
+    def test_returns_only_see_and_seealso_rows(self, fresh_persistence):
         heading_id = fresh_persistence.resolve_or_insert_heading("Main", "Main", depth=0)
         _ref(fresh_persistence, 1, heading_id, encap="standard")
         _ref(fresh_persistence, 2, heading_id, encap="see{Other}", heading_raw_text="Zeta")
         _ref(fresh_persistence, 3, heading_id, encap="seealso{Another}", heading_raw_text="Apple")
 
-        candidates = fresh_persistence.fetch_legacy_cross_reference_candidates()
-        ids = {c["unique_id_number"] for c in candidates}
-        assert ids == {2, 3}
+        candidates = fresh_persistence.fetch_references_carrying_xrefs()
+        assert {c.entry_id for c in candidates} == {2, 3}
 
-    def test_orders_by_heading_raw_text_case_insensitively(self, fresh_persistence):
+    def test_orders_by_heading_case_insensitively(self, fresh_persistence):
         heading_id = fresh_persistence.resolve_or_insert_heading("Main", "Main", depth=0)
         _ref(fresh_persistence, 1, heading_id, encap="see{X}", heading_raw_text="zeta")
         _ref(fresh_persistence, 2, heading_id, encap="see{Y}", heading_raw_text="Apple")
 
-        candidates = fresh_persistence.fetch_legacy_cross_reference_candidates()
-        assert [c["heading_raw_text"] for c in candidates] == ["Apple", "zeta"]
+        candidates = fresh_persistence.fetch_references_carrying_xrefs()
+        assert [c.heading_raw for c in candidates] == ["Apple", "zeta"]
 
     def test_with_no_db_path_returns_empty_list(self, tmp_path):
         from models.file_tree_persistence import FileTreePersistence
         fp = FileTreePersistence(db_path="")
-        assert fp.fetch_legacy_cross_reference_candidates() == []
+        assert fp.fetch_references_carrying_xrefs() == []

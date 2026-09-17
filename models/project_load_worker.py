@@ -7,6 +7,7 @@ from models import index_tag_grammar as grammar
 from models.latex_dialect import LATEX_DIALECT as dialect
 from models.latex_index_parser import LatexIndexParser
 from models.latex_command_registry_model import LatexCommandRegistryModel
+from models.latex_record_mapping import payload_from_reference
 
 class ProjectLoadWorker(QObject):
     """
@@ -67,7 +68,11 @@ class ProjectLoadWorker(QObject):
             if actual_db_to_load:
                 self.status_updated.emit("Database file localized. Validating data manifest records...")
                 
-                headings, references = self.db_persist.fetch_index_manifest()
+                headings, records = self.db_persist.fetch_index_manifest()
+                # The repository hands back records; everything downstream of
+                # the load was written against this application's row payload,
+                # which a fresh scan also produces, so the two stay one shape.
+                references = [payload_from_reference(record) for record in records]
                 
                 # Check if the tables actually contain entries (Legacy vs Brand New Empty Database)
                 if headings or references:

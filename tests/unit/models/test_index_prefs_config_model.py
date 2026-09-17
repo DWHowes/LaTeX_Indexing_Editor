@@ -423,6 +423,9 @@ class TestPerIndexSettings:
         with sqlite3.connect(db_path) as conn:
             conn.execute("DELETE FROM project_metadata WHERE key = 'index_definitions'")
             conn.execute("UPDATE project_metadata SET value = '1.0.0' WHERE key = 'schema_version'")
+            # The fold is this application's own host migration since phase FN
+            # (1.1.0), so a project from before it has that version too.
+            conn.execute("UPDATE project_metadata SET value = '1.0.0' WHERE key = 'host_schema_version'")
             conn.executemany(
                 "INSERT OR REPLACE INTO project_metadata (key, value) VALUES (?, ?)",
                 [("pref_imakeidx_title", "Index of Cases"), ("pref_imakeidx_columns", "1")],

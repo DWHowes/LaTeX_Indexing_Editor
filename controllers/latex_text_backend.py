@@ -29,7 +29,7 @@ them, change one, say what else moved.
 
 import os
 
-from bookindexcore.backend.base import DocumentBackend, EntryState
+from bookindexcore.backend.base import DocumentBackend
 from bookindexcore.backend.locator import (
     EditResult,
     Locator,
@@ -85,12 +85,6 @@ class LatexTextBackend(DocumentBackend):
 
     #: LaTeX owns the file it writes, so a committed write stays undoable.
     clears_on_commit = False
-
-    #: Two of the five. A ``.tex`` file cannot be edited under us by a live
-    #: application the way an InDesign story can, so CONFLICTED and ORPHANED
-    #: are unreachable here -- external edits are caught by the checksum
-    #: resync instead, which is a different mechanism with its own recovery.
-    reachable_states = frozenset({EntryState.ORIGINAL, EntryState.STAGED})
 
     def __init__(self, doc_io, index_pattern=None):
         self._io = doc_io

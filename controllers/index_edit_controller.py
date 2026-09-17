@@ -1219,17 +1219,17 @@ class IndexEditController(QObject):
         written to the DB, the DB row EntryModifierModel.revert_dirty_record
         reads back is still exactly the pre-edit baseline.
         """
-        dirty_ids = self._entry_model.get_dirty_ids_for_file(file_path)
+        dirty_ids = self._entry_model.get_dirty_ids_for_container(file_path)
         for entry_id in dirty_ids:
             old_heading = self._entry_model.get_heading_text(entry_id)
             record = self._entry_model.get_record(entry_id) or {}
             is_closer = record.is_range_closer
 
-            db_row = self._entry_model.revert_dirty_record(entry_id)
-            if db_row is None:
+            stored = self._entry_model.revert_dirty_record(entry_id)
+            if stored is None:
                 continue
 
-            db_heading = db_row.get("heading_raw_text", "")
+            db_heading = stored.heading_raw
             self._staging_model.register_original(entry_id, db_heading)
 
             # Closers are never shown in the tree (see
