@@ -2127,3 +2127,9 @@ only this application can hold.
 - `gui_smoke/test_undo_redo_pipeline.py::TestASaveAsksTheBackend`: a save keeps
   history this backend can reverse, and empties it when the declaration is
   flipped. It fails with the save's call removed.
+
+## `controllers/test_insert_entry_shortcut.py`
+
+Added 17 September 2026. The Insert button's `Ctrl+K` is read from the shared
+map (`INSERT_ENTRY`) rather than typed on the button; the test pins that the
+key and tooltip an indexer sees did not change when the literal went.

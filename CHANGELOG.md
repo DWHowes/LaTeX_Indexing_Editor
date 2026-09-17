@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The Insert button's Ctrl+K comes from the shared shortcut map
+
+The InDesign Index Editor's entry window has the same Insert button, so the
+gesture is declared once, as `bookindexcore.ui.shortcuts.INSERT_ENTRY`, instead
+of as a literal here. The key and the tooltip are unchanged
+(`tests/controllers/test_insert_entry_shortcut.py`).
+
 ### Adapted to the core's phase FN
 
 The shared core was made format-neutral (`bookindexcore`

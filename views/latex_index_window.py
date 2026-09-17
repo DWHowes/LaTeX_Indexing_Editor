@@ -39,6 +39,7 @@ from PySide6.QtCore import QEvent, Qt, Signal, QSize, Slot, QSettings
 from bookindexcore.ui.entry_window import (
     EntryWindowTitleBar, LevelFields, SortKeyLineEdit,
 )
+from bookindexcore.ui import shortcuts
 from bookindexcore.ui.style import AppStyleConfiguration
 from models import index_syntax_check as syntax
 from models.latex_dialect import LATEX_DIALECT as dialect
@@ -181,8 +182,8 @@ class LatexIndexWindow(QDockWidget):
             field.installEventFilter(self)
 
         self.insert_btn = QPushButton("Insert Index Tag")
-        self.insert_btn.setShortcut("Ctrl+K")
-        self.insert_btn.setToolTip("Insert the index entry (Ctrl+K)")
+        self.insert_btn.setShortcut(shortcuts.sequence(shortcuts.INSERT_ENTRY))
+        self.insert_btn.setToolTip(shortcuts.describe(shortcuts.INSERT_ENTRY))
         self.insert_btn.clicked.connect(self.insertRequested.emit)
 
         self.text_style_label = QLabel("Text Style:")
