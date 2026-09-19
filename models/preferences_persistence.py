@@ -2,6 +2,11 @@ import json
 import os
 from PySide6.QtCore import QObject, QSettings, QDir, QByteArray
 
+# Moved into the core on 19 September 2026, when the InDesign editor became
+# its second caller; imported here so `global_store` below, and anything that
+# names it from this module, is unchanged.
+from bookindexcore.qt.settings import QSettingsGlobalStore  # noqa: F401
+
 from models.index_tag_grammar import (
     DEFAULT_BOLD_ENCAP_VALUES,
     DEFAULT_ITALIC_ENCAP_VALUES,
@@ -36,49 +41,6 @@ RECENT_PROJECTS_HARD_CAP = 25
 RECENT_PROJECTS_MAX_SHOWN = 25
 RECENT_PROJECTS_MIN_SHOWN = 1
 RECENT_PROJECTS_DEFAULT_SHOWN = 10
-
-
-class QSettingsGlobalStore:
-    r"""
-    A ``bookindexcore.persistence.GlobalStore`` over one QSettings group.
-
-    ``ScopedSettings`` needs a global store that outlives the process, and
-    ``DictGlobalStore`` does not: it is the in-memory one the package ships
-    for tests. Handing the shared Check Index and Sorting groups a dict meant
-    that with no project open they were edited, saved, and gone at the next
-    launch -- invisible until those pages became reachable from a menu.
-
-    Narrow on purpose. The protocol is two methods, and this is the whole
-    adapter: a group name, a read and a write. Values are stored as QSettings
-    stores them and coerced back to the group's declared types by
-    ``ScopedSettings.load``, which is why nothing here needs to know a type.
-    Lists are the one exception -- QSettings round-trips a Python list through
-    an ``.ini`` unreliably -- so they are comma-joined on the way out, the
-    same convention ``update_general_preferences`` already uses, and
-    ``coerce_like`` splits them again on the way in.
-    """
-
-    def __init__(self, group: str, settings: QSettings | None = None):
-        self._group = group
-        self._settings = settings if settings is not None else QSettings()
-
-    def read_all(self) -> dict:
-        self._settings.beginGroup(self._group)
-        try:
-            return {key: self._settings.value(key)
-                    for key in self._settings.childKeys()}
-        finally:
-            self._settings.endGroup()
-
-    def write(self, values) -> None:
-        self._settings.beginGroup(self._group)
-        try:
-            for key, value in values.items():
-                if isinstance(value, (list, tuple)):
-                    value = ",".join(str(item) for item in value)
-                self._settings.setValue(key, value)
-        finally:
-            self._settings.endGroup()
 
 
 class PreferencesPersistence(QObject):

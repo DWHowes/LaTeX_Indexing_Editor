@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### The Check Index defaults and the settings store come from the core
+
+`CHECK_INDEX_DEFAULTS` is built by `bookindexcore.checks.check_index_defaults`,
+seeded with this application's mixed-case words, and `QSettingsGlobalStore` is
+imported from `bookindexcore.qt.settings`. Both moved into the core when the
+InDesign editor became their next caller. The defaults are identical, value
+for value, checked by comparing them before and after; the core's version
+deep-copies, where `dict(GRAMMAR_DEFAULTS)` here had shared the grammar
+defaults' own lists.
+
 ### A leftover database name no longer stands in for the project
 
 Loading a project fell back to any `*_index_data.db` in its folder when the

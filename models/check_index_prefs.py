@@ -17,8 +17,10 @@ stored value has to be the exception.
 
 from typing import Any, Dict
 
-from bookindexcore.checks import ALL_RULES, DISABLED_RULES_KEY, default_enabled
-from bookindexcore.model.grammar import GRAMMAR_DEFAULTS, grammar_from_settings
+from bookindexcore.checks import (
+    ALL_RULES, DISABLED_RULES_KEY, check_index_defaults, default_enabled,
+)
+from bookindexcore.model.grammar import grammar_from_settings
 from bookindexcore.persistence import DictGlobalStore, ScopedSettings
 
 #: The ``pref_`` namespace every scoped setting in this application uses.
@@ -43,11 +45,11 @@ __all__ = [
     "PREF_PREFIX", "CheckIndexPrefs", "default_rule_selection",
 ]
 
-CHECK_INDEX_DEFAULTS: Dict[str, Any] = dict(GRAMMAR_DEFAULTS)
-CHECK_INDEX_DEFAULTS["mixed_case_exceptions"] = list(LATEX_MIXED_CASE_WORDS)
-CHECK_INDEX_DEFAULTS[DISABLED_RULES_KEY] = sorted(
-    rule.id for rule in ALL_RULES if not rule.default_on
-)
+#: The group's defaults, built by the core (written once there since the
+#: InDesign editor would have been the third copy): the shared grammar's, the
+#: rules off until asked for, and this application's mixed-case words.
+CHECK_INDEX_DEFAULTS: Dict[str, Any] = check_index_defaults(
+    mixed_case_exceptions=list(LATEX_MIXED_CASE_WORDS))
 
 
 class CheckIndexPrefs:
