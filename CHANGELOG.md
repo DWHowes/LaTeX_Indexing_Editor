@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### A leftover database name no longer stands in for the project
+
+Loading a project fell back to any `*_index_data.db` in its folder when the
+project's own database was missing: a name left over from before the database
+became `<project>_index_manifest.db`. Whatever it found was never read, because
+the index then came from the project's own database regardless, so a stray
+file could only make an empty project look populated and skip the scan that
+fills it. The fallback is gone (`tests/persistence/test_project_load_worker.py`).
+Found while the InDesign Index Editor was checked against this application's
+project storage.
+
 ### The Insert button's Ctrl+K comes from the shared shortcut map
 
 The InDesign Index Editor's entry window has the same Insert button, so the

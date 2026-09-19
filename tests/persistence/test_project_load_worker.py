@@ -242,3 +242,35 @@ class TestForceRescan:
         assert len(references) == 5
         names = {os.path.basename(p) for p in worker.get_scanned_tex_file_paths()}
         assert names == {"main.tex", "intro.tex", "chapter10.tex", "descript.tex"}
+
+
+class TestAStrayDatabaseIsNotAProject:
+    """
+    process() used to fall back to any `*_index_data.db` in the folder when the
+    project's own database was missing -- a name left over from before the
+    database became `<project>_index_manifest.db` -- and then read the
+    manifest from the project's own database regardless. So a stray file could
+    only make an empty project look populated. Removed 19 Sep 2026.
+    """
+
+    def test_a_leftover_index_data_file_is_not_read_as_the_project(self, tmp_path):
+        (tmp_path / "Old_index_data.db").write_bytes(b"")
+        asked = []
+
+        class Recording:
+            def get_active_database_path(self):
+                return str(tmp_path / "Book_index_manifest.db")    # not there
+
+            def fetch_all_project_files(self):
+                return []
+
+            def fetch_index_manifest(self):
+                asked.append("fetch_index_manifest")
+                return [], []
+
+            def __getattr__(self, name):
+                return lambda *args, **kwargs: None
+
+        worker = ProjectLoadWorker(db_persistence=Recording(), project_root=str(tmp_path))
+        worker.process()
+        assert asked == [], "a stray *_index_data.db was taken for the project's database"

@@ -631,6 +631,13 @@ is the end-to-end version: an older database opens, the schema migration folds
 its old flat values into definition zero, and the model reads them from the
 new place.
 
+`test_project_load_worker.py` also pins that a leftover `*_index_data.db` in a
+project folder (the database's name before it became
+`<project>_index_manifest.db`) is **not** taken for the project: `process()` used
+to fall back to one when the project's own database was missing, and then read
+the project's own anyway, so a stray file could only make an empty project look
+populated.
+
 `test_project_load_worker.py` also pins that a **styled** range written by
 hand — `\index{term|(textbf}` … `\index{term|)textbf}`, valid `makeindex` that
 turns up in imported source — pairs into one range with its style intact,

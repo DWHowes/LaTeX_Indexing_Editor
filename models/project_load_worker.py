@@ -55,14 +55,13 @@ class ProjectLoadWorker(QObject):
                 self.status_updated.emit("Scanning project directory tree nodes...")
                 self._scan_folder_data(str(project_root), file_tree_payload)
 
-            actual_db_to_load = None
-            if db_path.exists() and db_path.is_file():
-                actual_db_to_load = db_path
-            else:
-                for file_item in project_root.iterdir():
-                    if file_item.is_file() and file_item.name.lower().endswith("_index_data.db"):
-                        actual_db_to_load = file_item
-                        break
+            # The project's own database, or nothing. There was a fallback here
+            # that took any `*_index_data.db` in the folder, a name left over
+            # from before the database became `<project>_index_manifest.db`;
+            # and whatever it found was never read, because the manifest below
+            # comes from the project's own database regardless. It could only
+            # mistake a stray file for a populated project. Removed 19 Sep 2026.
+            actual_db_to_load = db_path if db_path.is_file() else None
 
             # Read database metrics ONLY if it houses populated project structures
             if actual_db_to_load:
