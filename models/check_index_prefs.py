@@ -18,7 +18,7 @@ stored value has to be the exception.
 from typing import Any, Dict
 
 from bookindexcore.checks import (
-    ALL_RULES, DISABLED_RULES_KEY, check_index_defaults, default_enabled,
+    ALL_RULES, DISABLED_RULES_KEY, check_index_defaults, default_enabled, enabled_rules,
 )
 from bookindexcore.model.grammar import grammar_from_settings
 from bookindexcore.persistence import DictGlobalStore, ScopedSettings
@@ -104,10 +104,11 @@ class CheckIndexPrefs:
 
         An id in the stored list that no longer names a rule is simply
         subtracted from nothing, so removing a rule in a later version does
-        not need a migration.
+        not need a migration. The core's `enabled_rules` since 1 October
+        2026, written once for every editor; this application has no rules of
+        its own, so none are passed.
         """
-        disabled = set(self.load().get(DISABLED_RULES_KEY, ()))
-        return {rule.id for rule in ALL_RULES} - disabled
+        return enabled_rules(self.load())
 
     # -- writing ------------------------------------------------------------
 

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Which rules are on comes from the core
+
+`CheckIndexPrefs.enabled_rules` is `bookindexcore.checks.enabled_rules`, written
+once when the InDesign editor became its third caller. Identical to what this
+file derived, compared over the stored values that file could hold; a stored
+`None`, which made the old derivation raise, now means nothing switched off.
+
 ### The Check Index defaults and the settings store come from the core
 
 `CHECK_INDEX_DEFAULTS` is built by `bookindexcore.checks.check_index_defaults`,

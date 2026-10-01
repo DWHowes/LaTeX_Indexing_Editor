@@ -82,6 +82,9 @@ DELIBERATE = {
     "testing.dialect_conformance": "test-only",
     "testing.provider_conformance": "test-only",
     "testing.stub_proposer": "test-only",
+    "dialect.delimited": "the escaped level-splitting of a delimited "
+                         "grammar (Word's `XE`, InDesign's topics); a LaTeX "
+                         "heading is braces and `!`, parsed by its own reader",
     "util.text_layer": "cleans a PDF's text layer; ToA_Builder and the "
                        "extraction probe call it, and this application "
                        "never reads a PDF",
