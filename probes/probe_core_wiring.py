@@ -82,6 +82,10 @@ DELIBERATE = {
     "testing.dialect_conformance": "test-only",
     "testing.provider_conformance": "test-only",
     "testing.stub_proposer": "test-only",
+    "ui.document_view": "a rendered, read-only document for a host with no "
+                        "source to show (Word, InDesign); a .tex file is "
+                        "shown as its source in an editor tab",
+    "ui.document_tabs": "the tabs holding ui.document_view",
     "dialect.delimited": "the escaped level-splitting of a delimited "
                          "grammar (Word's `XE`, InDesign's topics); a LaTeX "
                          "heading is braces and `!`, parsed by its own reader",
