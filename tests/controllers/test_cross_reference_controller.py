@@ -17,7 +17,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QTabWidget
 
 from controllers.cross_reference_controller import CrossReferenceController
-from views.cross_reference_list import CrossReferenceList
+from bookindexcore.ui.cross_reference_list import CrossReferenceList
 from bookindexcore.util.text import TextSanitizer
 from bookindexcore.session.backup import SessionBackupManager
 from controllers.document_io_controller import DocumentIOController

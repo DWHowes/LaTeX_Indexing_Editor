@@ -227,9 +227,10 @@ class BulkRepairController:
         if not self._index_edit_ctrl.apply_command(command):
             QMessageBox.warning(
                 parent_window, "Repair index entries",
-                "The repairs could not be applied and nothing has been "
-                "changed. The document may have been edited since the preview "
-                "was taken; try again.")
+                self._index_edit_ctrl.last_command_problem or (
+                    "The repairs could not be applied and nothing has been "
+                    "changed. The document may have been edited since the preview "
+                    "was taken; try again."))
             return 0
 
         # Recorded so it can be undone in one step, like any other edit.

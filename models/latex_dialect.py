@@ -151,6 +151,8 @@ class LatexDialect:
     #: exceeding its remit. Shared preferences read this and do not offer the
     #: label fields for a LaTeX project. Measured in E7.
     xref_label_owner = XREF_LABEL_DOCUMENT
+    #: No cross-reference kinds beyond see and see also (the core's two).
+    preserved_xref_kinds: dict = {}
 
     #: **True, and LaTeX is the only one of the three for which it is.**
     #: ``\index{X|fn{4}}`` against a document defining ``\def\fn#1#2{{#2}n#1}``

@@ -2140,3 +2140,14 @@ only this application can hold.
 Added 17 September 2026. The Insert button's `Ctrl+K` is read from the shared
 map (`INSERT_ENTRY`) rather than typed on the button; the test pins that the
 key and tooltip an indexer sees did not change when the literal went.
+
+## The core's undo loop and Cross-References tab (1 October 2026)
+
+`controllers/test_apply_command_put_back.py`: `apply_command` takes its edit
+loop from the core (`bookindexcore.model.undo.apply_all_or_nothing`, the
+InDesign editor's step 7, S1). A refusal with everything put back says
+nothing more; a put-back that fails sets `last_command_problem`, which the
+undo, redo and repair messages now show instead of "nothing has changed".
+`views/cross_reference_list.py` is gone: the tab is the core's, and
+`controllers/test_cross_reference_controller.py` drives it from there
+unchanged.

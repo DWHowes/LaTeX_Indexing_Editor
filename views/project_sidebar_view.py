@@ -6,7 +6,7 @@ from bookindexcore.ui.sidebar import SidebarPanels
 from views.file_tree_view import FileTreeView
 from views.index_tree_view import IndexTreeView
 from views.entry_modifier_list import EntryModifierList
-from views.cross_reference_list import CrossReferenceList
+from bookindexcore.ui.cross_reference_list import CrossReferenceList
 
 
 class ProjectSidebarView(SidebarPanels):

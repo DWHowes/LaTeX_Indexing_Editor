@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### The Cross-References tab and the undo loop are the core's
+
+- **The Cross-References tab** is `bookindexcore.ui.cross_reference_list`,
+  moved from `views/cross_reference_list.py` when the InDesign editor needed
+  it. One visible change: the Type column shows **"see also"**, the label,
+  where it showed the stored value "seealso" (the table item held one value
+  for both, so storing the kind replaced its label).
+- **Undo's edit loop** (`apply_command`) is the core's
+  `apply_all_or_nothing`; the records and coordinates afterwards stay here.
+  **A put-back that fails is now said** in the status bar and in Repair
+  Index Entries' warning, which until now said nothing had changed while the
+  console said otherwise.
+- **The dialect declares `preserved_xref_kinds`**, empty.
+
 ### Which rules are on comes from the core
 
 `CheckIndexPrefs.enabled_rules` is `bookindexcore.checks.enabled_rules`, written

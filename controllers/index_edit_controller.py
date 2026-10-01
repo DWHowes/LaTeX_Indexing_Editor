@@ -96,6 +96,8 @@ class IndexEditController(QObject):
         # holds, and AppPipelineController reads it back off here so that
         # there is exactly one entry table.
         self.text_backend = LatexTextBackend(doc_io)
+        #: Set by `apply_command` when a put-back failed (see there).
+        self.last_command_problem = ""
 
         #: Containers already adopted inside a `bulk_writes` block, or None
         #: when not in one. See `bulk_writes` for why adopting once per
@@ -1277,19 +1279,25 @@ class IndexEditController(QObject):
         resolved.
         """
         from bookindexcore.model.commands import DELETE, EDIT, INSERT
+        from bookindexcore.model.undo import apply_all_or_nothing
 
-        applied: list = []
         # One adoption for the whole command, including any rollback: the
         # backend maintains its own table as each edit lands, so rebuilding it
         # per edit was redoing work the backend had just done. On a command
         # that renames every entry of a large index this is the difference
         # between usable and not -- see `bulk_writes`.
+        #
+        # **The edit loop is the core's** since 1 October 2026 (the InDesign
+        # editor's step 7, S1): every editor had written the same apply-each-
+        # and-put-back-in-reverse loop. What stays here is what is LaTeX's,
+        # the records and coordinates after the edits land.
         with self.bulk_writes():
-            for edit in command.edits:
-                if not self._apply_macro_edit(edit):
-                    self._roll_back_applied_edits(applied)
-                    return False
-                applied.append(edit)
+            outcome = apply_all_or_nothing(command.edits, self._apply_macro_edit)
+        #: Said to the indexer by the caller when a put-back failed: the
+        #: document and the index disagree, which used to reach the console only.
+        self.last_command_problem = outcome.sentence() if outcome.not_put_back else ""
+        if not outcome.ok:
+            return False
 
         if command.kind == DELETE:
             for snapshot in command.entries:
@@ -1364,19 +1372,6 @@ class IndexEditController(QObject):
         if not self.place_macro(file_path, position, edit.after).ok:
             return False
         return True
-
-    def _roll_back_applied_edits(self, applied: list) -> None:
-        """
-        Puts back the edits of a command that failed partway. Walks them
-        in reverse for the same reason IndexCommand.inverted() does: each
-        edit shifted everything after it.
-        """
-        for edit in reversed(applied):
-            if not self._apply_macro_edit(edit.inverted()):
-                print(
-                    "[UNDO GUARD] rollback of a partially applied command failed — "
-                    f"{os.path.basename(edit.locator.container)} may need a resync"
-                )
 
     def _recreate_entry(self, snapshot, command) -> None:
         """

@@ -1011,8 +1011,9 @@ class AppPipelineController(QObject):
 
         if not self.index_edit_ctrl.apply_command(command.inverted()):
             self.window.status_bar.showMessage(
-                "Couldn't undo — the file no longer matches what was recorded. "
-                "Try 'Resync Index Data from Disk'.", 6000
+                self.index_edit_ctrl.last_command_problem or (
+                    "Couldn't undo — the file no longer matches what was recorded. "
+                    "Try 'Resync Index Data from Disk'."), 6000
             )
             return
 
@@ -1030,8 +1031,9 @@ class AppPipelineController(QObject):
 
         if not self.index_edit_ctrl.apply_command(command):
             self.window.status_bar.showMessage(
-                "Couldn't redo — the file no longer matches what was recorded. "
-                "Try 'Resync Index Data from Disk'.", 6000
+                self.index_edit_ctrl.last_command_problem or (
+                    "Couldn't redo — the file no longer matches what was recorded. "
+                    "Try 'Resync Index Data from Disk'."), 6000
             )
             return
 
