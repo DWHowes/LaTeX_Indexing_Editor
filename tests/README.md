@@ -2151,3 +2151,21 @@ undo, redo and repair messages now show instead of "nothing has changed".
 `views/cross_reference_list.py` is gone: the tab is the core's, and
 `controllers/test_cross_reference_controller.py` drives it from there
 unchanged.
+
+## The tree's order, the table build and the head note (2 October 2026)
+
+From the InDesign editor's step 8, subunit A:
+
+- `gui_smoke/test_tree_order.py`: the tree is handed the rules *Which order to
+  show* resolves to, at start, on a project opening, and after the setting
+  changes. Before, `filing_rules` was None whatever was chosen.
+- `gui_smoke/test_toa_build_rules.py`: *Build Table of Authorities* reaches
+  the build with the resolved rules. **Negative control**: the old call,
+  `sort_prefs.rules()` with no argument, raises `TypeError` here; nothing
+  exercised the path before (the wiring test beside it is a static scan).
+- `gui_smoke/test_head_note_dialog.py`: *Add Head Note* opens the core's
+  dialog labelled for LaTeX, stores the note and writes it as
+  `\indexprologue{...}`; the old module no longer imports.
+- `controllers/test_preferences_persistence.py`'s recent-project tests run
+  unchanged against the core's list, which is the point: the accessors kept
+  their names and behaviour.

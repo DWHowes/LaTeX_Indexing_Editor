@@ -81,7 +81,9 @@ from bookindexcore.ui.search.window import AdvancedSearchWindow
 from bookindexcore.ui.dialogs.name_inversion_dialog import NameInversionDialog
 from bookindexcore.ui.dialogs.statistics_dialog import IndexStatisticsDialog
 from views.rtf_viewer_dialog import RtfViewerDialog
-from views.head_note_dialog import HeadNoteDialog
+# The dialog is the core's since 2 October 2026 (the InDesign editor's step 8,
+# S8); what the text is, LaTeX source, is said here.
+from bookindexcore.ui.dialogs.head_note_dialog import HeadNoteDialog
 
 def _placement_coords(result) -> dict:
     r"""
@@ -282,6 +284,7 @@ class AppPipelineController(QObject):
             global_store=self.prefs.global_store("CheckIndexPrefs/global"))
         self.sort_prefs = SortPrefs(
             global_store=self.prefs.global_store("SortPrefs/global"))
+        self.apply_filing_rules()
         self.presentation_prefs = PresentationPrefs(
             global_store=self.prefs.global_store("PresentationPrefs/global"))
         self.toa_prefs = ToaPrefs(
@@ -1505,6 +1508,7 @@ class AppPipelineController(QObject):
         # overwrite what it has.
         self.check_index_prefs.open_project(self.scope_ctrl.get_persistence_model())
         self.sort_prefs.open_project(self.scope_ctrl.get_persistence_model())
+        self.apply_filing_rules()
         self.presentation_prefs.open_project(self.scope_ctrl.get_persistence_model())
         self.toa_prefs.open_project(self.scope_ctrl.get_persistence_model())
         self.window.status_bar.showMessage(f"Project '{project_name}' loaded successfully.", 3000)
@@ -2147,7 +2151,8 @@ class AppPipelineController(QObject):
         QApplication.processEvents()
         try:
             plan = build_toa_plan(
-                self.text_backend, system, self.sort_prefs.rules(),
+                self.text_backend, system,
+                self.sort_prefs.rules(self._index_prefs_model.index_prefs()),
                 house=house,
                 on_progress=lambda done, total: (
                     progress.advance(done, total),
@@ -2187,8 +2192,9 @@ class AppPipelineController(QObject):
             self.window.status_bar.showMessage("No macros were written.", 3000)
             return
 
-        controller = ToaController(self.text_backend, system,
-                                   self.sort_prefs.rules())
+        controller = ToaController(
+            self.text_backend, system,
+            self.sort_prefs.rules(self._index_prefs_model.index_prefs()))
         result = controller.apply(dataclasses.replace(plan, entries=accepted))
 
         # **The declarations go into the generated block as well as into the
@@ -2289,6 +2295,21 @@ class AppPipelineController(QObject):
     def _spawn_preferences_dialog(self) -> None:
         """Instantiates and executes the preferences configuration flow."""
         self._index_prefs_ctrl.execute_configuration_flow()
+        self.apply_filing_rules()
+
+    def apply_filing_rules(self) -> None:
+        """
+        The tree files by the Sorting page's *Which order to show*: this
+        project's rules, or as the engine will file them (``sort_prefs.rules``
+        resolves the pair). Until the InDesign editor's step 8 the choice was
+        stored and no tree was ordered by it, because the shared tree made
+        every row without rules.
+        """
+        tree = getattr(self, "index_tree_view", None)
+        prefs = getattr(self, "sort_prefs", None)
+        model = getattr(self, "_index_prefs_model", None)
+        if tree is not None and prefs is not None and model is not None:
+            tree.set_filing_rules(prefs.rules(model.index_prefs()))
 
     @Slot()
     def _refresh_insert_settings_menu_state(self) -> None:
@@ -2360,7 +2381,9 @@ class AppPipelineController(QObject):
         persistence = self.scope_ctrl.get_persistence_model()
         existing_note = persistence.get_metadata_value("head_note_text") if persistence else None
 
-        dialog = HeadNoteDialog(self.window)
+        dialog = HeadNoteDialog(
+            self.window, label="LaTeX formatted head note:",
+            placeholder=r"e.g., \textit{See also} individual entries for specific page ranges.")
         if existing_note:
             dialog.configure_for_edit(existing_note)
 
@@ -2672,6 +2695,7 @@ class AppPipelineController(QObject):
         self.cross_reference_ctrl.set_active_project(None, None)
         self.check_index_prefs.close_project()
         self.sort_prefs.close_project()
+        self.apply_filing_rules()
         self.presentation_prefs.close_project()
         self.toa_prefs.close_project()
         self._refresh_index_command_options()

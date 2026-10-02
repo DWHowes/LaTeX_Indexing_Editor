@@ -184,6 +184,13 @@ class IndexPrefsConfigModel:
                 coerced = default_val
             setattr(self._data, key, coerced)
 
+    def index_prefs(self) -> IndexPrefsData:
+        """
+        The settings as they stand, which ``SortPrefs.rules`` reads the
+        engine and its ordering from.
+        """
+        return self._data
+
     def serialize_to_dict(self) -> Dict[str, Any]:
         return asdict(self._data)
 

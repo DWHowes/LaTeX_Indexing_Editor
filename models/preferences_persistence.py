@@ -1,4 +1,3 @@
-import json
 import os
 from PySide6.QtCore import QObject, QSettings, QDir, QByteArray
 
@@ -26,21 +25,22 @@ LEGACY_PAGE_STYLE_KEYS = {
     "encap_italic_values": "page_style_italic_values",
 }
 
-# Recent projects. The user-visible count is capped at RECENT_PROJECTS_MAX_SHOWN,
-# but the stored list runs to RECENT_PROJECTS_HARD_CAP: lowering the preference
-# should change how many are *displayed*, not throw history away, so raising it
-# again brings the older entries back. (Deliberately unlike the undo stack,
-# where lowering the bound really does discard.)
-#
-# These stay here rather than moving to the shared General tab, and the tab is
-# *told* them (IndexPrefsConfigDialog passes them through). A model importing a
-# widget module for three integers is the shape of Phase 0's first defect, and
-# this application remains the authority on what it will store.
-RECENT_PROJECTS_KEY = "recent_projects"
-RECENT_PROJECTS_HARD_CAP = 25
-RECENT_PROJECTS_MAX_SHOWN = 25
-RECENT_PROJECTS_MIN_SHOWN = 1
-RECENT_PROJECTS_DEFAULT_SHOWN = 10
+# Recent projects: the list and its bounds are the core's
+# (`bookindexcore.session.recent`) since 2 October 2026, when the InDesign
+# editor became the list's second caller and the Word editor its third (the
+# InDesign editor's step 8, S3). Imported here so every name this module has
+# always exported still resolves. Shown up to the preference, stored to the
+# hard cap: lowering the preference and raising it again brings the older
+# entries back, deliberately unlike undo.
+from bookindexcore.session.recent import (  # noqa: E402
+    RECENT_PROJECTS_DEFAULT_SHOWN,
+    RECENT_PROJECTS_HARD_CAP,
+    RECENT_PROJECTS_KEY,
+    RECENT_PROJECTS_MAX_SHOWN,
+    RECENT_PROJECTS_MIN_SHOWN,
+    RecentProjects,
+    folder_identity,
+)
 
 
 class PreferencesPersistence(QObject):
@@ -372,86 +372,45 @@ class PreferencesPersistence(QObject):
 
     # --- Recent projects ------------------------------------------------
     #
-    # Stored as one JSON string rather than the comma-joined form the other
-    # list preferences use: these entries are filesystem paths, and a comma
-    # is a legal character in a Windows or POSIX path, so a comma-joined
-    # list cannot be split back apart safely.
+    # The list is the core's `RecentProjects`; these keep the names the
+    # controllers and tests have always called. One JSON string, not the
+    # comma-joined form the other lists use, because a comma is legal in a
+    # path.
 
     @staticmethod
     def _normalise_project_key(path: str) -> str:
-        """The identity two entries are considered the same by.
+        """The identity two entries are the same by: the core's, a folder
+        compared as Windows compares it."""
+        return folder_identity(path)
 
-        Case-folded because Windows paths are case-insensitive, so opening
-        `D:\\Books\\Smith` and `d:\\books\\smith` must not leave two entries
-        for one project.
-        """
-        return os.path.normcase(os.path.normpath(str(path)))
+    def _recent(self) -> RecentProjects:
+        return RecentProjects(self.settings)
 
     def get_recent_projects(self) -> list[dict]:
         """Most-recently-opened first. Each entry is {'path', 'name'}.
 
-        Returns everything stored, not just the displayed count -- trimming
-        to the user's preference is the caller's job, so lowering that
-        preference does not destroy history.
+        Everything stored, not the displayed count: trimming to the
+        preference is the caller's, so lowering it destroys no history.
         """
-        raw = self.settings.value(RECENT_PROJECTS_KEY, "")
-        if not raw:
-            return []
-        try:
-            entries = json.loads(str(raw))
-        except (ValueError, TypeError):
-            print("[PREFS] Recent projects list was unreadable; starting a new one.")
-            return []
-        if not isinstance(entries, list):
-            return []
-
-        cleaned = []
-        seen = set()
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            path = str(entry.get("path", "")).strip()
-            if not path:
-                continue
-            key = self._normalise_project_key(path)
-            if key in seen:
-                continue
-            seen.add(key)
-            cleaned.append({"path": path, "name": str(entry.get("name", "")).strip()})
-        return cleaned[:RECENT_PROJECTS_HARD_CAP]
+        return self._recent().entries()[:RECENT_PROJECTS_HARD_CAP]
 
     def record_recent_project(self, path: str, name: str) -> None:
-        """Move a project to the front of the list, or add it there.
+        """Moves a project to the front of the list, or adds it there.
 
-        Called only after a load has actually succeeded, so a cancelled or
-        failed open leaves no trace.
+        Called only after a load has succeeded, so a cancelled or failed
+        open leaves no trace. The path is stored normalised, as it always
+        was here.
         """
         if not path:
             return
-        path = os.path.normpath(str(path))
-        key = self._normalise_project_key(path)
-
-        entries = [e for e in self.get_recent_projects()
-                   if self._normalise_project_key(e["path"]) != key]
-        entries.insert(0, {"path": path, "name": str(name or "").strip()})
-
-        self.settings.setValue(
-            RECENT_PROJECTS_KEY,
-            json.dumps(entries[:RECENT_PROJECTS_HARD_CAP], ensure_ascii=False),
-        )
-        self.settings.sync()
+        self._recent().record(os.path.normpath(str(path)), name)
 
     def forget_recent_project(self, path: str) -> None:
-        """Drop one entry — used when its folder has gone missing."""
-        key = self._normalise_project_key(path)
-        entries = [e for e in self.get_recent_projects()
-                   if self._normalise_project_key(e["path"]) != key]
-        self.settings.setValue(RECENT_PROJECTS_KEY, json.dumps(entries, ensure_ascii=False))
-        self.settings.sync()
+        """Drops one entry: its folder has gone."""
+        self._recent().forget(path)
 
     def clear_recent_projects(self) -> None:
-        self.settings.setValue(RECENT_PROJECTS_KEY, json.dumps([]))
-        self.settings.sync()
+        self._recent().clear()
 
     def update_fallback_directory(self, folder_path: str):
         self.settings.setValue("last_project_path", os.path.normpath(folder_path))

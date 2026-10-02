@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### The tree follows *Which order to show*; Build Table of Authorities fixed
+
+- **The index tree is filed by the Sorting page's *Which order to show***.
+  The setting was stored and ordered nothing: the shared tree made every row
+  without rules, and nothing handed it any. It is now given the rules the
+  setting resolves to at start, when a project opens or closes, and after
+  Preferences. Found 2 October 2026 by the InDesign editor's step 8 scope.
+- **Build Table of Authorities no longer stops with an error.** It and the
+  write that follows it called `SortPrefs.rules()` without the project's
+  index settings, which that method requires, so the build raised
+  `TypeError` before reaching the citations. Found tracing the same setting.
+- **The recent-projects list and the head note dialog are the core's**
+  (`bookindexcore.session.RecentProjects`,
+  `bookindexcore.ui.dialogs.head_note_dialog`), moved for the InDesign
+  editor. The list's key, cap and order are unchanged, so a stored list
+  reads as before; the dialog is told that its note is LaTeX.
+  `views/head_note_dialog.py` is gone.
+- **The General page's own keys stay where they are** (the settings root),
+  not moved to the core's `GeneralPrefs`: moving them would mean migrating
+  every indexer's stored values for no change in behaviour.
+
 ### The Cross-References tab and the undo loop are the core's
 
 - **The Cross-References tab** is `bookindexcore.ui.cross_reference_list`,
