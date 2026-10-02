@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### The sort store's defaults and the page-style vocabulary come from the core
+
+No change in behaviour. `SORT_PREFS_DEFAULTS` is the core's
+`SORTING_PAGE_DEFAULTS`, and the dialect's bold and italic macros become
+vocabulary through the core's `emphasis_styles`, both written when the
+InDesign editor became the next caller of each (its step 8). One small
+difference: a blank name in either list is dropped rather than kept as an
+empty style.
+
 ### The tree follows *Which order to show*; Build Table of Authorities fixed
 
 - **The index tree is filed by the Sorting page's *Which order to show***.

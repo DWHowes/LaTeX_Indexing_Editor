@@ -2169,3 +2169,10 @@ From the InDesign editor's step 8, subunit A:
 - `controllers/test_preferences_persistence.py`'s recent-project tests run
   unchanged against the core's list, which is the point: the accessors kept
   their names and behaviour.
+
+## The core's sort defaults and page-style lists (2 October 2026)
+
+The existing dialect and sort-preference tests run unchanged against
+`bookindexcore.sorting.page.SORTING_PAGE_DEFAULTS` and
+`bookindexcore.dialect.emphasis_styles`, which is the assertion: the store
+keeps the same keys and the vocabulary the same styles.

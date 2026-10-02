@@ -35,10 +35,10 @@ from typing import Any, Dict
 
 from bookindexcore import store
 from bookindexcore.sorting import (
-    LEGACY_SORT_KEYS, ORDER_BY_PROJECT, ORDER_MODE_KEY, SORT_DEFAULTS,
+    LEGACY_SORT_KEYS, ORDER_BY_PROJECT, ORDER_MODE_KEY,
     SortRules, makeindex_host, rules_for, xindy_host,
 )
-from bookindexcore.structure.kinds import INDEX_KIND_KEY, KIND_SUBJECT
+from bookindexcore.sorting.page import SORTING_PAGE_DEFAULTS
 from bookindexcore.persistence import DictGlobalStore, ScopedSettings
 
 from models.check_index_prefs import PREF_PREFIX
@@ -50,15 +50,11 @@ __all__ = ["SORT_PREFS_DEFAULTS", "SortPrefs"]
 
 #: Every ``SortRules`` field, plus the two keys that travel with them and are
 #: not fields: the order mode, and the index kind.
-SORT_PREFS_DEFAULTS: Dict[str, Any] = dict(SORT_DEFAULTS)
-SORT_PREFS_DEFAULTS[ORDER_MODE_KEY] = ORDER_BY_PROJECT
-#: The second non-field key, and it arrives for the same reason the first
-#: did: it travels in the page's payload and is not a ``SortRules`` field.
-#:
-#: **A declaration rather than a rule.** It records which kind of index this
-#: project's filing settings were seeded from, so that reopening the window
-#: shows what was declared instead of offering to declare it again.
-SORT_PREFS_DEFAULTS[INDEX_KIND_KEY] = KIND_SUBJECT
+#: The second, the index kind, is a declaration rather than a rule: which
+#: kind of index the filing settings were seeded from. Both are the core's
+#: since 2 October 2026 (``bookindexcore.sorting.page``), when the InDesign
+#: editor was the third application to add them by hand.
+SORT_PREFS_DEFAULTS: Dict[str, Any] = dict(SORTING_PAGE_DEFAULTS)
 
 
 class SortPrefs:

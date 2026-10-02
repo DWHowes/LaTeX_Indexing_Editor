@@ -61,6 +61,7 @@ from bookindexcore.dialect import (
     TextRun,
     XREF_LABEL_DOCUMENT,
     XRefSpec,
+    emphasis_styles,
 )
 
 from models import index_syntax_check as syntax
@@ -211,15 +212,12 @@ class LatexDialect:
         def _canonical_first(values, canonical):
             return sorted(values, key=lambda v: v.strip().lower() != canonical)
 
-        styles = [PageStyle(STANDARD_PAGE_STYLE, "Standard")]
-        styles += [PageStyle(v, v, bold=True)
-                   for v in _canonical_first(self._bold_values, "textbf")]
-        styles += [
-            PageStyle(v, v, italic=True)
-            for v in _canonical_first(self._italic_values, "textit")
-            if v not in self._bold_values
-        ]
-        return tuple(styles)
+        # The two lists as vocabulary are the core's (``emphasis_styles``)
+        # since the InDesign editor's dialect adopted them too; the order is
+        # LaTeX's.
+        return (PageStyle(STANDARD_PAGE_STYLE, "Standard"),) + emphasis_styles(
+            _canonical_first(self._bold_values, "textbf"),
+            _canonical_first(self._italic_values, "textit"))
 
     def max_entry_length(self, project: object = None) -> Optional[int]:
         r"""
