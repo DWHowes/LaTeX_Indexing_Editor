@@ -2176,3 +2176,10 @@ The existing dialect and sort-preference tests run unchanged against
 `bookindexcore.sorting.page.SORTING_PAGE_DEFAULTS` and
 `bookindexcore.dialect.emphasis_styles`, which is the assertion: the store
 keeps the same keys and the vocabulary the same styles.
+
+## A name's language from the core (6 October 2026)
+
+The name-inversion and heading-language tests run unchanged against the
+core's `HeadingLanguages`, which is the assertion: the precedence and the
+two writes are what they were. The search window's kept report is tested in
+the core (`tests/ui/test_search.py::TestWhatTheWindowSaysAtTheEnd`).

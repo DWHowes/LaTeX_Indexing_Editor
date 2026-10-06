@@ -614,18 +614,33 @@ class AppPipelineController(QObject):
         a reader that writes would turn a cancelled dialog into a row nothing
         points at.
         """
-        try:
-            persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
-            if persistence is not None:
-                heading_id = persistence.find_heading_id(heading_text)
-                stated = persistence.heading_language(heading_id)
-                if stated != UNSTATED:
-                    return stated
-            if self.name_inverter is not None:
-                return self.name_inverter.remembered_language(heading_text)
-        except Exception as exc:
-            print(f"[NAME INVERSION] Language lookup failed for {heading_text!r}: {exc}")
-        return UNSTATED
+        return self._heading_languages().of(heading_text)
+
+    def _heading_languages(self):
+        """
+        The precedence and the two writes: the core's ``HeadingLanguages``
+        since 6 October 2026, when the InDesign editor would have been the
+        third copy. The project's half is this project's heading row.
+        """
+        from bookindexcore.naming.desk import HeadingLanguages
+
+        def persistence():
+            return self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
+
+        def read_project(heading_text):
+            model = persistence()
+            if model is None:
+                return UNSTATED
+            return model.heading_language(model.find_heading_id(heading_text))
+
+        def write_project(heading_text, language):
+            model = persistence()
+            heading_id = model.find_heading_id(heading_text) if model is not None else None
+            if heading_id is not None:
+                model.set_heading_language(heading_id, language)
+
+        return HeadingLanguages(self._names, read_project=read_project,
+                                write_project=write_project)
 
     def remember_compound_surname(self, surname: str, *,
                                   everywhere: bool = False) -> None:
@@ -679,24 +694,7 @@ class AppPipelineController(QObject):
         here, recorded the decision for this book alone and asked again in the
         next one. Classifying a name is meant to be work done once.
         """
-        try:
-            persistence = self.scope_ctrl.get_persistence_model() if self.scope_ctrl else None
-            if persistence is not None:
-                heading_id = persistence.find_heading_id(heading_text)
-                if heading_id is not None:
-                    persistence.set_heading_language(heading_id, language)
-        except Exception as exc:
-            print(f"[NAME INVERSION] Could not store the language for "
-                  f"{heading_text!r}: {exc}")
-        try:
-            # Separately guarded: the two stores fail for unrelated reasons —
-            # no project open, no name cache configured — and one of them being
-            # unavailable is no reason to withhold the decision from the other.
-            if self.name_inverter is not None:
-                self.name_inverter.remember_language(heading_text, language)
-        except Exception as exc:
-            print(f"[NAME INVERSION] Could not remember the language for "
-                  f"{heading_text!r}: {exc}")
+        self._heading_languages().state(heading_text, language)
 
     @Slot(object, str, object)
     def _present_name_inversion_dialog(self, persistent_index, source_name: str,

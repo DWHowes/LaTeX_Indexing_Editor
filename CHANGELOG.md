@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### A name's language, and Advanced Search's last line
+
+- **A heading's language** is read and written by the core's
+  `HeadingLanguages` (this project's heading row first, then the shared name
+  database; stated into both). No change in behaviour; the two methods were
+  the same in the Word editor, and the InDesign editor would have been the
+  third copy.
+- **Advanced Search now keeps "Could not read ..." beside its count.** A
+  file that could not be read was named, then replaced by *Found N matches*
+  at once, so the search said nothing about the files it had skipped.
+
 ### The sort store's defaults and the page-style vocabulary come from the core
 
 No change in behaviour. `SORT_PREFS_DEFAULTS` is the core's
