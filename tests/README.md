@@ -2193,3 +2193,14 @@ manuscript. It now sets *Which order to show* to the engine's order, gives the
 project a rule makeindex lacks (numbers read as numbers, since with defaults
 the two coincide and the test would mean nothing), and asserts the project's
 rules. **Negative control**: it fails against the 2 October call.
+
+## Menu paths and Help links (8 October 2026)
+
+`gui_smoke/test_menu_paths.py`, copied from the InDesign editor for the user
+documents review. Every *Menu → Command* in Help, the README and `User Guide
+V3.docx` (read from `word/document.xml`) must be on the menu `MainMenuBar`
+puts it on; menus are reached with `findChildren(QMenu)`, never
+`action.menu()`, which takes ownership in PySide6 and destroys the menu. Every
+`toc.json` entry must be a topic and every topic an entry, and every relative
+link must resolve. **Negative controls**: a real command on the wrong menu in
+both arrow forms, and a check that the walk read the commands at all.

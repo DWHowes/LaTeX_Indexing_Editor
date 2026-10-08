@@ -37,7 +37,7 @@ Every shortcut in the application, grouped by where it applies. Menu shortcuts a
 | `Ctrl+Alt+M` | Manage Project Commands... |
 | `Ctrl+Alt+R` | Create Rtf File |
 
-**Resync Index Data from Disk**, **Resync Workspace Files from Disk**, **Manage Pruned Files...**, **Index Statistics...**, and **Check Range Consistency...** don't have shortcuts — use the Tools menu.
+**Resync Index Data from Disk**, **Resync Workspace Files from Disk**, **Manage Pruned Files...**, **Index Statistics...**, and **Check Range Consistency...** don't have shortcuts: use the Tools menu.
 
 ## Help menu
 
@@ -45,7 +45,7 @@ Every shortcut in the application, grouped by where it applies. Menu shortcuts a
 |---|---|
 | `F1` | Contents... |
 
-**About LaTeX Indexing Editor...** has no shortcut — use the Help menu. It reports the version you're running, along with the Python and Qt versions underneath it, which are the details worth quoting when reporting a problem.
+**About LaTeX Indexing Editor...** has no shortcut: use the Help menu. It reports the version you're running, along with the Python and Qt versions underneath it, which are the details worth quoting when reporting a problem.
 
 ## Global (works anywhere in the window)
 
@@ -74,7 +74,7 @@ Shortcuts specific to the docked [Index Entry Window](../getting_started/create_
 
 ## Editor tabs
 
-The read-only `.tex` preview tabs restrict editing to a safe subset of keys: arrow/paging navigation, `Ctrl+C` (copy), `Ctrl+A` (select all), `Ctrl+F` (Find, same as the Edit menu), `Ctrl+Z` (undo), `Ctrl+Y` (redo), and `Esc` to clear the current selection. Everything else — typing, cut, paste — is blocked, since these tabs aren't meant for freehand editing outside the index-entry workflow.
+The read-only `.tex` preview tabs restrict editing to a safe subset of keys: arrow/paging navigation, `Ctrl+C` (copy), `Ctrl+A` (select all), `Ctrl+F` (Find, same as the Edit menu), `Ctrl+Z` (undo), `Ctrl+Y` (redo), and `Esc` to clear the current selection. Everything else (typing, cut, paste) is blocked, since these tabs aren't meant for freehand editing outside the index-entry workflow.
 
 ## See also
 

@@ -40,7 +40,7 @@ A high-performance desktop application built with Python and PySide6 (Qt) design
    ```
    
    Editable means a change in `bookindexcore` is live here with no reinstall.
-   Install it into the same virtual environment you activated above — into a
+   Install it into the same virtual environment you activated above. Install it into a
    different interpreter and this application will keep running an older copy
    with nothing to tell you.
 
@@ -52,7 +52,7 @@ A high-performance desktop application built with Python and PySide6 (Qt) design
 
 ### For indexer end users
 
-No Python, no setup — just download and run the installer.
+No Python, no setup: just download and run the installer.
 
 1. **Download the installer**
 
@@ -62,9 +62,9 @@ No Python, no setup — just download and run the installer.
 
 2. **Run the installer**
 
-   Double-click the downloaded `.exe` and follow the prompts. It installs just for your own user account — no administrator rights needed, and no other software (Python included) is required beforehand.
+   Double-click the downloaded `.exe` and follow the prompts. It installs just for your own user account: no administrator rights needed, and no other software (Python included) is required beforehand.
 
-   Windows may show a **"Windows protected your PC"** SmartScreen warning, since this alpha build isn't yet code-signed. This is expected for a new, unsigned installer — click **"More info"**, then **"Run anyway"** to proceed.
+   Windows may show a **"Windows protected your PC"** SmartScreen warning, since this alpha build isn't yet code-signed. This is expected for a new, unsigned installer: click **"More info"**, then **"Run anyway"** to proceed.
 
 3. **Launch it**
 
@@ -74,32 +74,32 @@ No Python, no setup — just download and run the installer.
 
    The installer also puts three PDFs on your machine: the **User Guide**, which walks through every part of the application; a **Design Overview** of how it is built; and a **Name Cache SQL Queries** reference. Open them from the "LaTeX Indexing Editor Documentation" shortcut in your Start Menu, next to the one that launches the app.
 
-   The application also has its own built-in help — **Help → Contents...**, or `F1` — which covers the same ground in shorter form, without leaving the app.
+   The application also has its own built-in help (**Help → Contents...**, or `F1`) which covers the same ground in shorter form, without leaving the app.
 
 #### Reporting problems
 
-This is an early alpha — things will break. When they do, please report it here:
+This is an early alpha: things will break. When they do, please report it here:
 
 **[📝 Report an issue](https://github.com/DWHowes/LaTeX_Indexing_Editor/issues/new)**
 
-You don't need any GitHub experience to use this — just:
+You don't need any GitHub experience to use this. Just:
 
 1. Click the link above (you'll need a free GitHub account; it'll prompt you to sign up/log in if you're not already)
 2. Give it a short title describing the problem (e.g. "Crash when opening a project with no base file set")
-3. In the description box, say what you did, what you expected to happen, and what happened instead — a screenshot helps if it's something visual
+3. In the description box, say what you did, what you expected to happen, and what happened instead: a screenshot helps if it's something visual
 4. Click **"Submit new issue"**
 
-That's it — no special formatting or process required. If you're not sure whether something is a real bug or expected behavior, report it anyway; it's easier to close a non-issue than to miss a real one.
+That's it: no special formatting or process required. If you're not sure whether something is a real bug or expected behavior, report it anyway; it's easier to close a non-issue than to miss a real one.
 
 # 
 
 ## Running the test suite
 
-This project has an automated test suite — a large collection of small scripts that each run a piece of the code and check that it behaves the way it's supposed to. You don't need any special background to use it; the instructions below are everything required.
+This project has an automated test suite: a large collection of small scripts that each run a piece of the code and check that it behaves the way it's supposed to. You don't need any special background to use it; the instructions below are everything required.
 
-**Why bother?** If you're changing code — fixing a bug, adding a feature, anything — running the tests before and after your change tells you two things: whether the app was already working correctly before you touched anything, and whether your change broke something you didn't intend to (including in a completely different part of the app than the one you edited — this happens more often than you'd expect, and the tests catch it automatically instead of you finding out the hard way weeks later).
+**Why bother?** If you're changing code (fixing a bug, adding a feature, anything), running the tests before and after your change tells you two things: whether the app was already working correctly before you touched anything, and whether your change broke something you didn't intend to (including in a completely different part of the app than the one you edited; this happens more often than you'd expect, and the tests catch it automatically instead of you finding out the hard way weeks later).
 
-You do **not** need the app open, and you do **not** need a display/screen — the tests run entirely in the terminal.
+You do **not** need the app open, and you do **not** need a display/screen: the tests run entirely in the terminal.
 
 ### One-time setup
 
@@ -111,7 +111,7 @@ pip install -r requirements-dev.txt
 
 This installs everything `requirements.txt` does, plus `pytest` (the tool that runs the tests) and a couple of its add-ons. You only need to do this once per virtual environment.
 
-`bookindexcore` carries its own suite, and it has to pass too — roughly a fifth of what used to be tested here is now tested there. Install its dev extras once:
+`bookindexcore` carries its own suite, and it has to pass too: roughly a fifth of what used to be tested here is now tested there. Install its dev extras once:
 
 ```
 pip install -e ../bookindexcore[qt,naming,help,search,dev]
@@ -140,7 +140,7 @@ pytest
 312 passed in 1.8s
 ```
 
-That means everything checked out — the app is behaving as expected. Green/passing output like this is what you want to see both before you start changing anything and after you're done.
+That means everything checked out: the app is behaving as expected. Green/passing output like this is what you want to see both before you start changing anything and after you're done.
 
 If something is broken, you'll instead see one or more lines like:
 
@@ -148,14 +148,14 @@ If something is broken, you'll instead see one or more lines like:
 FAILED tests/persistence/test_project_files.py::test_prune_marks_inactive_and_returns_true
 ```
 
-followed by details about what the test expected versus what actually happened. Read that section — it usually points at the exact file and line involved, and the mismatch it describes is a direct clue to what's wrong. If you weren't the one who broke it (say, it fails on a completely fresh clone before you've changed anything), that's worth flagging rather than working around.
+followed by details about what the test expected versus what actually happened. Read that section: it usually points at the exact file and line involved, and the mismatch it describes is a direct clue to what's wrong. If you weren't the one who broke it (say, it fails on a completely fresh clone before you've changed anything), that's worth flagging rather than working around.
 
-You might also occasionally see `xfailed` in the summary line (for example: `362 passed, 1 xfailed`). That's not a failure — it marks a known, deliberately-tracked issue that's expected to fail until someone specifically fixes it. Don't worry about these unless you're the one doing that fix.
+You might also occasionally see `xfailed` in the summary line (for example: `362 passed, 1 xfailed`). That's not a failure: it marks a known, deliberately-tracked issue that's expected to fail until someone specifically fixes it. Don't worry about these unless you're the one doing that fix.
 
 ### Learning more / adding your own tests
 
-If you're extending the app and want to understand how the test suite is organized, or add tests of your own for something new you've built, see [`tests/README.md`](tests/README.md) — it goes into the architecture, conventions, and reasoning in more depth than is needed just to run the suite.
+If you're extending the app and want to understand how the test suite is organized, or add tests of your own for something new you've built, see [`tests/README.md`](tests/README.md): it goes into the architecture, conventions, and reasoning in more depth than is needed just to run the suite.
 
 ## Building a release
 
-See [`PACKAGING.md`](PACKAGING.md) — the full procedure from version bump to published GitHub release, including how to verify the installer before it goes anywhere.
+See [`PACKAGING.md`](PACKAGING.md): the full procedure from version bump to published GitHub release, including how to verify the installer before it goes anywhere.

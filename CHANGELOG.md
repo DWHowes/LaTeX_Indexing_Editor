@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Help brought current, and no em-dashes in it (8 October 2026)
+
+The user documents review measured the application against its Help:
+
+- **Which order to show**, in effect since 2 October, was in no topic, and
+  the index tree topic still said its nodes were sorted alphabetically. A new
+  topic, *The Sorting Page*, says what each answer shows for makeindex and
+  for xindy, and that neither changes what is written.
+- **The Preferences overview named four of its eight pages.** Checks,
+  Sorting, Presentation and Authorities now have a section each.
+- **The session log** was described as always living in the project folder;
+  before a project opens and after it closes it is in the editor's own data
+  folder. A failed start now says where the log is, and the topic says so.
+- **The Table of Authorities review counts five things**, not three: entries
+  filed by title for want of an author above, and entries not read. No macro
+  is written inside the bibliography.
+- **328 em-dashes** in Help and 21 in the README are gone, each replaced by a
+  comma, colon, semicolon or parentheses and read in context.
+
+`tests/gui_smoke/test_menu_paths.py` holds the menu paths in Help, the README
+and the V3 guide to `MainMenuBar`, and the Help's links and contents both ways.
+
 ### A Table of Authorities is filed by the project's rules, whatever the tree shows
 
 The 2 October fix to *Build Table of Authorities* handed the build the rules

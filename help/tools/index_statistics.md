@@ -2,13 +2,13 @@
 
 **Tools → Index Statistics...** gives a quick numeric summary of the current project's index:
 
-- **Main headings** — the number of distinct top-level headings.
-- **Sub1 headings** — the number of distinct first-level sub-headings.
-- **Sub2 headings** — the number of distinct second-level sub-headings.
-- **Total index references** — the number of ordinary page references in the project. A page-range reference (see [Range References](../index_tree/range_references.md)) counts once, not twice, even though it's two `\index` macros in the source.
-- **Total cross-references** — the number of "see" / "see also" pointers (see [Cross-References](../index_tree/cross_references.md)), counted separately from ordinary page references.
+- **Main headings**: the number of distinct top-level headings.
+- **Sub1 headings**: the number of distinct first-level sub-headings.
+- **Sub2 headings**: the number of distinct second-level sub-headings.
+- **Total index references**: the number of ordinary page references in the project. A page-range reference (see [Range References](../index_tree/range_references.md)) counts once, not twice, even though it's two `\index` macros in the source.
+- **Total cross-references**: the number of "see" / "see also" pointers (see [Cross-References](../index_tree/cross_references.md)), counted separately from ordinary page references.
 
-The dialog reads straight from the project database, so the numbers reflect the project **as last saved**, not the entries currently on screen — index changes are written to the database when you [save](../getting_started/saving_and_closing.md). Save first for a count that includes this session's work. Likewise, if you've hand-edited a `.tex` file outside the editor, [resync](../tools/resync.md) first.
+The dialog reads straight from the project database, so the numbers reflect the project **as last saved**, not the entries currently on screen: index changes are written to the database when you [save](../getting_started/saving_and_closing.md). Save first for a count that includes this session's work. Likewise, if you've hand-edited a `.tex` file outside the editor, [resync](../tools/resync.md) first.
 
 ## How the counting works
 
@@ -32,7 +32,7 @@ LaTeX allows three, so three is what you see. The same summary in the Word
 index editor shows three and in InDesign four, because those formats say so.
 
 The counts cover the whole project. A project carrying more than one named
-index — entries written as `\index[name]{...}` — is counted together rather
+index, entries written as `\index[name]{...}`, is counted together rather
 than index by index.
 
 ## See also

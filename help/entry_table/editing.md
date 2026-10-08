@@ -1,12 +1,12 @@
 # Editing Entries in the Table
 
-The entry table (in the "Edit Entries" pane) lists every `\index` reference in the project as a row, spreadsheet-style — a flat alternative to browsing the [index tree](../index_tree/navigating.md), better suited to reviewing or bulk-editing many entries at once.
+The entry table (in the "Edit Entries" pane) lists every `\index` reference in the project as a row, spreadsheet-style: a flat alternative to browsing the [index tree](../index_tree/navigating.md), better suited to reviewing or bulk-editing many entries at once.
 
 ## Columns
 
-Each heading level has two columns: **Main Display** / **Main Sort**, **Sub1 Display** / **Sub1 Sort**, **Sub2 Display** / **Sub2 Sort**. The "Display" column is the text that appears in the printed index; the "Sort" column is only used to decide where it's alphabetized, for cases where the two need to differ — for example, filing "St. Louis" under "Saint Louis" for sorting purposes while still displaying it as "St. Louis". Leave Sort empty and the Display text is used for both. There's also a **Page** column (the page-style override, if any) and a read-only **ID** column.
+Each heading level has two columns: **Main Display** / **Main Sort**, **Sub1 Display** / **Sub1 Sort**, **Sub2 Display** / **Sub2 Sort**. The "Display" column is the text that appears in the printed index; the "Sort" column is only used to decide where it's alphabetized, for cases where the two need to differ: for example, filing "St. Louis" under "Saint Louis" for sorting purposes while still displaying it as "St. Louis". Leave Sort empty and the Display text is used for both. There's also a **Page** column (the page-style override, if any) and a read-only **ID** column.
 
-The **Sort as** fields in the [Index Entry window](../getting_started/create_an_index_entry.md) are the same thing at the point of creation, and follow the same rule — so this is where you correct the sort key of an entry that already exists, including one created before those fields were there.
+The **Sort as** fields in the [Index Entry window](../getting_started/create_an_index_entry.md) are the same thing at the point of creation, and follow the same rule, so this is where you correct the sort key of an entry that already exists, including one created before those fields were there.
 
 You can hide columns you don't need: right-click the table's header row to toggle any column on or off.
 
@@ -16,32 +16,32 @@ A [range reference](../index_tree/range_references.md) is styled from this colum
 
 ## Editing a cell
 
-Click into a cell and type to change it. An edit here rewrites the corresponding `\index` macro in the source file — the same way a rename in the index tree does — so there's no separate "apply" step beyond finishing the edit.
+Click into a cell and type to change it. An edit here rewrites the corresponding `\index` macro in the source file, the same way a rename in the index tree does, so there's no separate "apply" step beyond finishing the edit.
 
 The rewrite goes into the open tab's buffer (or straight to the file, if that file isn't open in a tab); the project database is updated when you [save](../getting_started/saving_and_closing.md).
 
 ## Warning icons
 
-A small icon beside a Display or Sort value means the text in that cell contains a character that LaTeX or `makeindex` will read as something other than what you typed. Hover it for the details — one line per problem, saying exactly what will happen.
+A small icon beside a Display or Sort value means the text in that cell contains a character that LaTeX or `makeindex` will read as something other than what you typed. Hover it for the details: one line per problem, saying exactly what will happen.
 
-A **triangle** means the entry is in real trouble: the document won't build, or the entry will be silently dropped or truncated. The worst of these is a bare `%`, which starts a LaTeX comment — the document compiles with no warning of any kind, and the printed index quietly shows only the text before the `%`, with no page number. Bare `&`, `#`, `_`, `^` and unpaired `$` stop the build on the second pass, with the error pointing into a generated file rather than at your source. A bare `"` or an unmatched brace has its own consequences, all described in the tooltip.
+A **triangle** means the entry is in real trouble: the document won't build, or the entry will be silently dropped or truncated. The worst of these is a bare `%`, which starts a LaTeX comment: the document compiles with no warning of any kind, and the printed index quietly shows only the text before the `%`, with no page number. Bare `&`, `#`, `_`, `^` and unpaired `$` stop the build on the second pass, with the error pointing into a generated file rather than at your source. A bare `"` or an unmatched brace has its own consequences, all described in the tooltip.
 
-An **information icon** means the entry will build but won't mean what you typed: `!`, `@` and `|` are `makeindex`'s own grammar — the level break, the sort key, and the page style — so `Bang! Goes` becomes two heading levels and `user@host` files under *user*. The tooltip gives you the correction (prefix the character with a quote mark: `Bang"! Goes`).
+An **information icon** means the entry will build but won't mean what you typed: `!`, `@` and `|` are `makeindex`'s own grammar (the level break, the sort key, and the page style), so `Bang! Goes` becomes two heading levels and `user@host` files under *user*. The tooltip gives you the correction (prefix the character with a quote mark: `Bang"! Goes`).
 
-The icons appear on entries loaded from your files and on cells you edit, and go away as soon as the text is clean. **Nothing is blocked.** This is advice; the entry inserts, edits and saves either way. To have a field corrected for you in one click, use the same icons in the [Index Entry window](../getting_started/create_an_index_entry.md) — a table cell reports the problem but has nowhere to put a button.
+The icons appear on entries loaded from your files and on cells you edit, and go away as soon as the text is clean. **Nothing is blocked.** This is advice; the entry inserts, edits and saves either way. To have a field corrected for you in one click, use the same icons in the [Index Entry window](../getting_started/create_an_index_entry.md): a table cell reports the problem but has nowhere to put a button.
 
 ## Searching
 
-The search box above the table filters rows live by Main, Sub1, and Sub2 display text — type to narrow the list down to matching entries.
+The search box above the table filters rows live by Main, Sub1, and Sub2 display text: type to narrow the list down to matching entries.
 
 ## Right-click actions
 
 Right-click a row (or a multi-row selection) for:
 
-- **Invert name** — runs [Name Inversion](../additional/name_inversion.md) on that row's Main heading.
-- **Delete reference** — removes the selected reference(s). See [Editing and Deleting Entries](../index_tree/editing_deleting.md) for how this differs from deleting a whole term in the tree.
-- **Duplicate references** — see [Duplicate References](../entry_table/duplicate_references.md).
-- **Invert headings** — swaps each selected row's Main and Sub1 fields (for example, "Topic ! Term" becomes "Term ! Topic"), useful for cross-posting an entry under a different primary heading. Only available when none of the selected rows have a Sub2 value.
+- **Invert name**: runs [Name Inversion](../additional/name_inversion.md) on that row's Main heading.
+- **Delete reference**: removes the selected reference(s). See [Editing and Deleting Entries](../index_tree/editing_deleting.md) for how this differs from deleting a whole term in the tree.
+- **Duplicate references**: see [Duplicate References](../entry_table/duplicate_references.md).
+- **Invert headings**: swaps each selected row's Main and Sub1 fields (for example, "Topic ! Term" becomes "Term ! Topic"), useful for cross-posting an entry under a different primary heading. Only available when none of the selected rows have a Sub2 value.
 
 Delete, Duplicate, and Invert headings act on your current multi-selection if the row you right-clicked is part of it, or on just that one row otherwise.
 

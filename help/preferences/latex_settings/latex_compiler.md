@@ -4,17 +4,17 @@ The first horizontal tab under **Preferences → LaTeX**. One setting: where to 
 
 | Setting      | Default   | What it does                                                                                                                                                                                                                                                      |
 | ------------ | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **compiler** | *(empty)* | Full path to your LaTeX compiler executable on your machine. Click **Browse** to pick it with a file dialog — with filters for `pdflatex.exe`, `xelatex.exe`, and `lualatex.exe`, plus a generic **Executable Files (*.exe)** option — or type the path directly. |
+| **compiler** | *(empty)* | Full path to your LaTeX compiler executable on your machine. Click **Browse** to pick it with a file dialog (it filters for `pdflatex.exe`, `xelatex.exe` and `lualatex.exe`, with a generic **Executable Files (*.exe)** option as well), or type the path directly. |
 
 ## Choosing a compiler
 
-- **pdflatex** — the default, fastest, and most widely supported engine. Use it unless a project specifically needs one of the others.
-- **XeLaTeX (xelatex)** — supports system-installed fonts and native Unicode text directly, without the font-handling workarounds pdflatex needs. Choose this for projects that require custom fonts or non-Latin/Unicode text.
-- **LuaLaTeX (lualatex)** — similar Unicode and font support to XeLaTeX, plus embedded Lua scripting for advanced document logic. Generally the slowest of the three to compile, but the most flexible.
+- **pdflatex**: the default, fastest, and most widely supported engine. Use it unless a project specifically needs one of the others.
+- **XeLaTeX (xelatex)**: supports system-installed fonts and native Unicode text directly, without the font-handling workarounds pdflatex needs. Choose this for projects that require custom fonts or non-Latin/Unicode text.
+- **LuaLaTeX (lualatex)**: similar Unicode and font support to XeLaTeX, plus embedded Lua scripting for advanced document logic. Generally the slowest of the three to compile, but the most flexible.
 
 This is required for [RTF Export](../../tools/rtf_export.md), which runs your configured compiler once to regenerate the raw index data before converting it. Left empty, RTF Export will refuse to run and tell you what's missing.
 
-This setting is machine-specific (it points at a file on *this* computer), so unlike most other preferences it's stored separately from the general preference set — but it still follows the same [global vs. per-project](../../preferences.md#global-vs-per-project) behavior as everything else here.
+This setting is machine-specific (it points at a file on *this* computer), so unlike most other preferences it's stored separately from the general preference set, but it still follows the same [global vs. per-project](../../preferences.md#global-vs-per-project) behavior as everything else here.
 
 ## Determining the compiler used in a project
 

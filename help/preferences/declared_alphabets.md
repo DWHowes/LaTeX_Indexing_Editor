@@ -4,7 +4,7 @@ Most indexes file by the ordinary Latin alphabet, and the application does
 that without being asked. Some languages do not. Welsh treats `ch`, `dd`, `ff`
 and `ng` as single letters that file after `c`, `d`, `f` and `g`; the Mayan
 alphabets place glottalised letters after their plain forms. In an index for
-such a language, filing by the English alphabet is not a matter of taste — it
+such a language, filing by the English alphabet is not a matter of taste: it
 is wrong, and it is wrong in a way that looks perfectly tidy on the page.
 
 A **declared alphabet** is a language's own letter order, written down once
@@ -33,8 +33,8 @@ spaces, and the application works out the filing rules. A letter of more than
 one character is the whole point: where `ch` follows `c`, every *ch-* word
 files after every *c-* word.
 
-Give it a name, and a source. **The source is asked for and never demanded** —
-left empty it reads as *not stated* and the alphabet is still kept — but an
+Give it a name, and a source. **The source is asked for and never demanded**:
+left empty it reads as *not stated* and the alphabet is still kept. But an
 alphabet is an authority's answer rather than yours, and a transcription
 presented as a published order is the one failure worth guarding against.
 
@@ -50,13 +50,13 @@ per letter and reports any that comes out wrong, naming the letter and showing
 you the comparison. Welsh `ng` is the standing example: it follows `g` in the
 alphabet but begins with `n`, and no single-level filing rule can reach it. You
 can move the letter, spell it differently, or accept that this mechanism does
-not reach it — but you will know.
+not reach it, but you will know.
 
 **Letters filed correctly and printed in the wrong section.** An index that
 prints a heading per letter takes that heading from the first character of the
 sort key, so a letter such as `Ä` files exactly where it should, after every
 `A` word, and prints under **A**. The editor names these too. An engine that
-knows the alphabet itself — `xindy` with a language module — prints them
+knows the alphabet itself, `xindy` with a language module, prints them
 correctly; `makeindex` has no way to be told.
 
 Neither report stops you saving. Both exist so that you find out while you can

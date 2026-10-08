@@ -18,7 +18,7 @@ Choosing a kind fills the filing settings below it with that kind's defaults
 Nothing re-applies them behind you.
 
 That matters when you read a setting back. An option that is off means you
-switched it off, not that it was never seeded — and if the two were
+switched it off, not that it was never seeded, and if the two were
 indistinguishable, every reopening of this page would be an invitation to
 re-seed settings you had deliberately changed.
 
@@ -39,8 +39,8 @@ commonest answer and the one that changes least.
 
 If your index is one of the other four, declaring it is the single most useful
 thing you can do to its filing, and it costs one choice. The per-language
-filing tables — the Dutch and German prefixes, the Irish and Māori rules, the
-declared alphabets — are seeded from this answer, so an index that has never
+filing tables (the Dutch and German prefixes, the Irish and Māori rules, the
+declared alphabets) are seeded from this answer, so an index that has never
 been declared reaches none of them.
 
 ## See also

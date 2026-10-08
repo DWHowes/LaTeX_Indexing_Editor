@@ -16,8 +16,8 @@ it can make mechanically.** A problem with no known fix is passed over
 silently rather than guessed at.
 
 ***It never changes what a heading says.*** Every repair here is about
-characters the index engine will misread — an unescaped special character, a
-misplaced delimiter — and none is about wording, spelling or filing. If a
+characters the index engine will misread: an unescaped special character, a
+misplaced delimiter, and none is about wording, spelling or filing. If a
 heading is wrong rather than malformed, that is yours to correct, and
 [Check Index](check_index.md) is the tool that will point at it.
 

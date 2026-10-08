@@ -1,6 +1,6 @@
 # Resyncing Workspace Files from Disk
 
-The Workspace Files tree (left sidebar) lists every `.tex` file the editor is tracking for the project. Once a project has been opened at least once, the editor trusts its own database for that list rather than re-scanning the project folder on every open — **Resync Workspace Files from Disk** (**Tools → Resync Workspace Files from Disk**) is the manual way to bring that list back in step with what's actually on disk.
+The Workspace Files tree (left sidebar) lists every `.tex` file the editor is tracking for the project. Once a project has been opened at least once, the editor trusts its own database for that list rather than re-scanning the project folder on every open: **Resync Workspace Files from Disk** (**Tools → Resync Workspace Files from Disk**) is the manual way to bring that list back in step with what's actually on disk.
 
 ## When to use it
 
@@ -15,11 +15,11 @@ It re-scans the project folder from scratch and rebuilds the tracked file list t
 - Every `.tex` file found on disk is included, and any file that had been pruned is un-pruned if it's still present.
 - Any tracked file that's no longer on disk is dropped from the list.
 
-This only affects which files the editor tracks and displays — it doesn't touch `\index` entries or their content. If your index data also needs rebuilding (for example, after hand-editing a `.tex` file's contents), run [Resync Index Data from Disk](../tools/resync.md) as well; the two are independent and often used together after external changes.
+This only affects which files the editor tracks and displays: it doesn't touch `\index` entries or their content. If your index data also needs rebuilding (for example, after hand-editing a `.tex` file's contents), run [Resync Index Data from Disk](../tools/resync.md) as well; the two are independent and often used together after external changes.
 
 ## Pruning a file
 
-Right-click any non-base `.tex` file in the Workspace Files tree and choose **Prune '‹filename›' (Contains No Index Text)** to exclude it from the project's search scope and Advanced Search — useful for a `.tex` file that never contains `\index` entries (a title page, an appendix stub, and so on) and doesn't need to be scanned. Pruning removes the file from the tree immediately and excludes it from the project database's tracked file list; it never deletes or modifies the file itself on disk.
+Right-click any non-base `.tex` file in the Workspace Files tree and choose **Prune '‹filename›' (Contains No Index Text)** to exclude it from the project's search scope and Advanced Search: useful for a `.tex` file that never contains `\index` entries (a title page, an appendix stub, and so on) and doesn't need to be scanned. Pruning removes the file from the tree immediately and excludes it from the project database's tracked file list; it never deletes or modifies the file itself on disk.
 
 A pruned file stays excluded across project close/reopen. To bring back an individual pruned file rather than everything at once, use [Manage Pruned Files...](../tools/manage_pruned_files.md).
 

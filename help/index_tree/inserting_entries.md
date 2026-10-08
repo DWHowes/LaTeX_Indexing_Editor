@@ -1,18 +1,18 @@
 # Inserting Entries
 
-New `\index` entries are created from the entry-insertion panel, not by hand-typing LaTeX. Fill in the fields, place your cursor (or select text — see below), and insert. For a walkthrough of every control in the panel, see [Create an Index Entry](../getting_started/create_an_index_entry.md).
+New `\index` entries are created from the entry-insertion panel, not by hand-typing LaTeX. Fill in the fields, place your cursor (or select text: see below), and insert. For a walkthrough of every control in the panel, see [Create an Index Entry](../getting_started/create_an_index_entry.md).
 
 ## The fields
 
-- **Main / Sub1 / Sub2** — the heading levels for this entry, from most general to most specific. Leave Sub1/Sub2 empty for a plain top-level entry; fill in Sub1 (and optionally Sub2) to file it under a sub-heading, exactly as it will nest in the index tree and the printed index.
-- **Page style** — an optional formatting override for how this entry's page number is typeset (for example, bold to mark a defining discussion). Leave it blank for a normal, unstyled page number.
-- **Command** — which indexing command to use. Defaults to plain `\index`, but if the project has adopted a custom command (see [Custom LaTeX Commands](../custom_commands/creating.md)), you can choose that instead.
+- **Main / Sub1 / Sub2**: the heading levels for this entry, from most general to most specific. Leave Sub1/Sub2 empty for a plain top-level entry; fill in Sub1 (and optionally Sub2) to file it under a sub-heading, exactly as it will nest in the index tree and the printed index.
+- **Page style**: an optional formatting override for how this entry's page number is typeset (for example, bold to mark a defining discussion). Leave it blank for a normal, unstyled page number.
+- **Command**: which indexing command to use. Defaults to plain `\index`, but if the project has adopted a custom command (see [Custom LaTeX Commands](../custom_commands/creating.md)), you can choose that instead.
 
-This panel only creates ordinary page references. Cross-references ("see"/"see also" pointers) are created separately, in the **Cross-References** tab of Edit Entries — see [Cross-References](../index_tree/cross_references.md).
+This panel only creates ordinary page references. Cross-references ("see"/"see also" pointers) are created separately, in the **Cross-References** tab of Edit Entries: see [Cross-References](../index_tree/cross_references.md).
 
 ## Point reference vs. range
 
-Whether you get a single point reference or a page-range reference depends on **whether you have text selected in the editor when you insert** — there's no separate toggle for it:
+Whether you get a single point reference or a page-range reference depends on **whether you have text selected in the editor when you insert**. There's no separate toggle for it:
 
 - **Cursor placed, nothing selected** → a single point reference at that position.
 - **Text selected** → a range spanning the selection: an opening marker before the selected text and a closing marker after it. See [Range References](../index_tree/range_references.md) for what that means and how it's tracked.
@@ -21,7 +21,7 @@ Whether you get a single point reference or a page-range reference depends on **
 
 The editor builds the correct `\index` macro (or your chosen custom command) from the fields you filled in and writes it into the file at the cursor/selection, and the new entry appears in the index tree and the entry table right away.
 
-Both of those are in memory, though — the macro is in the tab's buffer and the entry is in the editor's working copy of the index. The file on disk and the project database catch up when you [save](../getting_started/saving_and_closing.md). Nothing is lost in between (undo still works, the entry is fully usable), but a project closed without saving won't have it.
+Both of those are in memory, though: the macro is in the tab's buffer and the entry is in the editor's working copy of the index. The file on disk and the project database catch up when you [save](../getting_started/saving_and_closing.md). Nothing is lost in between (undo still works, the entry is fully usable), but a project closed without saving won't have it.
 
 ## See also
 
