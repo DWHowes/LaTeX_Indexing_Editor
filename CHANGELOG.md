@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### A Table of Authorities is filed by the project's rules, whatever the tree shows
+
+The 2 October fix to *Build Table of Authorities* handed the build the rules
+*Which order to show* resolves to, and a table's filing key is written into
+each macro as its sort key. So setting the tree to show the engine's order
+changed what was written into the manuscript, when that setting is only
+meant to change what you see. Both the review's build and the write after it
+take the project's own rules now. Found 8 October 2026 by the user documents
+review; the test written on 2 October asserted the resolved rules and now
+asserts the opposite.
+
 ### A name's language, and Advanced Search's last line
 
 - **A heading's language** is read and written by the core's

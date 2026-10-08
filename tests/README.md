@@ -2183,3 +2183,13 @@ The name-inversion and heading-language tests run unchanged against the
 core's `HeadingLanguages`, which is the assertion: the precedence and the
 two writes are what they were. The search window's kept report is tested in
 the core (`tests/ui/test_search.py::TestWhatTheWindowSaysAtTheEnd`).
+
+## The table is filed by the project's rules (8 October 2026)
+
+`gui_smoke/test_toa_build_rules.py` asserted that *Build Table of Authorities*
+is handed the order-resolved rules, which was the defect: a table's filing key
+is written into each macro as its sort key, so a viewing choice reached the
+manuscript. It now sets *Which order to show* to the engine's order, gives the
+project a rule makeindex lacks (numbers read as numbers, since with defaults
+the two coincide and the test would mean nothing), and asserts the project's
+rules. **Negative control**: it fails against the 2 October call.

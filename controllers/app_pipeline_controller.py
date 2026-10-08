@@ -2148,9 +2148,14 @@ class AppPipelineController(QObject):
         progress.show()
         QApplication.processEvents()
         try:
+            # **The project's rules, never the resolved pair.** A table's
+            # filing key is written into each macro as its sort key, and
+            # *Which order to show* is a viewing choice: resolved here, it
+            # wrote the engine's emulation into the manuscript whenever the
+            # tree was set to show the engine's order.
             plan = build_toa_plan(
                 self.text_backend, system,
-                self.sort_prefs.rules(self._index_prefs_model.index_prefs()),
+                self.sort_prefs.project_rules(self._index_prefs_model.index_prefs()),
                 house=house,
                 on_progress=lambda done, total: (
                     progress.advance(done, total),
@@ -2192,7 +2197,7 @@ class AppPipelineController(QObject):
 
         controller = ToaController(
             self.text_backend, system,
-            self.sort_prefs.rules(self._index_prefs_model.index_prefs()))
+            self.sort_prefs.project_rules(self._index_prefs_model.index_prefs()))
         result = controller.apply(dataclasses.replace(plan, entries=accepted))
 
         # **The declarations go into the generated block as well as into the
