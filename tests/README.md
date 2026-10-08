@@ -2204,3 +2204,13 @@ puts it on; menus are reached with `findChildren(QMenu)`, never
 `toc.json` entry must be a topic and every topic an entry, and every relative
 link must resolve. **Negative controls**: a real command on the wrong menu in
 both arrow forms, and a check that the walk read the commands at all.
+
+## The guide's populated sidebar figures (8 October 2026)
+
+`gui_smoke/shoot_guide_panels.py` is **not a test** and is named so the suite
+never collects it. It lives here for `booted_app` and `open_project`: it opens
+an invented book in the real application, adds managed cross-references
+through the tab's controller, and photographs the index tree, the entry table
+and the Cross-References tab for the User Guide. Run it explicitly, on the
+real platform (`QT_QPA_PLATFORM=windows`); `SHOOT_OUT` sends the images
+somewhere other than `documentation/images/`.

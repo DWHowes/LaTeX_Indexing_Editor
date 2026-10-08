@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### User Guide V3 brought current, and 33 of its 50 figures shot again (8 October 2026)
+
+`documentation/User Guide V3.docx` is gitignored, so this records what changed
+in it:
+
+- **Text.** *Which order to show* (a paragraph in *What Kind of Index Is
+  This?*); the index tree's order, which it described as alphabetical; the
+  session log's two locations and the failed-start message; the Table of
+  Authorities review's five counts; the name-inversion dialog's language
+  question. The troubleshooting section said nothing detects plural, case or
+  spacing variants, which Check Index has done since September. 77
+  em-dashes replaced and read in context. Contents and figure list updated
+  by Word.
+- **Figures.** ***33 were drawn in Agency FB***, the offscreen platform's
+  first font alphabetically, or showed a test book's text, folder names or
+  index, which the rule on client text forbids. Several were also out of
+  date: the Preferences figures showed three tabs where there are eight,
+  and the name-inversion dialog had no language control. All 33 are shot
+  again on the real display over an invented book on negligence.
+  `probes/shoot_screenshots.py` builds 30 of them, and
+  `tests/gui_smoke/shoot_guide_panels.py` opens the invented book in the real
+  application for the three populated sidebar panels. The probe gained
+  `--out`, to look before replacing, and `--offscreen`, which sets the font
+  directory and Segoe UI, though not the native style.
+
 ### Help brought current, and no em-dashes in it (8 October 2026)
 
 The user documents review measured the application against its Help:
