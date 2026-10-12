@@ -744,7 +744,11 @@ class AppPipelineController(QObject):
 
             # Cache if the user changed the auto-resolved value
             original_auto = inversion_result.authority_term or inversion_result.rule_suggestion or ""
-            if self.name_inverter and final_value.strip() != original_auto.strip():
+            # A *no* to the surname question is kept even where the rules had
+            # already left the name in direct order: it is the decision they
+            # will get wrong in the next book, and now somebody has made it.
+            if self.name_inverter and (final_value.strip() != original_auto.strip()
+                                       or dialog.has_surname() is False):
                 self.name_inverter.cache_resolved_heading(
                     source_name, final_value, reason=reason, locale=language,
                     user_edited=True)

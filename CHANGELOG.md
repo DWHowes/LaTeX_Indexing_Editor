@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 12 October 2026: the name dialog asks whether a name has a surname
+
+- **From bookindexcore, with no change here to show it**: the name dialog now
+  asks *does this name have a surname?*, with a note on the period for the
+  traditions where it decides (Turkish, Irish, Welsh, Ethiopian, Icelandic).
+  *No* puts the name as written. The name article's validation set traced 19
+  of its 23 wrong headings to that one defect.
+- **A *no* is kept even where the rules had already left the name in direct order.** This editor remembered a correction only when the value differed from the rules' answer, so for a name the rules leave alone (an Amharic name, say) the indexer's explicit answer was dropped. `test_name_inversion_async.py::TestANameWithNoSurname`, whose first test fails without the change.
+
 ### User Guide V3 brought current, and 33 of its 50 figures shot again (8 October 2026)
 
 `documentation/User Guide V3.docx` is gitignored, so this records what changed

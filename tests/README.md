@@ -2214,3 +2214,7 @@ through the tab's controller, and photographs the index tree, the entry table
 and the Cross-References tab for the User Guide. Run it explicitly, on the
 real platform (`QT_QPA_PLATFORM=windows`); `SHOOT_OUT` sends the images
 somewhere other than `documentation/images/`.
+
+## A name with no surname (12 October 2026)
+
+`tests/gui_smoke/test_name_inversion_async.py::TestANameWithNoSurname` opens the real dialog on an Amharic name the rules leave in direct order: a *no* is kept in the shared store with the reason *patronymic*, and accepting unanswered keeps nothing.

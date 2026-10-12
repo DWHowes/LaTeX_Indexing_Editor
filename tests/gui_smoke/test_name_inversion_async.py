@@ -774,3 +774,54 @@ class TestStatingALanguageWithoutALookup:
 class _Codes:
     Accepted = 1
     Rejected = 0
+
+
+class TestANameWithNoSurname:
+    """
+    *No* to the dialog's surname question, where the rules had already left
+    the name in direct order: nothing in the cell changes, and the decision is
+    still kept, because it is the one the rules will get wrong in the next book.
+
+    The name is tagged Amharic, for which the rules give direct order
+    (Giorgis), so the rules' answer and the indexer's agree and only the
+    explicit *no* distinguishes a decision from an unexamined default.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _amharic(self, pipeline, monkeypatch):
+        monkeypatch.setattr(pipeline, "heading_language", lambda name: "am")
+
+    def test_it_is_remembered_though_nothing_changed(self, pipeline, name_index,
+                                                     monkeypatch, qtbot):
+        from PySide6.QtCore import QPersistentModelIndex
+
+        model, index = name_index
+        kept = []
+        monkeypatch.setattr(pipeline.name_inverter, "cache_resolved_heading",
+                            lambda name, heading, **kw: kept.append((name, heading, kw["reason"])))
+        result = NameInversionResult(display_value="Mengistu Lemma", authority_term=None,
+                                     rule_suggestion="Mengistu Lemma", used_authority=False)
+        pipeline._present_name_inversion_dialog(QPersistentModelIndex(index),
+                                                "Mengistu Lemma", result)
+        dialog = pipeline._active_dialog
+        qtbot.addWidget(dialog)
+        dialog.surname_combo.setCurrentIndex(dialog.surname_combo.findData(False))
+        dialog.accept()
+        assert kept == [("Mengistu Lemma", "Mengistu Lemma", "patronymic")]
+
+    def test_accepting_the_rules_answer_unanswered_keeps_nothing(self, pipeline, name_index,
+                                                                monkeypatch, qtbot):
+        from PySide6.QtCore import QPersistentModelIndex
+
+        model, index = name_index
+        kept = []
+        monkeypatch.setattr(pipeline.name_inverter, "cache_resolved_heading",
+                            lambda name, heading, **kw: kept.append((name, heading)))
+        result = NameInversionResult(display_value="Mengistu Lemma", authority_term=None,
+                                     rule_suggestion="Mengistu Lemma", used_authority=False)
+        pipeline._present_name_inversion_dialog(QPersistentModelIndex(index),
+                                                "Mengistu Lemma", result)
+        dialog = pipeline._active_dialog
+        qtbot.addWidget(dialog)
+        dialog.accept()
+        assert kept == []
