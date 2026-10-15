@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 15 October 2026: the menu-path test runs on bookindexcore's checks
+
+Nothing changes in the window. The test that every *Menu > Command* the documents name is the menu that holds it, and that every help link leads to a topic, was one of three copies across the editors; the checks are now `bookindexcore.testing.documentation` and `bookindexcore.qt.menus`, and this application's test keeps only its own sources and negative controls. Every path still passes.
+
 ### 12 October 2026: the name dialog asks whether a name has a surname
 
 - **From bookindexcore, with no change here to show it**: the name dialog now

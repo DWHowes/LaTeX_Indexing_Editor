@@ -16,41 +16,37 @@ A path is checked only when what follows the arrow is a command this
 application has, so *Preferences → Sorting* (a page, not a menu) is left
 alone. **Negative controls**: a real command on the wrong menu in both arrow
 forms, and a check that the walk read the commands at all.
+
+**The checks are bookindexcore's** (``testing.documentation``, with
+``qt.menus`` reading the menu bar) since 15 October 2026, when this test and
+two others like it were the three copies a fourth application would have
+added to. What stays here is this application's sources and controls.
 """
 
-import json
-import re
 import zipfile
 from pathlib import Path
 
 import pytest
 
+from bookindexcore.testing.documentation import help_link_problems, wrong_menu_paths
+
 ROOT = Path(__file__).resolve().parents[2]
 HELP = ROOT / "help"
 GUIDE = ROOT / "documentation" / "User Guide V3.docx"
-MENU = re.compile(r"\b(File|Edit|View|Tools|Help)\s*(?:→|>|->)\s*")
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-
-
-def _plain(label: str) -> str:
-    return label.replace("&", "").rstrip("…").rstrip(".").strip()
 
 
 @pytest.fixture(scope="module")
 def commands(qapp):
     """Each command's label, as text spells it, to the menu that holds it."""
-    from PySide6.QtWidgets import QMainWindow, QMenu
+    from PySide6.QtWidgets import QMainWindow
 
+    from bookindexcore.qt.menus import menu_commands
     from views.main_menu_bar import MainMenuBar
 
     window = QMainWindow()
     bar = MainMenuBar(window)
-    found = {}
-    for menu in bar.findChildren(QMenu):
-        title = _plain(menu.title())
-        for action in menu.actions():
-            if not action.isSeparator() and action.text():
-                found.setdefault(_plain(action.text()), title)
+    found = menu_commands(bar)
     window.close()
     return found
 
@@ -63,20 +59,6 @@ def _guide_text() -> str:
                      for p in root.iter(W + "p"))
 
 
-def wrong_paths(text: str, commands: dict) -> list[str]:
-    """Each ``Menu → Command`` in ``text`` naming a command another menu holds."""
-    flat = re.sub(r"\s+", " ", text)
-    found = []
-    for match in MENU.finditer(flat):
-        following = flat[match.end():match.end() + 80].lstrip("*")
-        named = [c for c in commands if following.lower().startswith(c.lower())]
-        if named:
-            command = max(named, key=len)
-            if commands[command] != match.group(1):
-                found.append(f"{match.group(1)} → {command} (it is on {commands[command]})")
-    return found
-
-
 def sources():
     for path in sorted(HELP.rglob("*.md")):
         yield str(path.relative_to(ROOT)), path.read_text(encoding="utf-8")
@@ -86,7 +68,7 @@ def sources():
 
 def test_every_menu_path_named_is_the_menu_that_holds_it(commands):
     wrong = {name: found for name, text in sources()
-             if (found := wrong_paths(text, commands))}
+             if (found := wrong_menu_paths(text, commands))}
     assert wrong == {}
 
 
@@ -99,30 +81,13 @@ def test_the_commands_were_read(commands):
 
 def test_a_wrong_menu_is_caught(commands):
     """Negative control: a real command on the wrong menu, both arrow forms."""
-    assert wrong_paths("**Tools → Preferences...**", commands) == [
-        "Tools → Preferences (it is on Edit)"]
-    assert wrong_paths("Edit > Check Index", commands) == [
-        "Edit → Check Index (it is on Tools)"]
-    assert wrong_paths("Edit → Preferences → Sorting, Tools → Check Index", commands) == []
+    assert wrong_menu_paths("**Tools \u2192 Preferences...**", commands) == [
+        "Tools > Preferences (it is on Edit)"]
+    assert wrong_menu_paths("Edit > Check Index", commands) == [
+        "Edit > Check Index (it is on Tools)"]
+    assert wrong_menu_paths("Edit \u2192 Preferences \u2192 Sorting, Tools \u2192 Check Index",
+                            commands) == []
 
 
 def test_every_help_link_and_contents_entry_leads_to_a_topic():
-    topics = {str(p.relative_to(HELP)).replace("\\", "/") for p in HELP.rglob("*.md")}
-
-    def files(items):
-        for item in items:
-            if item.get("file"):
-                yield item["file"]
-            yield from files(item.get("children", []))
-
-    listed = set(files(json.loads((HELP / "toc.json").read_text(encoding="utf-8"))))
-    assert listed - topics == set(), "contents entries with no topic"
-    assert topics - listed - {"index.md"} == set(), "topics missing from the contents"
-
-    broken = []
-    for path in HELP.rglob("*.md"):
-        for target in re.findall(r"\]\(([^)#\s]+\.md)", path.read_text(encoding="utf-8")):
-            resolved = (path.parent / target).resolve()
-            if not resolved.is_file():
-                broken.append(f"{path.relative_to(HELP)} -> {target}")
-    assert broken == []
+    assert help_link_problems(HELP) == []

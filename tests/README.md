@@ -2218,3 +2218,7 @@ somewhere other than `documentation/images/`.
 ## A name with no surname (12 October 2026)
 
 `tests/gui_smoke/test_name_inversion_async.py::TestANameWithNoSurname` opens the real dialog on an Amharic name the rules leave in direct order: a *no* is kept in the shared store with the reason *patronymic*, and accepting unanswered keeps nothing.
+
+## The menu-path test on the core's checks (15 October 2026)
+
+`test_menu_paths.py` calls `bookindexcore.testing.documentation.wrong_menu_paths` and `help_link_problems` (and, where the commands are read from the window, `bookindexcore.qt.menus.menu_commands`) in place of its own copies of them; its sources and negative controls are unchanged, and a wrong path is now reported as *Menu > Command (it is on Other)* whatever arrow the document wrote.
